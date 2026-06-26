@@ -1,0 +1,6 @@
+# Avci Drone - Yer Kontrol Istasyonu : Python bagimliliklari
+# Kurulum:  pip install -r requirements.txt
+numpy
+mss
+Pillow
+pygetwindow

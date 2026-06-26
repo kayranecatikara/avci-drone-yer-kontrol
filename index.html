@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avcı Drone — Yer Kontrol İstasyonu</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#11161f; --panel2:#161c27; --border:#222c3a;
+    --text:#cdd6e4; --muted:#6b7891; --accent:#00e0a4; --accent2:#33a0ff;
+    --danger:#ff5d5d; --warn:#ffb454;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);
+    color:var(--text);height:100vh;display:grid;
+    grid-template-rows:56px 1fr;overflow:hidden;
+  }
+  .mono{font-family:Consolas,"Courier New",monospace}
+
+  /* ---- Üst bar ---- */
+  header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 20px;background:var(--panel);border-bottom:1px solid var(--border);
+  }
+  header h1{font-size:16px;letter-spacing:.5px;font-weight:600}
+  header h1 .em{color:var(--accent)}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--muted);
+    box-shadow:0 0 0 0 rgba(0,0,0,0);transition:.2s}
+  .dot.ok{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .dot.wait{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .dot.bad{background:var(--danger);box-shadow:0 0 10px var(--danger)}
+
+  /* ---- Ana 3 panel ---- */
+  main{display:grid;grid-template-columns:260px 1fr 340px;gap:12px;padding:12px;min-height:0}
+  .col{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .col h2{font-size:12px;letter-spacing:1.5px;color:var(--muted);font-weight:600;
+    padding:14px 16px;border-bottom:1px solid var(--border);text-transform:uppercase}
+  .col .body{padding:14px 16px;overflow:auto;flex:1;min-height:0}
+
+  /* ---- Sol panel: butonlar ---- */
+  .btn{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;
+    margin-bottom:10px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-size:14px;cursor:pointer;
+    transition:.15s;text-align:left}
+  .btn:hover{border-color:var(--accent2);background:#1b2330}
+  .btn .ic{font-size:18px}
+  .btn.start:hover{border-color:var(--accent)}
+  .btn.stop:hover{border-color:var(--danger)}
+  .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+
+  /* ---- Orta panel: görüntü ---- */
+  #view{flex:1;display:flex;align-items:center;justify-content:center;
+    background:#06080c;border-radius:8px;position:relative;overflow:hidden}
+  #view video{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
+  #view .ph{text-align:center;color:var(--muted);display:flex;flex-direction:column;
+    align-items:center;gap:16px;padding:20px}
+  #view .ph .big{font-size:46px;opacity:.5}
+  #view .ph .sub{font-size:13px;line-height:1.6}
+  .sharebtn{padding:12px 22px;background:var(--accent);color:#04241c;border:none;
+    border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}
+  .sharebtn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+
+  /* ---- Sağ panel: telemetri ---- */
+  .card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    padding:12px 14px;margin-bottom:12px}
+  .card .title{font-size:12px;letter-spacing:1px;font-weight:600;margin-bottom:10px;
+    display:flex;align-items:center;gap:8px}
+  .card.drone .title{color:var(--accent)}
+  .card.target .title{color:var(--accent2)}
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+    padding:5px 0;border-bottom:1px dashed #1a2230}
+  .row:last-child{border-bottom:none}
+  .row .k{font-size:12px;color:var(--muted)}
+  .row .v{font-size:14px}.row .v small{color:var(--muted);font-size:11px}
+  .dist{background:linear-gradient(135deg,#13202b,#161c27);border:1px solid var(--border);
+    border-radius:8px;padding:14px;text-align:center}
+  .dist .k{font-size:11px;letter-spacing:1px;color:var(--muted)}
+  .dist .v{font-size:30px;color:var(--accent);margin-top:4px}
+  .dist .v small{font-size:14px;color:var(--muted)}
+
+  /* alt durum çubuğu */
+  .status{font-size:12px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+
+  <header>
+    <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span></h1>
+    <div class="conn"><span id="dot" class="dot bad"></span><span id="connText">Bağlantı bekleniyor…</span></div>
+  </header>
+
+  <main>
+    <!-- SOL: Görev Kontrol -->
+    <section class="col">
+      <h2>Görev Kontrol</h2>
+      <div class="body">
+        <button class="btn start" onclick="gonderKomut('start')"><span class="ic">🚀</span> Görev Başlat</button>
+        <button class="btn stop" onclick="gonderKomut('stop')"><span class="ic">⏹️</span> Görev Durdur</button>
+        <button class="btn" onclick="soon()"><span class="ic">🎮</span> Manuel Mod</button>
+        <button class="btn" onclick="soon()"><span class="ic">🛰️</span> GPS Temizle: Kapalı</button>
+        <p class="note">⚠️ <b>Görev Başlat</b> drone'u arm edip hedefe yöneltir.
+        Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).</p>
+      </div>
+      <div class="status" id="gorevDurum">⚪ Görev: Pasif</div>
+      <div class="status" id="leftStatus">Sistem hazır.</div>
+    </section>
+
+    <!-- ORTA: Görüntü -->
+    <section class="col">
+      <h2>Kamera / Görüntü</h2>
+      <div class="body" style="padding:12px">
+        <div id="view">
+          <video id="cam" autoplay muted playsinline></video>
+          <div class="ph" id="camPh">
+            <div class="big">🖥️</div>
+            <div class="sub">Oyun görüntüsünü bağlamak için butona bas,<br>
+            açılan listeden <b>oyun penceresini</b> seç.</div>
+            <button id="shareBtn" class="sharebtn">📡 Görüntüyü Bağla</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SAĞ: Telemetri -->
+    <section class="col">
+      <h2>Telemetri</h2>
+      <div class="body">
+        <div class="card drone">
+          <div class="title">🛸 AVCI DRONE</div>
+          <div class="row"><span class="k">Konum X</span><span class="v mono" id="dx">—</span></div>
+          <div class="row"><span class="k">Konum Y</span><span class="v mono" id="dy">—</span></div>
+          <div class="row"><span class="k">Konum Z</span><span class="v mono" id="dz">—</span></div>
+          <div class="row"><span class="k">İrtifa</span><span class="v mono" id="dalt">—</span></div>
+          <div class="row"><span class="k">Hız</span><span class="v mono" id="dspd">—</span></div>
+          <div class="row"><span class="k">Yön (Yaw)</span><span class="v mono" id="dyaw">—</span></div>
+        </div>
+
+        <div class="card target">
+          <div class="title">🎯 HEDEF İHA <small style="color:var(--muted);font-weight:400">(ham GPS)</small></div>
+          <div class="row"><span class="k">Konum X</span><span class="v mono" id="tx">—</span></div>
+          <div class="row"><span class="k">Konum Y</span><span class="v mono" id="ty">—</span></div>
+          <div class="row"><span class="k">Konum Z</span><span class="v mono" id="tz">—</span></div>
+          <div class="row"><span class="k">Hız</span><span class="v mono" id="tspd">—</span></div>
+        </div>
+
+        <div class="card" style="border-color:#3a3320">
+          <div class="title" style="color:var(--warn)">⚔️ FİLTRE KIYASI</div>
+          <div class="row"><span class="k">Ham (bozuk)</span><span class="v mono" id="kHam">—</span></div>
+          <div class="row"><span class="k">🟢 Efe (blok_j)</span><span class="v mono" id="kEfe">—</span></div>
+          <div class="row"><span class="k">🔵 Ömer (v6)</span><span class="v mono" id="kOmer">—</span></div>
+          <div class="row"><span class="k">🏆 Kazanan</span><span class="v mono" id="kKazanan">—</span></div>
+        </div>
+
+        <div class="dist">
+          <div class="k">AVCI — HEDEF MESAFE</div>
+          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  function soon(){
+    $("leftStatus").textContent = "Bu özellik sonraki adımda aktif olacak.";
+    setTimeout(()=>{ $("leftStatus").textContent = "Sistem hazır."; }, 2500);
+  }
+
+  async function gonderKomut(cmd){
+    try{
+      const r = await fetch("/api/command",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({cmd:cmd})});
+      const d = await r.json();
+      $("leftStatus").textContent = d.msg || "Komut gönderildi";
+    }catch(e){ $("leftStatus").textContent = "Komut gönderilemedi (sunucu kapalı?)"; }
+  }
+
+  function setConn(state){
+    const dot = $("dot"), txt = $("connText");
+    dot.className = "dot " + (state==="ok"?"ok":state==="wait"?"wait":"bad");
+    txt.textContent = state==="ok" ? "Oyuna bağlı"
+                    : state==="wait" ? "Oyuna bağlanılıyor…"
+                    : "Sunucu kapalı";
+  }
+
+  const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
+  const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
+  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist"]
+                    .forEach(id=>$(id).textContent="—");
+
+  let lastOk = 0;
+  async function tick(){
+    try{
+      const r = await fetch("/api/telemetry",{cache:"no-store"});
+      const t = await r.json();
+      if(t.connected) lastOk = Date.now();
+      // Bağlantı bir an aksasa bile son bilinen değerleri göstermeye devam et.
+      // (SDK son değeri tutar; 2.5 sn içinde bağlıysak "bağlı" kabul ederiz.)
+      setConn((Date.now()-lastOk) < 2500 ? "ok" : "wait");
+      $("gorevDurum").innerHTML = t.gorev_aktif
+        ? "🟢 Görev: AKTİF — " + (t.j ? t.j.durum : "")
+        : "⚪ Görev: Pasif";
+      const d=t.drone, g=t.target;
+      $("dx").innerHTML  = f1(d.x)+' <small>m</small>';
+      $("dy").innerHTML  = f1(d.y)+' <small>m</small>';
+      $("dz").innerHTML  = f1(d.z)+' <small>m</small>';
+      $("dalt").innerHTML= f1(d.altitude_m)+' <small>m</small>';
+      $("dspd").innerHTML= f1(d.speed_kmh)+' <small>km/h</small>';
+      $("dyaw").innerHTML= f0(d.yaw)+' <small>°</small>';
+      $("tx").innerHTML  = f1(g.x)+' <small>m</small>';
+      $("ty").innerHTML  = f1(g.y)+' <small>m</small>';
+      $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
+      $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
+      $("dist").textContent = f1(t.distance_m);
+
+      // Filtre kıyası (Efe vs Ömer)
+      const ky = t.kiyas || {};
+      $("kHam").innerHTML  = ky.ham_ort_m!=null  ? f1(ky.ham_ort_m)+' <small>m</small>'  : "—";
+      $("kEfe").innerHTML  = ky.efe_ort_m!=null  ? f1(ky.efe_ort_m)+' <small>m</small>'  : '<small>ısınıyor…</small>';
+      $("kOmer").innerHTML = ky.omer_ort_m!=null ? f1(ky.omer_ort_m)+' <small>m</small>' : '<small>ısınıyor…</small>';
+      $("kKazanan").innerHTML = ky.kazanan
+        ? (ky.kazanan==="EFE" ? '<span style="color:var(--accent)">EFE 🟢</span>'
+                              : '<span style="color:var(--accent2)">ÖMER 🔵</span>')
+        : "—";
+    }catch(e){
+      setConn("bad"); dash();
+    }
+  }
+  setInterval(tick, 200);
+  tick();
+
+  // ---- Canlı görüntü: tarayıcının ekran/pencere paylaşımı (getDisplayMedia) ----
+  const cam = $("cam"), camPh = $("camPh"), shareBtn = $("shareBtn");
+  let stream = null;
+  async function startShare(){
+    try{
+      stream = await navigator.mediaDevices.getDisplayMedia({ video:{frameRate:30}, audio:false });
+      cam.srcObject = stream;
+      cam.style.display = "block";
+      camPh.style.display = "none";
+      stream.getVideoTracks()[0].addEventListener("ended", stopShare);
+    }catch(e){ console.log("Görüntü paylaşımı iptal/hata:", e); }
+  }
+  function stopShare(){
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    cam.style.display="none"; camPh.style.display="flex";
+  }
+  shareBtn.onclick = startShare;
+</script>
+</body>
+</html>

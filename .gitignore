@@ -1,0 +1,23 @@
+# --- Oyun dosyalari (cok buyuk + yarisma materyali; repoya KONMAZ) ---
+Drones of War Teknofest/
+
+# --- Calisma zamani / log ciktilari ---
+kiyas_log.csv
+*.log
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# --- Isletim sistemi / editor ---
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+
+# Yanlislikla olusan cift uzantili kopya (dogrusu: omer_filtre.py)
+omer_filtre.py.py
