@@ -22,7 +22,7 @@ kontrol arayüzü içerir.
 ## ⚙️ Kurulum (tek seferlik)
 1. Bu repoyu indir veya klonla:
    ```
-   git clone <repo-url>
+   git clone <https://github.com/kayranecatikara/avci-drone-yer-kontrol>
    cd "Yarismaci Dokuman"
    ```
 2. Gerekli paketleri kur:
