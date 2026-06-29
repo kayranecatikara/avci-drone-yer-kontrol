@@ -49,7 +49,43 @@
   .btn .ic{font-size:18px}
   .btn.start:hover{border-color:var(--accent)}
   .btn.stop:hover{border-color:var(--danger)}
+  .btn.active{border-color:var(--accent);background:#13202b;
+    box-shadow:inset 0 0 0 1px var(--accent)}
   .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+
+  /* ---- Manuel mod paneli (klavye + hiz slideri) ---- */
+  .manuel-panel{background:var(--panel2);border:1px solid var(--accent);
+    border-radius:8px;padding:12px 14px;margin:-2px 0 10px}
+  .manuel-panel .mlabel{font-size:12px;color:var(--muted);display:flex;
+    justify-content:space-between;align-items:center;margin-bottom:8px}
+  .manuel-panel .mlabel b{color:var(--accent);font-size:14px}
+  .manuel-panel input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:22px}
+  .mkeys{margin-top:12px;display:flex;flex-direction:column;gap:7px;
+    font-size:11px;color:var(--muted)}
+  .mkeys .krow{display:flex;align-items:center;gap:6px}
+  .mkeys .krow .sep{flex:0 0 12px}
+  .kcap{display:inline-flex;align-items:center;justify-content:center;min-width:22px;
+    height:22px;padding:0 5px;background:var(--panel);border:1px solid var(--border);
+    border-radius:5px;font-family:Consolas,monospace;font-size:12px;color:var(--text);
+    font-weight:600;transition:.08s}
+  .kcap.on{background:var(--accent);color:#04241c;border-color:var(--accent);
+    box-shadow:0 0 8px var(--accent)}
+
+  /* ---- Görev kaynak seçimi (Efe/Ömer/Kayra/Gerçek GPS) ---- */
+  .kaynak-panel{background:var(--panel2);border:1px solid var(--accent);
+    border-radius:8px;padding:10px 12px;margin:-2px 0 10px;
+    display:flex;flex-direction:column;gap:7px}
+  .kaynak-panel .kaynak-baslik{font-size:10px;letter-spacing:1.5px;color:var(--muted);
+    font-weight:600;text-transform:uppercase}
+  .kbtn{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;
+    background:var(--panel);border:1px solid var(--border);border-radius:7px;
+    color:var(--text);font-size:13px;cursor:pointer;transition:.12s;text-align:left}
+  .kbtn:hover{border-color:var(--accent2);background:#1b2330}
+  .kbtn.active{border-color:var(--accent);background:#13202b;color:var(--accent);
+    box-shadow:inset 0 0 0 1px var(--accent);font-weight:600}
+  .kbtn-gercek:hover{border-color:var(--warn)}
+  .kbtn-gercek.active{border-color:var(--warn);background:#211b10;color:var(--warn);
+    box-shadow:inset 0 0 0 1px var(--warn)}
 
   /* ---- Orta panel: görüntü ---- */
   #view{flex:1;display:flex;align-items:center;justify-content:center;
@@ -97,12 +133,33 @@
     <section class="col">
       <h2>Görev Kontrol</h2>
       <div class="body">
-        <button class="btn start" onclick="gonderKomut('start')"><span class="ic">🚀</span> Görev Başlat</button>
-        <button class="btn stop" onclick="gonderKomut('stop')"><span class="ic">⏹️</span> Görev Durdur</button>
-        <button class="btn" onclick="soon()"><span class="ic">🎮</span> Manuel Mod</button>
+        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (İnovasyonlu J)</button>
+        <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
+        <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
+        <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
+
+        <!-- Manuel mod paneli: butona basinca acilir -->
+        <div id="manuelPanel" class="manuel-panel" style="display:none">
+          <div class="mlabel">Hız <b id="hizVal">50%</b></div>
+          <input id="hizSlider" type="range" min="10" max="100" value="50" step="5">
+          <div class="mkeys">
+            <div class="krow"><span class="kcap" data-k="w">W</span> İleri
+              <span class="sep"></span><span class="kcap" data-k="s">S</span> Geri</div>
+            <div class="krow"><span class="kcap" data-k="a">A</span> Sola kay
+              <span class="sep"></span><span class="kcap" data-k="d">D</span> Sağa kay</div>
+            <div class="krow"><span class="kcap" data-k="q">Q</span> Sola dön
+              <span class="sep"></span><span class="kcap" data-k="e">E</span> Sağa dön</div>
+            <div class="krow"><span class="kcap" data-k="r">R</span> Yüksel
+              <span class="sep"></span><span class="kcap" data-k="f">F</span> Alçal</div>
+          </div>
+        </div>
+
         <button class="btn" onclick="soon()"><span class="ic">🛰️</span> GPS Temizle: Kapalı</button>
-        <p class="note">⚠️ <b>Görev Başlat</b> drone'u arm edip hedefe yöneltir.
-        Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).</p>
+        <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>İnovasyonlu J</b> filtresiyle hedefe gider.
+        İstediğin an <b>Gerçek GPS</b>'e basıp <b>canlı geçiş</b> yapabilirsin.<br>
+        🎯 <b>Gerçek GPS</b>: filtreyi atlar, doğrudan gerçek konuma gidip vurur (yalnızca sim/debug).<br>
+        Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).<br>
+        🎮 <b>Manuel Mod</b>: klavyeyle uç. Tuş bırakınca drone hover yapar.</p>
       </div>
       <div class="status" id="gorevDurum">⚪ Görev: Pasif</div>
       <div class="status" id="leftStatus">Sistem hazır.</div>
@@ -146,12 +203,24 @@
           <div class="row"><span class="k">Hız</span><span class="v mono" id="tspd">—</span></div>
         </div>
 
+        <!-- TEŞHİS: Gerçek GPS modunda irtifa neden inmiyor? Z değerlerini yan yana göster. -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent2)">🔎 İRTİFA / Z TEŞHİS</div>
+          <div class="note" style="margin:-4px 0 8px">Gerçek GPS modunda güdüm <b>Hedef Z (gerçek)</b> ile <b>Drone Z</b>'yi kıyaslar.</div>
+          <div class="row"><span class="k">Drone Z (konum)</span><span class="v mono" id="zDz">—</span></div>
+          <div class="row"><span class="k">Drone irtifa (alt)</span><span class="v mono" id="zDalt">—</span></div>
+          <div class="row"><span class="k">Hedef Z (ham)</span><span class="v mono" id="zTz">—</span></div>
+          <div class="row"><span class="k">Hedef Z (GERÇEK)</span><span class="v mono" id="zTgz">—</span></div>
+          <div class="row"><span class="k">Δ hedef−drone</span><span class="v mono" id="zDelta">—</span></div>
+          <div class="row"><span class="k">Truth geliyor mu</span><span class="v mono" id="zTruth">—</span></div>
+          <div class="row"><span class="k">Aktif bozulma</span><span class="v mono" id="zBoz" style="font-size:11px;text-align:right">—</span></div>
+        </div>
+
         <div class="card" style="border-color:#3a3320">
-          <div class="title" style="color:var(--warn)">⚔️ FİLTRE KIYASI</div>
+          <div class="title" style="color:var(--warn)">📊 SAPMA (gerçeğe hata)</div>
+          <div class="note" style="margin:-4px 0 8px"><b>ort</b> · <span style="opacity:.75">kötü</span> (m). Düşük = iyi. (yalnızca sim/debug)</div>
           <div class="row"><span class="k">Ham (bozuk)</span><span class="v mono" id="kHam">—</span></div>
-          <div class="row"><span class="k">🟢 Efe (blok_j)</span><span class="v mono" id="kEfe">—</span></div>
-          <div class="row"><span class="k">🔵 Ömer (v6)</span><span class="v mono" id="kOmer">—</span></div>
-          <div class="row"><span class="k">🏆 Kazanan</span><span class="v mono" id="kKazanan">—</span></div>
+          <div class="row"><span class="k">🟣 İnovasyonlu J <small style="color:var(--muted);font-weight:400">(üretim)</small></span><span class="v mono" id="kJ">—</span></div>
         </div>
 
         <div class="dist">
@@ -179,6 +248,104 @@
     }catch(e){ $("leftStatus").textContent = "Komut gönderilemedi (sunucu kapalı?)"; }
   }
 
+  // =====================================================================
+  //  MANUEL MOD — klavyeyle drone kontrolü + hız slideri
+  //  Tuş haritası (e.code ile fiziksel tuş; klavye dili fark etmez):
+  //    W/S = ileri/geri (pitch),  A/D = sola/sağa kay (roll),
+  //    Q/E = sola/sağa dön (yaw), R/F = yüksel/alçal (throttle)
+  //  Hız slideri tüm eksenleri ölçekler. Komutlar /api/manuel'e akıtılır;
+  //  tuş bırakınca 0 (hover) gider, sekme/pencere odağı kaybolunca da sıfırlanır.
+  // =====================================================================
+  let manuelAcik = false;
+  let manuelHiz  = 0.5;                 // hız çarpanı (slider: 0.10–1.00)
+  let manuelTimer = null;               // periyodik gönderim (slider/uzun basış için)
+  const tuslar = {w:false,a:false,s:false,d:false,q:false,e:false,r:false,f:false};
+  // Fiziksel tuş kodu -> mantıksal eksen tuşu
+  const TUS_KOD = {KeyW:"w",KeyA:"a",KeyS:"s",KeyD:"d",KeyQ:"q",KeyE:"e",KeyR:"r",KeyF:"f"};
+
+  function tusGorsel(){
+    document.querySelectorAll(".kcap").forEach(el=>{
+      el.classList.toggle("on", !!tuslar[el.dataset.k]);
+    });
+  }
+
+  function manuelGonder(){
+    if(!manuelAcik) return;
+    // Eksen niyeti (her eksen -1, 0 veya +1):
+    const pitch = (tuslar.w?1:0) - (tuslar.s?1:0);   // W ileri (+)
+    const roll  = (tuslar.a?1:0) - (tuslar.d?1:0);   // A sola, D sağa (oyunda roll işareti ters -> A(+)/D(-))
+    const yaw   = (tuslar.q?1:0) - (tuslar.e?1:0);   // Q sola dön (+) — ana_kontrol ile aynı işaret
+    const thr   = (tuslar.r?1:0) - (tuslar.f?1:0);   // R yüksel (+)
+    const g = manuelHiz;
+    const body = JSON.stringify({pitch:pitch*g, roll:roll*g, yaw:yaw*g, throttle:thr*g});
+    fetch("/api/manuel",{method:"POST",headers:{"Content-Type":"application/json"},body}).catch(()=>{});
+  }
+
+  function tusBas(e){
+    if(e.ctrlKey||e.metaKey||e.altKey) return;       // Ctrl+R vb. tarayıcı kısayollarına dokunma
+    const k = TUS_KOD[e.code]; if(!k) return;
+    e.preventDefault();
+    if(!tuslar[k]){ tuslar[k]=true; tusGorsel(); manuelGonder(); }
+  }
+  function tusBirak(e){
+    const k = TUS_KOD[e.code]; if(!k) return;
+    e.preventDefault();
+    if(tuslar[k]){ tuslar[k]=false; tusGorsel(); manuelGonder(); }
+  }
+  function tumTuslariBirak(){                          // odak kaybı / panel kapanışı: her şeyi bırak
+    let degisti=false;
+    for(const k in tuslar){ if(tuslar[k]){ tuslar[k]=false; degisti=true; } }
+    tusGorsel();
+    if(degisti) manuelGonder();                        // hover komutu gönder
+  }
+
+  function manuelUIAc(){
+    manuelAcik = true;
+    $("manuelBtn").classList.add("active");
+    $("manuelPanel").style.display = "block";
+    window.addEventListener("keydown", tusBas);
+    window.addEventListener("keyup", tusBirak);
+    window.addEventListener("blur", tumTuslariBirak);
+    manuelTimer = setInterval(manuelGonder, 80);       // ~12 Hz: slider değişimi + failsafe tazeleme
+  }
+  function manuelUIKapat(){                             // sadece yerel temizlik (komut göndermez)
+    manuelAcik = false;
+    $("manuelBtn").classList.remove("active");
+    $("manuelPanel").style.display = "none";
+    tumTuslariBirak();
+    window.removeEventListener("keydown", tusBas);
+    window.removeEventListener("keyup", tusBirak);
+    window.removeEventListener("blur", tumTuslariBirak);
+    if(manuelTimer){ clearInterval(manuelTimer); manuelTimer=null; }
+  }
+
+  function manuelTogle(){
+    if(!manuelAcik){ manuelUIAc(); gonderKomut("manuel_on"); }
+    else           { manuelUIKapat(); gonderKomut("manuel_off"); }
+  }
+
+  // ---- Görev güdümü: tek üretim filtresi v2 + Gerçek GPS (test) ----
+  // Görev Başlat = v2 ile uç. Gerçek GPS = filtreyi atla, doğrudan gerçek
+  // konuma git (yalnızca sim/debug'da anlamlı, irtifa testi için).
+  function kaynakSec(k){ gonderKomut("start_" + k); }
+  function kaynakVurgula(k){                          // aktif kaynağa göre buton vurgusu
+    $("startBtn").classList.toggle("active", k === "v2");
+    $("gercekBtn").classList.toggle("active", k === "gercek");
+  }
+  function gorevBaslat(){ if(manuelAcik) manuelUIKapat(); kaynakSec("v2"); }
+  function gercekTest(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
+  function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
+
+  // Hız slideri: anlık olarak çarpanı güncelle ve komutu tazele
+  (function(){
+    const sl = $("hizSlider"), lab = $("hizVal");
+    sl.addEventListener("input", ()=>{
+      manuelHiz = sl.value/100;
+      lab.textContent = sl.value + "%";
+      manuelGonder();
+    });
+  })();
+
   function setConn(state){
     const dot = $("dot"), txt = $("connText");
     dot.className = "dot " + (state==="ok"?"ok":state==="wait"?"wait":"bad");
@@ -201,9 +368,15 @@
       // Bağlantı bir an aksasa bile son bilinen değerleri göstermeye devam et.
       // (SDK son değeri tutar; 2.5 sn içinde bağlıysak "bağlı" kabul ederiz.)
       setConn((Date.now()-lastOk) < 2500 ? "ok" : "wait");
-      $("gorevDurum").innerHTML = t.gorev_aktif
-        ? "🟢 Görev: AKTİF — " + (t.j ? t.j.durum : "")
-        : "⚪ Görev: Pasif";
+      const KAD = {v2:"İnovasyonlu J", gercek:"Gerçek GPS"};
+      const kad = KAD[t.kaynak] || "";
+      $("gorevDurum").innerHTML = t.manuel_aktif
+        ? '🎮 MANUEL MOD — klavye kontrol'
+        : t.gorev_aktif
+          ? "🟢 Görev: AKTİF — " + kad + (t.j && t.j.durum ? " · " + t.j.durum : "")
+          : "⚪ Görev: Pasif";
+      // Aktif güdüm kaynağına göre buton vurgusu
+      kaynakVurgula(t.gorev_aktif ? t.kaynak : null);
       const d=t.drone, g=t.target;
       $("dx").innerHTML  = f1(d.x)+' <small>m</small>';
       $("dy").innerHTML  = f1(d.y)+' <small>m</small>';
@@ -217,15 +390,32 @@
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
 
-      // Filtre kıyası (Efe vs Ömer)
+      // 🔎 İrtifa / Z teşhis — Gerçek GPS modunda drone neden inmiyor?
+      // Güdüm dikey komutu: throttle ≈ (Hedef Z gerçek − Drone Z). + → tırman, − → alçal.
+      const dbg = t.debug || {};
+      const tgz = (dbg.available && dbg.target_real) ? dbg.target_real.z : null;
+      $("zDz").innerHTML   = f1(d.z)+' <small>m</small>';
+      $("zDalt").innerHTML = f1(d.altitude_m)+' <small>m</small>';
+      $("zTz").innerHTML   = f1(g.z)+' <small>m</small>';
+      $("zTgz").innerHTML  = tgz!=null ? f1(tgz)+' <small>m</small>' : '<small>— (truth yok)</small>';
+      if(tgz!=null && d.z!=null){
+        const delta = tgz - d.z;
+        const renk  = delta>0 ? 'var(--warn)' : 'var(--accent)';
+        const yon   = delta>0 ? 'tırman ↑' : 'alçal ↓';
+        $("zDelta").innerHTML = '<span style="color:'+renk+'">'+f1(delta)+' <small>m · '+yon+'</small></span>';
+      } else { $("zDelta").innerHTML = "—"; }
+      $("zTruth").innerHTML = dbg.available
+        ? '<span style="color:var(--accent)">EVET</span>'
+        : '<span style="color:var(--danger)">HAYIR</span>';
+      $("zBoz").textContent = (dbg.corruptions && dbg.corruptions.length)
+        ? dbg.corruptions.join(' · ') : 'yok';
+
+      // Sapma — gerçeğe hata: ortalama · en kötü (m). Tek üretim filtresi: İnovasyonlu J.
       const ky = t.kiyas || {};
-      $("kHam").innerHTML  = ky.ham_ort_m!=null  ? f1(ky.ham_ort_m)+' <small>m</small>'  : "—";
-      $("kEfe").innerHTML  = ky.efe_ort_m!=null  ? f1(ky.efe_ort_m)+' <small>m</small>'  : '<small>ısınıyor…</small>';
-      $("kOmer").innerHTML = ky.omer_ort_m!=null ? f1(ky.omer_ort_m)+' <small>m</small>' : '<small>ısınıyor…</small>';
-      $("kKazanan").innerHTML = ky.kazanan
-        ? (ky.kazanan==="EFE" ? '<span style="color:var(--accent)">EFE 🟢</span>'
-                              : '<span style="color:var(--accent2)">ÖMER 🔵</span>')
-        : "—";
+      const kfmt = (ort,mx)=> ort==null ? '<small>ısınıyor…</small>'
+            : f1(ort)+' <small>m · kötü '+f1(mx)+'</small>';
+      $("kHam").innerHTML = ky.ham_ort_m!=null ? f1(ky.ham_ort_m)+' <small>m</small>' : "—";
+      $("kJ").innerHTML   = kfmt(ky.j_ort_m, ky.j_max_m);
     }catch(e){
       setConn("bad"); dash();
     }
