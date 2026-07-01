@@ -10,6 +10,10 @@ models/bestpose.pt
 veri/
 kiyas_log.csv
 gorsel_log.csv
+# duz-yapi calistirmalarindan kok dizine dusen loglar (analiz_ucus.py / tani_irtifa.py)
+ucus_log*.csv
+ucus_metrikler.csv
+tani_log.csv
 *.log
 
 # --- Python ---

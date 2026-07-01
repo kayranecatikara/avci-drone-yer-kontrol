@@ -1,0 +1,13 @@
+# Avci Drone - Yer Kontrol Istasyonu : Python bagimliliklari
+# Kurulum:  pip install -r requirements.txt
+numpy
+mss
+Pillow
+pygetwindow
+
+# --- Gorsel gudum (IBVS) fazi: YOLO nesne tespiti ---
+# NOT (CUDA/GPU): torch'u ONCE dogru wheel'den kur, sonra bu dosyayi yukle:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# (CPU-only ise: pip install torch torchvision)  Ardindan: pip install -r requirements.txt
+ultralytics
+opencv-python
