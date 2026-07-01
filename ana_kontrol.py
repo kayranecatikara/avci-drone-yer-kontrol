@@ -81,6 +81,16 @@ class Cfg:
     HANDOFF_RANGE = 4000.0      # cm; tespit menziline gore TUNE et (genis tut)
     HANDOFF_EXIT  = 5000.0      # bu mesafenin disina cikinca handoff iptal
 
+    # --- TERMINAL VURUS (carpisma-rotasi) — GPS ile CARPMA ---
+    # Takip+fren hedef hizinda 'standoff'ta kaliyor (avci hedefi gecemiyor). Yakinda
+    # frensiz carpisma-rotasi: v_des = v_hedef + V_CLOSE*LOS -> mesafe 0'a iner. (2B sim
+    # dogruladi: takip+fren 24 m'de kalir, carpisma-rotasi 0 m.)
+    STRIKE_RANGE = 6000.0       # cm (60 m); bu menzil altinda vurus moduna gec
+    V_CLOSE      = 1200.0       # cm/s (12 m/s) LOS boyunca kapanis hizi
+    KV_STRIKE    = 3.0          # hiz izleme kazanci [1/s] (ivme = KV*(v_des - v_own))
+    A_MAX_STRIKE = 9.81 * math.tan(math.radians(35.0)) * 100.0   # ~687 cm/s^2 yatay ivme tavani
+    STRIKE_TILT  = 1.0          # vurusta tam tilt yetkisi (ram); [-1,1] icinde
+
     # --- YAKLASMA HIZI PROFILI (overshoot guard) — DEGISTIRME ---
     V_CAP_FAR  = 2500.0         # cm/s uzakta (120km/h = 3333 cm/s'in altinda)
     V_CAP_NEAR = 500.0          # cm/s handoff yakininda
@@ -91,14 +101,26 @@ class Cfg:
     KD_H = 0.00060             # yatay turev -> sonumleme (modest; filtre zaten lead'liyor)
     KP_Z = 0.00040             # irtifa -> throttle
     KD_Z = 0.00100
+    KI_Z = 0.00020             # YENI dikey INTEGRAL: ileri-ucus tasimasi yuzunden P-only
+                               # hedefin ~14 m USTUNDE dengeleniyordu (kalici hata). I terimi
+                               # bu yanliligi zamanla toplayip kapatir -> drone hedef irtifasina
+                               # oturur (sim: 14 m -> ~0). Anti-windup icin band+clamp asagida.
+    INT_Z_BAND = 2500.0        # cm; integrali SADECE |ez|<25 m iken biriktir (tirmanista windup yok)
+    INT_Z_MAX  = 5000.0        # cm; integral clamp (KI_Z*INT_Z_MAX = 1.0 -> tavani asmaz)
     KP_YAW = 1.0               # yaw hatasi (rad) -> yaw komutu
 
     # --- KOMUT TAVANLARI ---
     PITCH_MAX = 0.75
     ROLL_MAX  = 0.75
     THR_UP    = 0.70
-    THR_DN    = -0.40          # nazik alcalma; ASLA -1 (serbest dusus) DEGIL
-    YAW_MAX   = 0.45
+    THR_DN    = -1.00          # DUZELTME: eski -0.40 cok zayifti. Tani verisi: drone hedefin
+                              # ustundeyken THR=-0.40 komutuna RAGMEN +3 m/s tirmanmaya devam
+                              # ediyordu (ileri-ucus tasimasi -0.40'i yeniyor). Tam inme yetkisi
+                              # gerekli; PD sadece cok yukaridayken -1'e gider, hedefe yakinda 0'a doner.
+    YAW_MAX   = 0.20           # DUZELTME: eski 0.45 burnu HIZLI donduruyordu -> govde cerçevesi
+                               # hizli donunce (rate-limitli) pitch/roll takip edemeyip salinim/
+                               # "sacma hareket" olusuyordu. Multikopter holonomik: yaw ceviriyi
+                               # yavaslatmak translasyonu bozmaz, sadece burnu nazikce hedefe cevirir.
 
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
@@ -171,6 +193,7 @@ class AvciKontrol:
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
         self.son_z_anlik = None         # J'nin ANLIK (lead'siz) irtifa kestirimi (cm) - DIKEY icin
+        self.son_xy_anlik = None        # J'nin ANLIK (lead'siz) yatay konumu (cm) - terminal vurus LOS'u
         self.son_hiz = None             # J'nin kestirdigi hedef hizi (cm/s, 3B) - olcum/ileri kullanim
         self._fresh = False             # bu tik J'den YENI gecerli kestirim geldi mi?
 
@@ -179,6 +202,15 @@ class AvciKontrol:
         self.e_prev = None
         self.t_prev = None
         self.de = [0.0, 0.0, 0.0]       # EMA-filtreli hata turevi (cm/s)
+        self._ez_int = 0.0              # dikey INTEGRAL birikimi (cm*s) - kalici irtifa hatasini kapatir
+        # kendi YATAY hiz vektoru (temiz konum sonlu-fark, EMA) - terminal vurus icin
+        self._own_pxy = None            # onceki kendi yatay konum (cm)
+        self._own_tv = None             # onceki olcum zamani
+        self._own_v = np.zeros(2)       # kendi yatay hiz (cm/s, dunya)
+        # GERCEK modda hedef hizi (truth konum sonlu-fark) - carpisma-rotasi icin
+        self._gt_prev_p = None          # onceki truth hedef konum (cm)
+        self._gt_prev_t = None
+        self._gt_vel = np.zeros(3)      # hedef hizi (cm/s, 3B)
         self.none_count = 0
         self.last_est = None
         self.handoff = False
@@ -202,6 +234,7 @@ class AvciKontrol:
         self.filtre = _filtre_uret(kaynak)
         self.son_ham = None                 # yeni filtre taze beslensin
         self.son_z_anlik = None
+        self.son_xy_anlik = None
         self.son_hiz = None
         self._fresh = False
         # FAZ-1 durumunu sifirla: komutlar 0'dan rate-limit'lensin, turev/handoff temiz.
@@ -209,6 +242,10 @@ class AvciKontrol:
         self.e_prev = None
         self.t_prev = None
         self.de = [0.0, 0.0, 0.0]
+        self._ez_int = 0.0              # dikey integrali taze baslat
+        self._own_pxy = None            # kendi yatay hiz kestirimini taze baslat
+        self._own_tv = None
+        self._own_v = np.zeros(2)
         self.none_count = 0
         self.last_est = None
         self.handoff = False
@@ -227,12 +264,14 @@ class AvciKontrol:
             self.son_ham = self.drone.get_target_location()   # debug olcumu icin tut
             dbg = self.drone.get_debug_truth()
             if dbg.get("available"):
-                self.son_temiz = np.array(dbg["target"]["position"], float)
-                self.son_z_anlik = float(self.son_temiz[2])   # gercekte lead yok -> ayni z
-                self._fresh = True
+                p = np.array(dbg["target"]["position"], float)
+                self.son_temiz = p
+                self.son_z_anlik = float(p[2])                # gercekte lead yok -> ayni z
+                self.son_xy_anlik = np.array([p[0], p[1]], float)  # carpisma-rotasi LOS'u icin
+                self.son_hiz = self._gercek_hedef_hiz(p)      # hedef hizi (truth sonlu-fark)
+                self._fresh = True                            # -> terminal vurus GERCEK modda da acilir
             else:
                 self._fresh = False
-            self.son_hiz = None               # gercek modda lead yok (saf pursuit)
             return self.son_temiz
 
         ham = self.drone.get_target_location()
@@ -249,9 +288,13 @@ class AvciKontrol:
                 if durum is None:
                     self.son_hiz = None
                     self.son_z_anlik = float(self.son_temiz[2])   # fallback
+                    self.son_xy_anlik = None
                 else:
                     self.son_hiz = np.array(durum["vel"], float)
                     self.son_z_anlik = float(durum["pos"][2])     # lead'siz anlik irtifa
+                    # lead'siz ANLIK yatay konum -> terminal vurus (carpisma-rotasi) LOS'u
+                    # bunu kullanir; lead son_temiz'de degil, hedef hizini eslemede otomatik.
+                    self.son_xy_anlik = np.array([durum["pos"][0], durum["pos"][1]], float)
             else:
                 self._fresh = False           # isinma/donma -> kestirim yok
         else:
@@ -297,6 +340,42 @@ class AvciKontrol:
         return self.de
 
     # ----------------------------------------------------------------
+    #  Kendi YATAY hiz vektoru (cm/s, dunya): temiz konum sonlu-fark + EMA.
+    #  Terminal vurus (carpisma-rotasi) hiz-izleme icin kullanir.
+    # ----------------------------------------------------------------
+    def _own_hiz(self, pxy, t):
+        if self._own_pxy is None or self._own_tv is None:
+            self._own_pxy = pxy.copy(); self._own_tv = t
+            return self._own_v
+        dt = t - self._own_tv
+        if 1e-3 < dt < 0.5:
+            raw = (pxy - self._own_pxy) / dt
+            self._own_v = 0.7 * self._own_v + 0.3 * raw
+            self._own_pxy = pxy.copy(); self._own_tv = t
+        elif dt >= 0.5:                                # bayat -> resetle
+            self._own_pxy = pxy.copy(); self._own_tv = t
+        return self._own_v
+
+    # ----------------------------------------------------------------
+    #  GERCEK modda hedef hizi (cm/s, 3B): truth konum sonlu-fark + EMA.
+    #  Carpisma-rotasi (v_des = v_hedef + V_CLOSE*LOS) icin gerekli; truth temiz
+    #  oldugundan sonlu-fark guvenli.
+    # ----------------------------------------------------------------
+    def _gercek_hedef_hiz(self, p):
+        now = time.perf_counter()
+        if self._gt_prev_p is None or self._gt_prev_t is None:
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+            return self._gt_vel
+        dt = now - self._gt_prev_t
+        if 1e-3 < dt < 0.5:
+            raw = (p - self._gt_prev_p) / dt
+            self._gt_vel = 0.7 * self._gt_vel + 0.3 * raw
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+        elif dt >= 0.5:
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+        return self._gt_vel
+
+    # ----------------------------------------------------------------
     #  Komut gonder (rate-limit + atomik set_control_surfaces)
     # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
@@ -333,6 +412,7 @@ class AvciKontrol:
         yaw_m = self.drone.get_drone_rotation()[2]
         drone_yaw = math.radians(yaw_m) if Cfg.ROT_IN_DEGREES else yaw_m
         t = time.perf_counter()
+        v_own = self._own_hiz(drone_pos[:2], t)                 # kendi yatay hiz (cm/s, dunya)
 
         # 1) J ile bozuk hedefi temizle (self._fresh: yeni kestirim geldi mi?)
         self._hedef_temizle()
@@ -400,9 +480,27 @@ class AvciKontrol:
         pitch_raw = clamp(pitch_raw, -Cfg.PITCH_MAX, Cfg.PITCH_MAX) * mag_scale
         roll_raw  = clamp(roll_raw,  -Cfg.ROLL_MAX,  Cfg.ROLL_MAX)  * mag_scale
 
-        # 8) irtifa (PD) — Z_SIGN ile dikey yon duzeltmesi (THR_DN/THR_UP duzeltilmis cercevede:
-        #    nazik alcalma -0.40, daha guclu tirmanma +0.70). KP_Z/KD_Z DEGISMEZ.
-        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KP_Z * ez + Cfg.KD_Z * de[2]), Cfg.THR_DN, Cfg.THR_UP)
+        # 7b) DIKEY-YATAY AYRISTIRMA DUZELTMESI (tani verisiyle kanitlandi):
+        #     Drone hedefin irtifasini ASTIGINDA (ez<0) hizli ileri-ucus YUKARI TASIMA
+        #     uretip alcalmayi engelliyordu (THR=-0.40'a ragmen +3 m/s tirmanis). Cozum:
+        #     ne kadar ustteyse kovalamayi (pitch/roll) o kadar KIS -> tasima dussun ->
+        #     drone alcalabilsin. Hedef irtifasina donunce tam kovalama geri gelir.
+        if ez < 0.0:
+            alc_oncelik = clamp(1.0 + ez / 800.0, 0.15, 1.0)   # ez=-8 m'de %15'e iner
+            pitch_raw *= alc_oncelik
+            roll_raw  *= alc_oncelik
+
+        # 8) irtifa (PID) — Z_SIGN ile dikey yon. P: KP_Z*ez, I: kalici acigi kapatir
+        #    (ileri-ucus tasimasina karsi ~14 m ustte dengelenmeyi onler), D: KD_Z*de[2].
+        #    KP_Z/KD_Z DEGISMEZ; THR_DN=-1.0 tam inme yetkisi.
+        #    Anti-windup: integrali sadece hedefe MAKUL yakinken (|ez|<band) biriktir ve
+        #    clamp'le; uzaktayken (tirmanis) sifirla ki windup olmasin.
+        if abs(ez) < Cfg.INT_Z_BAND:
+            self._ez_int = clamp(self._ez_int + ez * Cfg.DT, -Cfg.INT_Z_MAX, Cfg.INT_Z_MAX)
+        else:
+            self._ez_int = 0.0
+        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KP_Z * ez + Cfg.KI_Z * self._ez_int + Cfg.KD_Z * de[2]),
+                        Cfg.THR_DN, Cfg.THR_UP)
 
         # 9) yaw: nazikce burnu hedefe cevir (handoff'ta kamera ortalansin)
         bearing = math.atan2(ey, ex)
@@ -413,6 +511,30 @@ class AvciKontrol:
         if d_h < Cfg.POS_DEADBAND:
             pitch_raw = 0.0
             roll_raw = 0.0
+
+        # 10b) TERMINAL VURUS (carpisma-rotasi) — hedefe yakinsak FREN YOK -> CARP.
+        #      v_des = v_hedef + V_CLOSE*LOS (hedef hizini filtreden=GPS esle + LOS boyunca
+        #      kapanis) => bagil hiz tamamen LOS boyunca => sabit kerteriz, azalan menzil =>
+        #      CARPMA. Lead OTOMATIK (hedef hizini esliyoruz). ivme = KV*(v_des - v_own),
+        #      TOPLAM tavana clip (ayri DEGIL) -> yengeç/yörünge yok. ANGLE-mode: ivme->tilt.
+        #      Yukaridaki takip+fren komutunu EZER (deadband dahil) ki hedefi gecip carpsin.
+        if d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None and self.son_xy_anlik is not None:
+            # LOS = lead'siz ANLIK hedefe (carpisma-rotasi icin gercek yon; lead son_temiz'de
+            # DEGIL, asagida hedef hizini eslemede OTOMATIK gelir -> cift-lead olmaz).
+            ex_s = float(self.son_xy_anlik[0] - drone_pos[0])
+            ey_s = float(self.son_xy_anlik[1] - drone_pos[1])
+            d_s = math.hypot(ex_s, ey_s)
+            ux, uy = ex_s / max(d_s, 1e-6), ey_s / max(d_s, 1e-6)      # LOS birim (dunya)
+            vdx = float(self.son_hiz[0]) + Cfg.V_CLOSE * ux            # istenen hiz (cm/s, dunya)
+            vdy = float(self.son_hiz[1]) + Cfg.V_CLOSE * uy
+            ax = Cfg.KV_STRIKE * (vdx - float(v_own[0]))               # ivme = KV*(v_des - v_own)
+            ay = Cfg.KV_STRIKE * (vdy - float(v_own[1]))
+            am = math.hypot(ax, ay)
+            if am > Cfg.A_MAX_STRIKE:                                  # TOPLAM ivme tavani
+                ax *= Cfg.A_MAX_STRIKE / am; ay *= Cfg.A_MAX_STRIKE / am
+            a_fwd, a_right = world_to_body(ax, ay, drone_yaw)          # dunya -> govde
+            pitch_raw = Cfg.PITCH_SIGN * clamp(a_fwd  / Cfg.A_MAX_STRIKE, -1.0, 1.0) * Cfg.STRIKE_TILT
+            roll_raw  = Cfg.ROLL_SIGN  * clamp(a_right / Cfg.A_MAX_STRIKE, -1.0, 1.0) * Cfg.STRIKE_TILT
 
         # --- TESHIS: irtifa kacma sorununu olcmek icin (Cfg.DEBUG_Z=False ile kapat) ---
         if Cfg.DEBUG_Z:

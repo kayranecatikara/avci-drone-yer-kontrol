@@ -259,17 +259,21 @@ def build_telemetry():
     drone_spd_ms = dspd * CM_TO_M
     target_spd_ms = tspd * CM_TO_M
 
-    # Avci ile hedef arasindaki 3 boyutlu mesafe (metre)
+    # Avci-hedef 3B mesafe — HAM GPS ile (bozuk). Ekranda gosterilen ana deger budur;
+    # bozuk GPS spoof/sicramasinda ziplayabilir (bu normal, ham veri gostergesi).
     distance_m = ((dx - tx) ** 2 + (dy - ty) ** 2 + (dz - tz) ** 2) ** 0.5
 
     # (Debug) Gercek (bozulmamis) degerler - oyunda debug acikken gelir.
     truth = drone.get_debug_truth()
     debug_info = {"available": bool(truth.get("available"))}
+    gercek_mesafe_m = None                       # avci <-> GERCEK hedef 3B mesafe (debug varsa)
     if debug_info["available"]:
         adx, ady, adz = (c * CM_TO_M for c in truth["drone"]["position"])
         tgx, tgy, tgz = (c * CM_TO_M for c in truth["target"]["position"])
         debug_info["drone_real"] = {"x": adx, "y": ady, "z": adz}
         debug_info["target_real"] = {"x": tgx, "y": tgy, "z": tgz}
+        # GERCEK mesafe: gercek avci konumu <-> gercek hedef konumu (bozulmamis)
+        gercek_mesafe_m = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
         # Hedef HAM GPS ile GERCEK konum arasindaki fark (bozulma miktari, metre)
         debug_info["target_raw_error_m"] = (
             (tx - tgx) ** 2 + (ty - tgy) ** 2 + (tz - tgz) ** 2) ** 0.5
@@ -318,6 +322,14 @@ def build_telemetry():
         kiyas[ad + "_ornek"] = int(a.size)
     _ozet("j", j_h)
 
+    # (GECICI TANI) kontrolcunun SON gonderdigi dikey/ileri komut -> tani_irtifa.py icin.
+    # Drone davranisini DEGISTIRMEZ; sadece son komutu gosterir. Sorun cozulunce silinebilir.
+    try:
+        _cmd_thr = float(drone._drone.throttle)
+        _cmd_pit = float(drone._drone.pitch)
+    except Exception:
+        _cmd_thr = _cmd_pit = None
+
     return {
         "connected": connected,
         "drone": {
@@ -326,13 +338,15 @@ def build_telemetry():
             "speed_ms": drone_spd_ms,
             "speed_kmh": drone_spd_ms * MS_TO_KMH,
             "roll": drot[0], "pitch": drot[1], "yaw": drot[2],
+            "cmd_throttle": _cmd_thr, "cmd_pitch": _cmd_pit,
         },
         "target": {
             "x": tx, "y": ty, "z": tz,
             "speed_ms": target_spd_ms,
             "speed_kmh": target_spd_ms * MS_TO_KMH,
         },
-        "distance_m": distance_m,
+        "distance_m": distance_m,               # HAM GPS-avci mesafe (ekrandaki ana deger)
+        "gercek_mesafe_m": gercek_mesafe_m,     # GERCEK GPS-avci mesafe (debug; bozulmamis)
         "debug": debug_info,
         "j": j_info,
         "gorev_aktif": gorev_aktif,

@@ -224,8 +224,10 @@
         </div>
 
         <div class="dist">
-          <div class="k">AVCI — HEDEF MESAFE</div>
+          <div class="k">HAM GPS — AVCI MESAFE</div>
           <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+          <div class="k" style="margin-top:10px">GERÇEK GPS — AVCI MESAFE</div>
+          <div class="v mono" style="font-size:20px;color:var(--muted)"><span id="dist_gercek">—</span> <small>m</small></div>
         </div>
       </div>
     </section>
@@ -356,7 +358,7 @@
 
   const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
   const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
-  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist"]
+  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist","dist_gercek"]
                     .forEach(id=>$(id).textContent="—");
 
   let lastOk = 0;
@@ -389,6 +391,8 @@
       $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
+      // GERCEK GPS-avci mesafe (debug truth varsa; yoksa "—")
+      $("dist_gercek").textContent = (t.gercek_mesafe_m != null) ? f1(t.gercek_mesafe_m) : "—";
 
       // 🔎 İrtifa / Z teşhis — Gerçek GPS modunda drone neden inmiyor?
       // Güdüm dikey komutu: throttle ≈ (Hedef Z gerçek − Drone Z). + → tırman, − → alçal.
