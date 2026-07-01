@@ -3,4 +3,8 @@
 numpy
 mss
 Pillow
-pygetwindow
+
+# --- Windows'a ozel (Linux'ta gerekmez, otomatik atlanir) ---
+# pygetwindow oyun penceresini bulmak icindir. Linux'ta yuklenmezse
+# server.py tum ekrani yakalar (kod bunu try/except ile otomatik yapar).
+pygetwindow; platform_system == "Windows"
