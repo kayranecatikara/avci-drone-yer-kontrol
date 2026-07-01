@@ -4,6 +4,8 @@ Drones of War Teknofest/
 # --- Calisma zamani / log ciktilari ---
 kiyas_log.csv
 tani_log.csv
+ucus_log*.csv
+ucus_metrikler.csv
 *.log
 
 # --- Python ---
