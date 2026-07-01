@@ -14,7 +14,7 @@ echo ============================================================
 REM Once sunucuyu baslat (2 saniye sonra tarayiciyi ac)
 start "" /min cmd /c "timeout /t 2 /nobreak >nul & start """" http://127.0.0.1:8000"
 
-python server.py
+python main.py
 
 echo.
 echo Sunucu durdu. Cikmak icin bir tusa bas...

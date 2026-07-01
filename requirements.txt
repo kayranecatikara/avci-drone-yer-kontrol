@@ -4,3 +4,16 @@ numpy
 mss
 Pillow
 pygetwindow
+
+# --- Gorsel faz (YOLO best.pt tespit + tracking + IBVS guduum) ---
+# ultralytics opencv-python'i de ceker (cv2 overlay icin). Yoksa sistem zarif
+# bozulur: gorsel faz pasif kalir, saf GPS yaklasma BUGUNKUYLE AYNI calisir.
+# CPU (varsayilan):  pip install ultralytics opencv-python
+# GPU (opsiyonel)  :  once CUDA torch (download.pytorch.org/whl/cu121), sonra ultralytics;
+#                     gorsel_tespit.GorselTespit(device=0) ile calistir.
+ultralytics
+opencv-python
+lap            # bytetrack tracking icin (ultralytics track); yoksa otomatik kurulur
+# Pencere-icerigi yakalama (occlusion-proof FPV; tek monitorde oyun arkada olsa bile).
+# Yoksa sistem mss ekran-bolgesi yakalamaya duser.
+windows-capture

@@ -1,8 +1,15 @@
 # --- Oyun dosyalari (cok buyuk + yarisma materyali; repoya KONMAZ) ---
 Drones of War Teknofest/
 
-# --- Calisma zamani / log ciktilari ---
+# --- Buyuk model ---
+# pose modeli 123 MB > GitHub 100 MB siniri (push REDDEDILIR). Aktif model best.pt (50 MB).
+bestpose.pt
+models/bestpose.pt
+
+# --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
+veri/
 kiyas_log.csv
+gorsel_log.csv
 *.log
 
 # --- Python ---
