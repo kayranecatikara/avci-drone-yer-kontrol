@@ -210,9 +210,9 @@ class Cfg:
     # 25 derece USTUNDE demek -> drone dengelenmek icin hedefin ALTINA iner (20 m'de
     # ~9 m!). Cozum: hedefi merkezin ALTINDAKI su referans cizgide tut; dikey hata
     # (ey - VIS_EY_REF) olur -> yaklasma DUZ/ayni-irtifa geometrisinde kalir.
-    # Deger: tan(25)/tan(FOV_dikey/2). FOV 125 YATAYSA (16:9, UE varsayimi) ~0.43;
-    # 125 dikeyse ~0.24. SIM'DE KALIBRE ET: hedef seninle AYNI irtifadayken slider'i
-    # bbox merkezinin oturdugu cizgiye getir (overlay'de turuncu REF cizgisi).
+    # Deger: tan(25)/tan(vFOV/2). 125 derece YATAY FOV (dogrulandi) + 16:9 ->
+    # vFOV/2 ~47.2 derece -> ref ~0.43. Ince ayar SIM'DE: hedef seninle AYNI
+    # irtifadayken slider'i bbox merkezinin oturdugu cizgiye getir (turuncu REF).
     VIS_EY_REF       = 0.43
     # Isaretler (SIM'de kalibre et: komut hatayi AZALTMALI; artiriyorsa isareti ters cevir)
     VIS_SIGN_YAW     = +1.0     # ex>0 (hedef SAGDA) -> burnu hedefe cevir
@@ -259,7 +259,10 @@ def speed_cap(d_horiz):
 
 
 # --- kamera devir esikleri (gorus fazi hook'u icin) ---
-KAMERA_FOV_YARIM = math.radians(62.5)   # 125 derece / 2 (SDK v2.2 resmi FOV)
+# SDK v2.2: FOV 125 derece = YATAY (dogrulandi). 16:9'da dikey FOV ~94.5 derece
+# (yarim ~47.2); kamera ekseni +25 derece yukari -> dikey gorus bandi ufka gore
+# yaklasik -22..+72 derece (hedefin USTUNDE kalmak dikey temasi kaybettirir).
+KAMERA_FOV_YARIM = math.radians(62.5)   # 125/2 (YATAY yarim aci)
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
 
