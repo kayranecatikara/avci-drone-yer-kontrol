@@ -24,7 +24,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sdk import drone_sdk as drone
-from guidance.ana_kontrol import AvciKontrol
+from guidance.ana_kontrol import AvciKontrol, Cfg
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
 import numpy as np
 
@@ -36,15 +36,12 @@ try:
 except Exception:
     gw = None
 
-# Gorsel tespit (YOLO best.pt) + cv2 overlay — OPSIYONEL.
-# Yoksa CV_OK=False -> gorsel faz pasif, sistem saf GPS ile BUGUNKUYLE AYNI calisir.
+# cv2 OPSIYONEL (pencere-yakalama karesini olcekle/JPEG'e cevir; ultralytics ile
+# birlikte gelir). Yoksa FPV mss+PIL yoluna duser, sistem cokmez.
 try:
     import cv2
-    from detection.gorsel_tespit import GorselTespit
-    CV_OK = True
-except Exception as _cv_e:
-    CV_OK = False
-    print("[SERVER] gorsel faz pasif (cv2/ultralytics yuklenemedi: %s)." % _cv_e)
+except Exception:
+    cv2 = None
 
 # ----------------------------------------------------------
 #  Sabitler
@@ -53,24 +50,15 @@ CM_TO_M = 0.01      # Oyun santimetre verir -> metre icin 0.01 ile carp
 MS_TO_KMH = 3.6     # metre/saniye -> kilometre/saat
 WEB_PORT = 8000     # Arayuzun acilacagi yerel port
 
-HERE = os.path.dirname(os.path.abspath(__file__))          # .../web (server.py + index.html)
-PROJ_ROOT = os.path.dirname(HERE)                          # depo koku
-MODEL_DIR = os.path.join(PROJ_ROOT, "models")              # egitilmis modeller (.pt)
-VERI_DIR = os.path.join(PROJ_ROOT, "veri")                 # calisma ciktilari (log/json/png)
+HERE = os.path.dirname(os.path.abspath(__file__))           # .../web (server.py + index.html)
+PROJ_ROOT = os.path.dirname(HERE)                           # depo koku
+VERI_DIR = os.path.join(PROJ_ROOT, "veri")                  # calisma ciktilari (log/csv; gitignore'lu)
 os.makedirs(VERI_DIR, exist_ok=True)
 
 # Goruntude oyun penceresini tanimak icin baslik ipuclari
 GAME_TITLE_HINTS = ["dronesofwar", "drones of war", "drone of war"]
 CAM_MAX_WIDTH = 960   # Yakalanan kareyi bu genislige olcekle (akiciligi artirir)
 CAM_JPEG_QUALITY = 60
-
-# --- GORSEL TESPIT MODELI (KOLAY DEGISTIR) ---
-# Yeni model gelince: .pt'yi models/ klasorune koy, SADECE MODEL_YOLU'nu degistir, server'i yeniden baslat.
-MODEL_YOLU = os.path.join(MODEL_DIR, "best.pt")   # tespit modeli (.pt): models/best.pt
-MODEL_CONF = 0.30            # YOLO tespit esigi: overlay bu esigin USTUNDEKI kutulari CIZER.
-                             # Dusuk tut (0.25-0.35) -> herhangi bir modelin NE algiladigini gor
-                             # (FP'ler de gorunur, model degerlendirmesi icin). Drone yalnizca
-                             # ana_kontrol.Cfg.GORSEL_CONF_MIN (0.65) USTUNDE gorsel faza ENGAGE olur.
 
 
 # ----------------------------------------------------------
@@ -104,7 +92,8 @@ def _find_game_region():
 
 
 def grab_frame_jpeg():
-    """Oyun penceresini (yoksa tum ekrani) yakalayip JPEG bayt dizisi doner."""
+    """mss FALLBACK: oyun penceresi bolgesini (yoksa tum ekrani) yakalayip JPEG doner.
+    windows-capture kuruluysa buraya dusulmez (fpv_jpeg pencere-icerigini kullanir)."""
     sct = _get_sct()
     region = _find_game_region()
     if region:
@@ -112,22 +101,34 @@ def grab_frame_jpeg():
         bbox = {"left": left, "top": top, "width": width, "height": height}
     else:
         bbox = sct.monitors[1]  # birincil monitor (tum ekran)
-
     raw = sct.grab(bbox)
     img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-
     if img.width > CAM_MAX_WIDTH:
         ratio = CAM_MAX_WIDTH / img.width
         img = img.resize((CAM_MAX_WIDTH, int(img.height * ratio)))
-
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
     return buf.getvalue()
 
 
+# ----------------------------------------------------------
+#  PENCERE-ICERIGI YAKALAMA (kayra'nin katmani — occlusion-proof FPV)
+#  Oyun penceresinin ICERIGINI yakalar: pencere tarayicinin ARKASINDA olsa bile
+#  dogru kare gelir; arayuz goruntusu PENCERE SECMEDEN otomatik akar.
+#  windows-capture yoksa hazir=False -> mss ekran-bolgesine duser (cokme yok).
+#  connection_manager oyun penceresi acilinca yakalamayi otomatik baslatir.
+# ----------------------------------------------------------
+try:
+    from detection.pencere_yakala import PencereYakala
+    pencere_yakala_motoru = PencereYakala(title_hints=GAME_TITLE_HINTS)
+except Exception as _py_e:
+    pencere_yakala_motoru = None
+    print("[SERVER] pencere_yakala yuklenemedi (%s) -> mss fallback." % _py_e)
+
+
 def _olcekle_bgr(bgr):
     """BGR kareyi CAM_MAX_WIDTH'e olcekle, contiguous yap; (kare, W, H) doner."""
-    if bgr.shape[1] > CAM_MAX_WIDTH:
+    if cv2 is not None and bgr.shape[1] > CAM_MAX_WIDTH:
         ratio = CAM_MAX_WIDTH / bgr.shape[1]
         bgr = cv2.resize(bgr, (CAM_MAX_WIDTH, int(bgr.shape[0] * ratio)))
     bgr = np.ascontiguousarray(bgr)                        # cv2/ultralytics contiguous ister
@@ -136,17 +137,16 @@ def _olcekle_bgr(bgr):
 
 
 def grab_frame_bgr():
-    """(BGR numpy kare, W, H) doner. ONCE pencere-icerigi yakalama (occlusion-proof:
-    oyun arkada olsa bile dogru kare). O tercih ediliyor ama kare henuz yoksa
-    (None, 0, 0) doner -> inference o turu atlar (ayna/yanlis kare gostermez).
-    windows-capture yoksa mss ekran-bolgesine duser (eski davranis)."""
+    """(BGR numpy kare, W, H) doner — YOLO dedektorunun kare kaynagi.
+    ONCE pencere-icerigi (occlusion-proof); kare henuz yoksa (None,0,0) -> dedektor
+    o turu atlar (ayna/yanlis kare islemez). windows-capture yoksa mss'e duser."""
     pym = pencere_yakala_motoru
     if pym is not None and pym.hazir:
         if pym.calisiyor():
             bgr = pym.get_latest_bgr()
             if bgr is not None:
                 return _olcekle_bgr(bgr)
-        return None, 0, 0                                  # pencere-yakalama tercih ama kare yok
+        return None, 0, 0                                  # pencere-yakalama tercih; kare yok
 
     # Fallback: mss ekran-bolgesi (windows-capture yoksa)
     sct = _get_sct()
@@ -158,69 +158,28 @@ def grab_frame_bgr():
         bbox = sct.monitors[1]
     raw = sct.grab(bbox)
     frame = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)
-    return _olcekle_bgr(frame[:, :, :3])                   # BGRA -> BGR (alpha at)
+    return _olcekle_bgr(frame[:, :, :3].copy())            # BGRA -> BGR (alpha at)
 
 
 def fpv_jpeg():
-    """Mevcut FPV JPEG: (1) gorev aktif + overlay hazirsa overlay'li kare,
-    (2) degilse pencere-yakalama ham karesi (gorev oncesi canli on-izleme),
-    (3) windows-capture yoksa mss. Hicbiri yoksa None (-> 503 -> placeholder)."""
-    if CV_OK and inference_aktif:
-        with tespit_lock:
-            data = son_overlay_jpeg
-        if data is not None:
-            return data
+    """/api/frame'in dondurdugu HAM oyun karesi (overlay YOK — bbox/rozet istemci
+    canvas'inda cizilir). Oncelik: pencere-icerigi karesi; windows-capture yoksa mss.
+    Kare yoksa None (-> 503 -> arayuz placeholder gosterip yeniden dener)."""
     pym = pencere_yakala_motoru
-    if pym is not None and pym.calisiyor():
-        bgr = pym.get_latest_bgr()
-        if bgr is not None:
-            b2, _w, _h = _olcekle_bgr(bgr)
+    if pym is not None and pym.hazir:
+        bgr = pym.get_latest_bgr() if pym.calisiyor() else None
+        if bgr is None:
+            return None                                    # oyun penceresi henuz yok
+        b2, _w, _h = _olcekle_bgr(bgr)
+        if cv2 is not None:
             ok, enc = cv2.imencode(".jpg", b2, [int(cv2.IMWRITE_JPEG_QUALITY), CAM_JPEG_QUALITY])
             if ok:
                 return enc.tobytes()
-    if pym is None or not pym.hazir:
-        return grab_frame_jpeg()                           # mss fallback (windows-capture yoksa)
-    return None
-
-
-def overlay_ciz(frame_bgr, tespit, dbg):
-    """mss karesine HUD ciz (yerinde): goruntu merkezi +, bbox, merkez nokta, hata
-    vektoru, durum, 'GPS GUDUMU: KAPALI' rozeti (yalniz gorsel_aktif), ex/ey, conf.
-    cv2 Hershey TR karakter basamaz -> ASCII metin."""
-    img = frame_bgr
-    h, w = img.shape[:2]
-    cx0, cy0 = w // 2, h // 2
-    cv2.drawMarker(img, (cx0, cy0), (255, 255, 255), cv2.MARKER_CROSS, 22, 1)  # goruntu merkezi +
-
-    durum = dbg.get("durum", "ARAMA")
-    gorsel_aktif = bool(dbg.get("gorsel_aktif", False))
-
-    if tespit.get("var"):
-        x1, y1, x2, y2 = [int(v) for v in tespit["bbox_xyxy"]]
-        tcx, tcy = int(tespit["cx"]), int(tespit["cy"])
-        renk = (0, 230, 0) if gorsel_aktif else (0, 200, 255)   # BGR: yesil / turuncu
-        cv2.rectangle(img, (x1, y1), (x2, y2), renk, 2)
-        cv2.circle(img, (tcx, tcy), 4, renk, -1)
-        cv2.line(img, (cx0, cy0), (tcx, tcy), renk, 1)          # hata vektoru
-        et = "HEDEF %.2f" % tespit.get("conf", 0.0)
-        if tespit.get("tid") is not None:
-            et += " id:%d" % tespit["tid"]
-        cv2.putText(img, et, (x1, max(14, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, renk, 1, cv2.LINE_AA)
-    else:
-        cv2.putText(img, "HEDEF YOK", (10, h - 12), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, (0, 0, 255), 1, cv2.LINE_AA)
-
-    cv2.putText(img, "DURUM: %s" % durum.replace("_", " "), (10, 22),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2, cv2.LINE_AA)
-
-    if gorsel_aktif:
-        cv2.rectangle(img, (10, 32), (252, 58), (0, 0, 200), -1)   # kirmizi rozet
-        cv2.putText(img, "GPS GUDUMU: KAPALI", (16, 50),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
-        cv2.putText(img, "ex=%+.2f ey=%+.2f" % (dbg.get("ex", 0.0), dbg.get("ey", 0.0)),
-                    (16, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 230, 0), 1, cv2.LINE_AA)
-    return img
+        img = Image.fromarray(b2[:, :, ::-1].copy())       # BGR->RGB (cv2 yoksa PIL ile)
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
+        return buf.getvalue()
+    return grab_frame_jpeg()                               # windows-capture yok -> mss
 
 
 # ----------------------------------------------------------
@@ -254,32 +213,27 @@ beyin_lock = threading.Lock()
 gorev_aktif = False
 
 # ----------------------------------------------------------
-#  GORSEL TESPIT (YOLO) — ayri inference thread'i ile paylasim
-#  Inference thread Tespit uretir; kontrol dongusu beyin.gorsel_guncelle ile besler.
-#  tespit_lock: yalniz son_tespit/son_overlay_jpeg yaziminda (beyin_lock'tan AYRI;
-#  iki kilit ASLA ic ice tutulmaz -> deadlock yok).
+#  CANLI TUNE: arayuzdeki slider'lar Cfg'yi calisirken degistirir.
+#  Kontrol dongusu Cfg.X'i HER tik okudugundan degisiklik ANINDA etki eder
+#  (server yeniden baslatmaya gerek YOK). Guvenlik icin sadece bu allowlist.
 # ----------------------------------------------------------
-# NOT: pose modeli (bestpose.pt) verilirse SADECE .boxes (bbox) kullanilir, keypoint'ler
-# yok sayilir (duz IBVS = bbox merkezi). Model + esik yukaridaki MODEL_YOLU / MODEL_CONF'ta.
-tespit_motoru = GorselTespit(MODEL_YOLU, conf=MODEL_CONF) if CV_OK else None
-tespit_lock = threading.Lock()
-EMPTY_TESPIT = {"var": False, "bbox_xyxy": None, "cx": 0.0, "cy": 0.0,
-                "w": 0.0, "h": 0.0, "conf": 0.0, "tid": None,
-                "frame_w": 0, "frame_h": 0, "ts": 0.0}
-son_tespit = dict(EMPTY_TESPIT)   # son Tespit (inference thread yazar, kontrol dongusu okur)
-son_overlay_jpeg = None           # son overlay'li JPEG (/api/frame doner)
-inference_aktif = False           # gorev basladiginda + model hazirsa True
-
-# Pencere-icerigi yakalama (occlusion-proof): tek monitorde oyun tarayicinin
-# ARKASINDA olsa bile dogru oyun karesini alir (mss ekran-bolgesinin aksine).
-# windows-capture yoksa hazir=False -> grab_frame_bgr mss'e duser.
-# connection_manager oyun penceresi acilinca otomatik baslatir.
-try:
-    from detection.pencere_yakala import PencereYakala
-    pencere_yakala_motoru = PencereYakala(title_hints=GAME_TITLE_HINTS) if CV_OK else None
-except Exception as _py_e:
-    pencere_yakala_motoru = None
-    print("[SERVER] pencere_yakala yuklenemedi: %s" % _py_e)
+TUNE_ALLOW = {
+    # terminal vurus / carpma
+    "V_CLOSE", "V_CLOSE_MIN", "KP_CLOSE", "KV_STRIKE", "STRIKE_TILT",
+    "STRIKE_RANGE", "COMMIT_RANGE",
+    # komut yumusakligi
+    "MAX_DELTA",
+    # yaw / burun
+    "YAW_MAX", "KP_YAW",
+    # yatay yaklasma
+    "KP_H", "KD_H",
+    # dikey (irtifa) PID
+    "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
+    # GORSEL GUDUM (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)
+    "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH",
+    "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
+    "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
+}
 
 # ----------------------------------------------------------
 #  MANUEL MOD (klavyeyle kontrol)
@@ -318,36 +272,10 @@ try:
 except Exception:
     _kiyas_log_f = None
 
-# GORSEL GUDUM (IBVS) zaman-indeksli log (50 Hz). gorsel_aktif iken yazilir.
-# kiyas_log.csv paket-indeksli (~1 Hz) oldugundan KARISTIRILMAZ -> ayri dosya.
-_GORSEL_LOG = os.path.join(VERI_DIR, "gorsel_log.csv")
-try:
-    _gorsel_log_f = open(_GORSEL_LOG, "w", encoding="utf-8")
-    _gorsel_log_f.write("t_ms,durum,gorsel_aktif,conf,cx,cy,ex,ey,doluluk,gate,"
-                        "cmd_thr,cmd_pitch,cmd_roll,cmd_yaw,"
-                        "raw_thr,raw_pitch,raw_roll,raw_yaw,"
-                        "gordu,kayip,drone_z\n")
-    _gorsel_log_f.flush()
-except Exception:
-    _gorsel_log_f = None
-_gorsel_log_t0 = None
-_gorsel_log_n = 0
-
-# --- GPS JSON KAYIT: target (hedef IHA) GPS'in BOZUK / GERCEK / J-FILTRELI halleri ---
-# Saniye bazinda, METRE. _kiyas_guncelle her pakette son degerleri gunceller;
-# _gps_json_yaz saniyede bir gps_kayit.json'a yazar. Her server basinda sifirlanir.
-_GPS_JSON = os.path.join(VERI_DIR, "gps_kayit.json")
-_gps_kayit = []
-_gps_son_bozuk = None       # [x,y,z] m - ham (bozuk) GNSS
-_gps_son_gercek = None      # [x,y,z] m - gercek (bozulmamis) konum
-_gps_son_j = None           # [x,y,z] m - Inovasyonlu J (v2) filtreli
-_gps_log_t0 = None
-_gps_log_son = 0.0
-
 
 def _kiyas_guncelle():
     """Her YENI ham pakette Inovasyonlu J'yi besle, gercege hatasini olc."""
-    global _kiyas_idx, _kiyas_son_ham, _gps_son_bozuk, _gps_son_gercek, _gps_son_j
+    global _kiyas_idx, _kiyas_son_ham
     ham = drone.get_target_location()
     if ham == _kiyas_son_ham:
         return
@@ -369,13 +297,6 @@ def _kiyas_guncelle():
         j_e = float(np.linalg.norm(np.array(j_out, float) - gercek))
         _kiyas_j_hata.append(j_e)
 
-    # GPS JSON icin son degerleri sakla (metre): bozuk / gercek / J-filtreli target GPS
-    _gps_son_bozuk  = [round(hx * CM_TO_M, 2), round(hy * CM_TO_M, 2), round(hz * CM_TO_M, 2)]
-    _gps_son_gercek = [round(float(gercek[0]) * CM_TO_M, 2), round(float(gercek[1]) * CM_TO_M, 2),
-                       round(float(gercek[2]) * CM_TO_M, 2)]
-    _gps_son_j = ([round(float(j_out[0]) * CM_TO_M, 2), round(float(j_out[1]) * CM_TO_M, 2),
-                   round(float(j_out[2]) * CM_TO_M, 2)] if j_out is not None else None)
-
     # CSV log (metre): bos sutun = o pakette cikti yok (None/isinma)
     if _kiyas_log_f is not None:
         he = "%.2f" % (ham_e / 100.0)
@@ -385,73 +306,6 @@ def _kiyas_guncelle():
             _kiyas_log_f.flush()
         except Exception:
             pass
-
-
-def _gps_json_yaz():
-    """Saniyede bir: target GPS'in BOZUK / GERCEK / J-FILTRELI hallerini (metre, x/y/z)
-    gps_kayit.json'a yaz. Degerler _kiyas_guncelle'de her pakette guncellenir."""
-    global _gps_log_t0, _gps_log_son
-    if _gps_son_bozuk is None or _gps_son_gercek is None:
-        return                                        # henuz veri / truth yok
-    now = time.time()
-    if _gps_log_t0 is None:
-        _gps_log_t0 = now
-    if now - _gps_log_son < 1.0:                       # saniyede bir ornek
-        return
-    _gps_log_son = now
-    _gps_kayit.append({
-        "t":        round(now - _gps_log_t0, 1),
-        "bozuk":    _gps_son_bozuk,
-        "gercek":   _gps_son_gercek,
-        "filtreli": _gps_son_j,
-    })
-    try:
-        with open(_GPS_JSON, "w", encoding="utf-8") as f:
-            json.dump({
-                "birim": "metre",
-                "eksenler": ["x", "y", "z"],
-                "aciklama": "hedef IHA GPS - bozuk: ham GNSS, gercek: gercek konum, "
-                            "filtreli: Inovasyonlu J (v2) ile temizlenmis",
-                "ornek_sayisi": len(_gps_kayit),
-                "kayitlar": _gps_kayit,
-            }, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def _gorsel_log_yaz():
-    """gorsel_aktif iken IBVS telemetrisini gorsel_log.csv'ye yaz (beyin_lock altinda
-    cagrilir). raw=IBVS ham komut (beyin.g_cmd), cmd=rate-limit SONRASI (beyin.prev).
-    ~25 satirda bir flush."""
-    global _gorsel_log_t0, _gorsel_log_n
-    if _gorsel_log_f is None or not beyin.gorsel_aktif:
-        return
-    now = time.perf_counter()
-    if _gorsel_log_t0 is None:
-        _gorsel_log_t0 = now
-    t = beyin.son_tespit or {}
-    raw = beyin.g_cmd
-    snt = beyin.prev                      # rate-limit SONRASI gonderilen komut
-    try:
-        dz = drone.get_drone_location()[2]
-    except Exception:
-        dz = 0.0
-    try:
-        _gorsel_log_f.write(
-            "%.0f,%s,%d,%.3f,%.1f,%.1f,%+.4f,%+.4f,%.3f,%.3f,"
-            "%+.4f,%+.4f,%+.4f,%+.4f,%+.4f,%+.4f,%+.4f,%+.4f,%d,%d,%.0f\n" % (
-                (now - _gorsel_log_t0) * 1000.0, beyin.durum,
-                1 if beyin.gorsel_aktif else 0, beyin.g_conf,
-                t.get("cx", 0.0), t.get("cy", 0.0), beyin.g_ex, beyin.g_ey,
-                beyin.g_doluluk, beyin.g_gate,
-                snt['thr'], snt['pitch'], snt['roll'], snt['yaw'],
-                raw['thr'], raw['pitch'], raw['roll'], raw['yaw'],
-                beyin.gordu_sayac, beyin.kayip_sayac, dz))
-        _gorsel_log_n += 1
-        if _gorsel_log_n % 25 == 0:
-            _gorsel_log_f.flush()
-    except Exception:
-        pass
 
 
 def _manuel_uygula():
@@ -470,79 +324,86 @@ def _manuel_uygula():
     drone.set_control_surfaces(thr, pit, rol, yaw, True)
 
 
-def inference_dongusu():
-    """Ayri thread (inference hizinda, ~10-30 Hz): mss grab -> YOLO -> Tespit ->
-    overlay -> JPEG; sonucu tespit_lock altinda paylasir. 50 Hz kontrolu BLOKLAMAZ.
-    Kilit sirasi: YOLO(kilitsiz) -> beyin_lock(kisa snapshot) -> overlay(kilitsiz) ->
-    tespit_lock(yaz). Iki kilit ASLA ic ice tutulmaz."""
-    global son_tespit, son_overlay_jpeg
-    while True:
-        if not (CV_OK and inference_aktif and tespit_motoru is not None
-                and tespit_motoru.hazir and drone.is_connected()):
-            time.sleep(0.05)
-            continue
-        # Pencere-yakalama tercih ediliyorsa ve calismyorsa baslatmayi dene
-        if (pencere_yakala_motoru is not None and pencere_yakala_motoru.hazir
-                and not pencere_yakala_motoru.calisiyor()):
-            pencere_yakala_motoru.baslat()
-        try:
-            bgr, w, h = grab_frame_bgr()
-            if bgr is None:                               # oyun penceresi/kare henuz yok -> atla
-                time.sleep(0.05)
-                continue
-            ham = tespit_motoru.tespit_et(bgr)            # KILITSIZ (agir is)
-            ts = time.perf_counter()
-            if ham is not None:
-                x1, y1, x2, y2 = ham["bbox_xyxy"]
-                tespit = {"var": True, "bbox_xyxy": ham["bbox_xyxy"],
-                          "cx": (x1 + x2) * 0.5, "cy": (y1 + y2) * 0.5,
-                          "w": (x2 - x1), "h": (y2 - y1),
-                          "conf": ham["conf"], "tid": ham.get("tid"),
-                          "frame_w": w, "frame_h": h, "ts": ts}
-            else:
-                tespit = {"var": False, "bbox_xyxy": None, "cx": 0.0, "cy": 0.0,
-                          "w": 0.0, "h": 0.0, "conf": 0.0, "tid": None,
-                          "frame_w": w, "frame_h": h, "ts": ts}
-            with beyin_lock:                              # kisa snapshot (overlay icin)
-                dbg = {"durum": beyin.durum, "gorsel_aktif": beyin.gorsel_aktif,
-                       "ex": beyin.g_ex, "ey": beyin.g_ey}
-            overlay_ciz(bgr, tespit, dbg)                 # KILITSIZ
-            ok, enc = cv2.imencode(".jpg", bgr,
-                                   [int(cv2.IMWRITE_JPEG_QUALITY), CAM_JPEG_QUALITY])
-            jpg = enc.tobytes() if ok else None
-            with tespit_lock:
-                son_tespit = tespit
-                if jpg is not None:
-                    son_overlay_jpeg = jpg
-        except Exception:
-            time.sleep(0.02)
-
-
 def kontrol_dongusu():
     while True:
         if drone.is_connected():
             try:
-                # Gorsel Tespit'i beyin_lock DISINDA oku (iki kilit ic ice gecmesin)
-                with tespit_lock:
-                    t_now = son_tespit
                 with beyin_lock:
                     if manuel_aktif:
                         beyin._hedef_temizle()    # J telemetrisi pasif aksin (guduuma dokunmaz)
                         _manuel_uygula()          # klavye komutunu uygula (kontrol)
                     elif gorev_aktif:
-                        beyin.gorsel_guncelle(t_now)  # gorsel temas FSM (giris/cikis)
-                        beyin.adim()              # gorsel_aktif ise IBVS, degilse GPS yaklasma
-                        _gorsel_log_yaz()         # gorsel_aktif iken IBVS CSV
+                        beyin.adim()              # tam kontrol (drone hedefe gider)
                     else:
                         beyin._hedef_temizle()    # sadece J'yi guncelle (olcum)
                         if beyin.debug_olc:
                             beyin._debug_olc()    # ham vs J hatasini olc
                     # Kiyas HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
                     _kiyas_guncelle()             # Inovasyonlu J sapma olcumu (ham vs J)
-                _gps_json_yaz()                   # saniyede bir GPS JSON: bozuk/gercek/filtreli target
             except Exception:
                 pass
         time.sleep(0.02)   # 50 Hz
+
+
+# ----------------------------------------------------------
+#  GORSEL TESPIT (YOLO best.pt) — AYRI thread.
+#  Agir inference beyin_lock DISINDA kosar; sonuc beyin_lock ICINDE beyne yazilir
+#  (kontrol dongusu 50Hz akici kalir). LAZY yukleme: ilk gorev tikinde model
+#  yuklenir (boot yavaslamaz). ultralytics/torch YOKSA hazir=False -> sistem GPS
+#  ile devam eder (gorsel faz sessizce devreye girmez, cokme YOK).
+# ----------------------------------------------------------
+dedektor = None
+_son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock ile korunur)
+
+
+def _normalize_tespit(det):
+    """Dedektor px ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz)."""
+    if det is None:
+        return None
+    W = float(det.get("W", 0) or 0); H = float(det.get("H", 0) or 0)
+    if W <= 1 or H <= 1:
+        return None
+    return {
+        "ex": (det["cx"] - W / 2.0) / (W / 2.0),   # + = hedef SAGDA
+        "ey": (det["cy"] - H / 2.0) / (H / 2.0),   # + = hedef ALTTA
+        "cx": det["cx"] / W, "cy": det["cy"] / H,  # normalize merkez [0..1]
+        "w": det["w"] / W, "h": det["h"] / H,      # normalize bbox boyut [0..1]
+        "conf": float(det.get("conf", 0.0)),
+    }
+
+
+def dedektor_dongusu():
+    global dedektor, _son_tespit_ui
+    from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
+    while True:
+        # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
+        if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
+            time.sleep(0.05)
+            continue
+        if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
+            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN)
+            if dedektor.hazir:
+                print("[GORSEL] best.pt yuklendi (device=%s). Siniflar: %s"
+                      % (dedektor.device, dedektor.names))
+            else:
+                print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
+                      % dedektor.hata)
+        if not dedektor.hazir:
+            time.sleep(1.0)                           # kurulum yok -> CPU yakma
+            continue
+        try:
+            dedektor.conf = float(Cfg.VIS_CONF_MIN)   # canli-tune: predict esigi slider'i izler
+            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
+            # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
+            det = dedektor.tespit_et(bgr) if bgr is not None else None
+        except Exception:
+            bgr, det = None, None
+        with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
+            beyin.set_gorsel_tespit(det)
+            _son_tespit_ui = _normalize_tespit(det)
+        if bgr is None:
+            time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
+        # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
 
 
 # ----------------------------------------------------------
@@ -566,17 +427,21 @@ def build_telemetry():
     drone_spd_ms = dspd * CM_TO_M
     target_spd_ms = tspd * CM_TO_M
 
-    # Avci ile hedef arasindaki 3 boyutlu mesafe (metre)
+    # Avci-hedef 3B mesafe — HAM GPS ile (bozuk). Ekranda gosterilen ana deger budur;
+    # bozuk GPS spoof/sicramasinda ziplayabilir (bu normal, ham veri gostergesi).
     distance_m = ((dx - tx) ** 2 + (dy - ty) ** 2 + (dz - tz) ** 2) ** 0.5
 
     # (Debug) Gercek (bozulmamis) degerler - oyunda debug acikken gelir.
     truth = drone.get_debug_truth()
     debug_info = {"available": bool(truth.get("available"))}
+    gercek_mesafe_m = None                       # avci <-> GERCEK hedef 3B mesafe (debug varsa)
     if debug_info["available"]:
         adx, ady, adz = (c * CM_TO_M for c in truth["drone"]["position"])
         tgx, tgy, tgz = (c * CM_TO_M for c in truth["target"]["position"])
         debug_info["drone_real"] = {"x": adx, "y": ady, "z": adz}
         debug_info["target_real"] = {"x": tgx, "y": tgy, "z": tgz}
+        # GERCEK mesafe: gercek avci konumu <-> gercek hedef konumu (bozulmamis)
+        gercek_mesafe_m = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
         # Hedef HAM GPS ile GERCEK konum arasindaki fark (bozulma miktari, metre)
         debug_info["target_raw_error_m"] = (
             (tx - tgx) ** 2 + (ty - tgy) ** 2 + (tz - tgz) ** 2) ** 0.5
@@ -593,6 +458,10 @@ def build_telemetry():
             float(beyin.son_temiz[0]), float(beyin.son_temiz[1]), float(beyin.son_temiz[2]))
         ham_list = list(beyin.ham_hatalar)
         j_list = list(beyin.j_hatalar)
+        vis_tespit = _son_tespit_ui       # normalize son tespit (dedektor thread yazar)
+        vis_pos = beyin._vis_pos_count
+        vis_lost = beyin._vis_lost_count
+        vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
     j_info = {"durum": j_durum, "hazir": j_temiz is not None}
     if j_temiz is not None:
         j_info["temiz"] = {"x": j_temiz[0] * CM_TO_M,
@@ -625,6 +494,26 @@ def build_telemetry():
         kiyas[ad + "_ornek"] = int(a.size)
     _ozet("j", j_h)
 
+    # (GECICI TANI) kontrolcunun SON gonderdigi dikey/ileri komut -> tani_irtifa.py icin.
+    # Drone davranisini DEGISTIRMEZ; sadece son komutu gosterir. Sorun cozulunce silinebilir.
+    try:
+        _cmd_thr = float(drone._drone.throttle)
+        _cmd_pit = float(drone._drone.pitch)
+    except Exception:
+        _cmd_thr = _cmd_pit = None
+
+    # GORSEL GUDUM durumu + son NORMALIZE tespit (overlay/rozet icin). durum
+    # GORSEL_GUDUM ise GPS yonelimi MIMARI olarak kesilmistir -> index.html
+    # "GPS GUDUMU: KAPALI" rozetini kirmizi yakar.
+    gorsel = {
+        "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
+        "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
+        "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
+        "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
+        "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
+        "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf} (normalize)
+    }
+
     return {
         "connected": connected,
         "drone": {
@@ -633,19 +522,22 @@ def build_telemetry():
             "speed_ms": drone_spd_ms,
             "speed_kmh": drone_spd_ms * MS_TO_KMH,
             "roll": drot[0], "pitch": drot[1], "yaw": drot[2],
+            "cmd_throttle": _cmd_thr, "cmd_pitch": _cmd_pit,
         },
         "target": {
             "x": tx, "y": ty, "z": tz,
             "speed_ms": target_spd_ms,
             "speed_kmh": target_spd_ms * MS_TO_KMH,
         },
-        "distance_m": distance_m,
+        "distance_m": distance_m,               # HAM GPS-avci mesafe (ekrandaki ana deger)
+        "gercek_mesafe_m": gercek_mesafe_m,     # GERCEK GPS-avci mesafe (debug; bozulmamis)
         "debug": debug_info,
         "j": j_info,
         "gorev_aktif": gorev_aktif,
         "manuel_aktif": manuel_aktif,
         "kaynak": j_kaynak,
         "kiyas": kiyas,
+        "gorsel": gorsel,
     }
 
 
@@ -675,14 +567,18 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/telemetry":
             payload = json.dumps(build_telemetry()).encode("utf-8")
             self._send(200, payload, "application/json")
+        elif self.path == "/api/tune":
+            # Mevcut tune parametre degerlerini dondur (slider'lari baslatmak icin).
+            vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
+            self._send(200, json.dumps(vals).encode("utf-8"), "application/json")
         elif self.path.startswith("/api/frame"):
             try:
-                data = fpv_jpeg()                 # overlay'li kare / ham oyun karesi / mss
-                if data is None:
+                jpeg = fpv_jpeg()                 # ham oyun karesi (pencere-icerigi / mss)
+                if jpeg is None:
                     self._send(503, "kare yok (oyun penceresi bekleniyor)".encode("utf-8"),
                                "text/plain; charset=utf-8")
                 else:
-                    self._send(200, data, "image/jpeg")
+                    self._send(200, jpeg, "image/jpeg")
             except Exception as e:
                 self._send(500, ("goruntu hatasi: %s" % e).encode("utf-8"),
                            "text/plain; charset=utf-8")
@@ -690,7 +586,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
     def do_POST(self):
-        global gorev_aktif, manuel_aktif, manuel_son_giris, inference_aktif
+        global gorev_aktif, manuel_aktif, manuel_son_giris
         if self.path == "/api/command":
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length).decode("utf-8") if length else "{}"
@@ -706,15 +602,12 @@ class Handler(BaseHTTPRequestHandler):
                     beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
-                # Gorsel faz: model hazirsa inference thread'i devreye girsin (yoksa saf GPS)
-                inference_aktif = bool(CV_OK and tespit_motoru is not None and tespit_motoru.hazir)
                 _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
                 msg = "GOREV BASLATILDI - kaynak: %s%s" % (
                     _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
             elif cmd == "stop":
                 gorev_aktif = False
                 manuel_aktif = False
-                inference_aktif = False       # gorsel faz dur
                 # Guvenlik: drone'u durdur (motorlari kes -> arm=False)
                 try:
                     drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, False)
@@ -723,7 +616,6 @@ class Handler(BaseHTTPRequestHandler):
                 msg = "GOREV DURDURULDU - drone pasif (motorlar kapali)"
             elif cmd == "manuel_on":
                 gorev_aktif = False           # gorev ve manuel ayni anda olmaz
-                inference_aktif = False       # manuel modda gorsel faz pasif
                 # Tek kilit altinda: durumu kur + arm/hover yolla (50Hz dongu ile
                 # ayni anda TCP'ye yazmayi onler).
                 with beyin_lock:
@@ -749,6 +641,15 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 msg = "MANUEL MOD KAPALI - drone havada sabit (hover)"
+            elif cmd == "vismode":
+                # GUDUM PIPELINE SWITCH (test): OTO | GPS | GORSEL
+                m = str(data.get("mode", "OTO")).upper()
+                with beyin_lock:
+                    ok = beyin.set_vis_mode(m)
+                _aciklama = {"OTO": "otomatik (kilit/geri-donus)",
+                             "GPS": "ZORLA GPS (gorsel kapali)",
+                             "GORSEL": "ZORLA GORSEL (GPS kapali)"}.get(m, "")
+                msg = ("GUDUM MODU: %s - %s" % (m, _aciklama)) if ok else "GECERSIZ mod: %s" % m
             payload = json.dumps({"ok": True, "msg": msg,
                                   "gorev_aktif": gorev_aktif,
                                   "manuel_aktif": manuel_aktif})
@@ -777,6 +678,26 @@ class Handler(BaseHTTPRequestHandler):
                     manuel_kontrol["yaw"] = _eksen(data.get("yaw", 0.0))
                     manuel_son_giris = time.time()
             self._send(200, b'{"ok":true}', "application/json")
+        elif self.path == "/api/tune":
+            # CANLI TUNE: {param, value} -> Cfg.<param> = float(value) (allowlist'te ise).
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+            p = data.get("param", "")
+            ok = False
+            val = None
+            if p in TUNE_ALLOW:
+                try:
+                    val = float(data.get("value"))
+                    setattr(Cfg, p, val)      # atomik (GIL) -> kilit gerekmez
+                    ok = True
+                except Exception:
+                    ok = False
+            self._send(200, json.dumps({"ok": ok, "param": p, "value": val}).encode("utf-8"),
+                       "application/json")
         else:
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
@@ -788,8 +709,8 @@ def main():
     # Arka planda baglanti yoneticisini ve gorev kontrol beynini baslat
     threading.Thread(target=connection_manager, daemon=True).start()
     threading.Thread(target=kontrol_dongusu, daemon=True).start()
-    if CV_OK:
-        threading.Thread(target=inference_dongusu, daemon=True).start()   # gorsel tespit thread'i
+    # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
+    threading.Thread(target=dedektor_dongusu, daemon=True).start()
 
     server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
     print("=" * 52)

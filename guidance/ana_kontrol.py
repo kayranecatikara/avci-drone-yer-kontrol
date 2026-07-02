@@ -47,11 +47,41 @@ KULLANIM (test / web arayuz):
     baslangic degerleridir, kod entegrasyonunda DEGISTIRILMEZ.
 ================================================================================
 """
+import csv
 import math
+import os
 import time
 import numpy as np
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
-from guidance.ibvs_guidance import IBVSGuidance, IBVSConfig     # gorsel faz: duz IBVS guduum
+from guidance.ibvs_guidance import AvciGorselGuduum             # gorsel faz: bbox -> angle-mode (bagimsiz)
+
+# --- UCUS LOGU: dosya dizini + sabit kolon sirasi (arac/analiz_ucus.py isimle okur) ---
+_HERE = os.path.dirname(os.path.abspath(__file__))          # .../guidance
+_PROJ_ROOT = os.path.dirname(_HERE)                         # depo koku
+_VERI_DIR = os.path.join(_PROJ_ROOT, "veri")                # calisma ciktilari (gitignore'lu)
+_LOG_COLS = [
+    # meta
+    "t_perf", "t_wall", "phase", "kaynak", "durum", "handoff", "fresh", "none_count",
+    # drone durumu (cm / derece / rad)
+    "drone_x", "drone_y", "drone_z", "drone_roll", "drone_pitch", "drone_yaw_deg",
+    "drone_yaw_rad", "drone_speed", "vown_x", "vown_y",
+    # hedef (FILTRE): est=2sn lead, anlik=lead'siz, ham=bozuk
+    "est_x", "est_y", "est_z", "z_ref", "xy_anlik_x", "xy_anlik_y", "son_z_anlik",
+    "son_hiz_x", "son_hiz_y", "son_hiz_z", "son_ham_x", "son_ham_y", "son_ham_z",
+    # hedef (GERCEK / truth) + drone truth + gercek mesafe + hedef rotasyon (guvenilmez)
+    "true_tx", "true_ty", "true_tz", "true_dx", "true_dy", "true_dz", "gercek_mesafe",
+    "tgt_roll", "tgt_pitch", "tgt_yaw",
+    # hata / guduum ici
+    "ex", "ey", "ez", "d_h", "e_fwd", "e_right", "vcap", "mag_scale", "alc_oncelik", "ez_int",
+    # terminal vurus (strike)
+    "d_s", "v_close", "vdx", "vdy", "ax", "ay", "a_fwd", "a_right",
+    # yaw & FOV (nose_off_true = burun ile GERCEK hedef arasi aci, DERECE)
+    "bearing", "yaw_err", "nose_off_true",
+    # ham komut (rate-limit ONCESI) vs uygulanan komut (rate-limit SONRASI = self.prev)
+    "thr_raw", "pitch_raw", "roll_raw", "yaw_raw", "thr_cmd", "pitch_cmd", "roll_cmd", "yaw_cmd",
+    # GORSEL GUDUM (VISUAL fazi): normalize bbox-merkez hatasi + gordu/conf/alan
+    "vis_ex", "vis_ey", "vis_gordu", "vis_conf", "vis_area",
+]
 
 
 # ==========================================================
@@ -82,6 +112,27 @@ class Cfg:
     HANDOFF_RANGE = 4000.0      # cm; tespit menziline gore TUNE et (genis tut)
     HANDOFF_EXIT  = 5000.0      # bu mesafenin disina cikinca handoff iptal
 
+    # --- TERMINAL VURUS (yumusak YAKLASMA-CARPMA) — GPS ile CARPMA ---
+    # Carpisma-rotasi: v_des = v_hedef + v_close*LOS. AMA v_close SABIT degil; mesafeyle
+    # ORANTILI ve tavanli: v_close = clamp(KP_CLOSE*d, 0, V_CLOSE). Boylece uzakta hizli
+    # yaklasir, hedefe YAKINDA yavaslar -> hedefi GECMEZ (overshoot yok), yumusak oturur.
+    STRIKE_RANGE = 6000.0       # cm (60 m); bu menzil altinda vurus moduna gec
+    V_CLOSE      = 1200.0       # cm/s (12 m/s) kapanis hizi TAVANI (uzakta)
+    KP_CLOSE     = 0.6          # 1/s; kapanis hizi = KP_CLOSE*mesafe -> yakinda kademeli yavaslar
+    V_CLOSE_MIN  = 700.0        # cm/s (7 m/s) kapanis hizi TABANI (COMMIT/RAM). Eskiden
+                               # v_close temasta 0'a iniyor + hiz-eslemesi drone'u frenliyordu
+                               # -> ~1.3 m'de GERI ATILMA (ucus logu: 16 bounce). Taban ile
+                               # drone hedefin ICINE itmeye devam eder -> delip gecer (hit).
+    KV_STRIKE    = 2.5          # hiz izleme kazanci [1/s] (dusuk -> yumusak; ivme = KV*(v_des-v_own))
+    A_MAX_STRIKE = 9.81 * math.tan(math.radians(35.0)) * 100.0   # ~687 cm/s^2 yatay ivme tavani
+    STRIKE_TILT  = 0.8          # vurus tilt yetkisi (1.0 yerine 0.8 -> daha az agresif)
+    COMMIT_RANGE = 500.0        # cm (5 m); bu menzil altinda YANAL (LOS'a dik) ivmeyi kis ->
+                               # temasta LOS acisal hizi patliyor (log: 7783 deg/s) -> komut
+                               # cilginca donup salinim/burun-kaybi yapiyor. Yakinda hedefe
+                               # DUZ dal (commit), yani kovalamayi birak.
+    VZ_MAX       = 3333.0       # cm/s; oyun max dikey hiz (120 km/h). Terminal 3D-carpmada
+                               # throttle ~ (istenen dikey hiz)/VZ_MAX olceginde kullanilir.
+
     # --- YAKLASMA HIZI PROFILI (overshoot guard) — DEGISTIRME ---
     V_CAP_FAR  = 2500.0         # cm/s uzakta (120km/h = 3333 cm/s'in altinda)
     V_CAP_NEAR = 500.0          # cm/s handoff yakininda
@@ -92,14 +143,25 @@ class Cfg:
     KD_H = 0.00060             # yatay turev -> sonumleme (modest; filtre zaten lead'liyor)
     KP_Z = 0.00040             # irtifa -> throttle
     KD_Z = 0.00100
+    KI_Z = 0.00020             # YENI dikey INTEGRAL: ileri-ucus tasimasi yuzunden P-only
+                               # hedefin ~14 m USTUNDE dengeleniyordu (kalici hata). I terimi
+                               # bu yanliligi zamanla toplayip kapatir -> drone hedef irtifasina
+                               # oturur (sim: 14 m -> ~0). Anti-windup icin band+clamp asagida.
+    INT_Z_BAND = 2500.0        # cm; integrali SADECE |ez|<25 m iken biriktir (tirmanista windup yok)
+    INT_Z_MAX  = 5000.0        # cm; integral clamp (KI_Z*INT_Z_MAX = 1.0 -> tavani asmaz)
     KP_YAW = 1.0               # yaw hatasi (rad) -> yaw komutu
 
     # --- KOMUT TAVANLARI ---
     PITCH_MAX = 0.75
     ROLL_MAX  = 0.75
     THR_UP    = 0.70
-    THR_DN    = -0.40          # nazik alcalma; ASLA -1 (serbest dusus) DEGIL
-    YAW_MAX   = 0.45
+    THR_DN    = -1.00          # DUZELTME: eski -0.40 cok zayifti. Tani verisi: drone hedefin
+                              # ustundeyken THR=-0.40 komutuna RAGMEN +3 m/s tirmanmaya devam
+                              # ediyordu (ileri-ucus tasimasi -0.40'i yeniyor). Tam inme yetkisi
+                              # gerekli; PD sadece cok yukaridayken -1'e gider, hedefe yakinda 0'a doner.
+    YAW_MAX   = 0.30           # burnu (kamerayi) hedefe donuk tutar. Eski salinim ram/orbit
+                               # kaynakliydi; yumusak yaklasma-carpma (kademeli kapanis) o sorunu
+                               # kaldirdigindan 0.30 guvenli: burun daha iyi takip eder, salinmaz.
 
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
@@ -119,12 +181,37 @@ class Cfg:
     # ez, thr, hiz, pitch. Sorun cozulunce False yap.
     DEBUG_Z = True
 
-    # --- GORSEL GUDUM (IBVS) FSM — tik @50Hz, inference-kare dedup edilir ---
-    GORSEL_GIRIS_N  = 5      # N ardisik GECERLI tespit -> GORSEL_GUDUM (gorsel temas)
-    GORSEL_KAYIP_M  = 15     # M ardisik kayip -> kayip dogrulandi
-    GORSEL_HOLD_S   = 0.50   # kayip sonrasi son gorsel komutu kisa sure koru (sn)
-    GORSEL_CONF_MIN = 0.65   # gecerli tespit icin min confidence (HUD-yazi sahte-pozitifini eler)
-    GORSEL_LOST_S   = 0.60   # inference STALL emniyeti (M'in duvar-saati karsiligi)
+    # --- UCUS LOGU (davranis teshisi) ---
+    # True iken adim() HER kontrol-tikini (~50 Hz) zengin bir CSV'ye yazar
+    # (ucus_log_<zaman>.csv). analiz_ucus.py bunu okuyup geri-cekilme / salinim /
+    # gorsel-temas-kaybi teshisi yapar. Yarismada/uretimde False yap.
+    LOG_ENABLE = True
+
+    # --- GORSEL GUDUM (DUZ IBVS) — gorsel temas SONRASI yonelim (YALNIZCA kamera) ---
+    # Kilit: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec
+    # ve BIR DAHA GPS'e donme (yarisma kurali). Isaret/gain'ler CANLI tune ile
+    # kalibre edilir (once tek eksen: yaw<-ex, sonra throttle<-ey, en son ileri).
+    VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "best.pt")
+    VIS_CONF_MIN     = 0.45     # kilit/komut icin asgari guven
+    VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
+    VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
+    VIS_DEADRECKON_S = 0.5      # kayipta son EMA yonuyle KISA kor-devam, sonra hover
+    VIS_LOST_TO_GPS_S = 1.0     # kayip bu sureyi asarsa GPS guduumune GERI DON (yeniden yaklas +
+                               # gorseli yeniden kilitle). 0 = asla donme (eski "hover sonsuza"
+                               # davranisi). Sure _vis_lost_count ile olculur -> son gorusten
+                               # itibaren ~ (VIS_STALE_S + bu) toplam kayipta GPS'e doner.
+    VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
+    # Isaretler (SIM'de kalibre et: komut hatayi AZALTMALI; artiriyorsa isareti ters cevir)
+    VIS_SIGN_YAW     = +1.0     # ex>0 (hedef SAGDA) -> burnu hedefe cevir
+    VIS_SIGN_VZ      = -1.0     # ey>0 (hedef ALTTA) -> ALCAL (throttle<0). Ters cikarsa +1.0
+    VIS_SIGN_PITCH   = +1.0     # ileri yaklasma +pitch (Cfg.PITCH_SIGN ile ayni mantik)
+    # Kazanclar / kapilar
+    VIS_K_YAW        = 0.5      # yatay ortalama kazanci (yaw = SIGN*K*ex)
+    VIS_K_VZ         = 0.5      # dikey ortalama kazanci (throttle = SIGN*K*ey)
+    VIS_K_FWD        = 0.4      # ileri yaklasma kazanci (merkez-kapisi ACIKKEN)
+    VIS_FWD_MAX      = 0.5      # ileri (pitch) komut tavani
+    VIS_CENTER_GATE  = 0.35     # |ex|,|ey| bu esigin ALTINDA ise ILERI'ye izin ver (once ortala)
+    VIS_AREA_STOP    = 0.20     # bbox alan orani buna yaklasinca ileri hizi 0'a iner (yakin -> yavasla)
 
 
 # ==========================================================
@@ -179,6 +266,7 @@ class AvciKontrol:
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
         self.son_z_anlik = None         # J'nin ANLIK (lead'siz) irtifa kestirimi (cm) - DIKEY icin
+        self.son_xy_anlik = None        # J'nin ANLIK (lead'siz) yatay konumu (cm) - terminal vurus LOS'u
         self.son_hiz = None             # J'nin kestirdigi hedef hizi (cm/s, 3B) - olcum/ileri kullanim
         self._fresh = False             # bu tik J'den YENI gecerli kestirim geldi mi?
 
@@ -187,38 +275,40 @@ class AvciKontrol:
         self.e_prev = None
         self.t_prev = None
         self.de = [0.0, 0.0, 0.0]       # EMA-filtreli hata turevi (cm/s)
+        self._ez_int = 0.0              # dikey INTEGRAL birikimi (cm*s) - kalici irtifa hatasini kapatir
+        # kendi YATAY hiz vektoru (temiz konum sonlu-fark, EMA) - terminal vurus icin
+        self._own_pxy = None            # onceki kendi yatay konum (cm)
+        self._own_tv = None             # onceki olcum zamani
+        self._own_v = np.zeros(2)       # kendi yatay hiz (cm/s, dunya)
+        # GERCEK modda hedef hizi (truth konum sonlu-fark) - carpisma-rotasi icin
+        self._gt_prev_p = None          # onceki truth hedef konum (cm)
+        self._gt_prev_t = None
+        self._gt_vel = np.zeros(3)      # hedef hizi (cm/s, 3B)
         self.none_count = 0
         self.last_est = None
         self.handoff = False
         self.handoff_announced = False
         self._kalkis_done = (not Cfg.TAKEOFF)
 
-        # --- GORSEL GUDUM (IBVS) durumu — gorsel temas sonrasi devralir ---
-        # Isaretler mevcut (kalibreli) GPS guduminden miras; SIGN_THR=-Z_SIGN (goruntu
-        # y-asagi terslemesi). SIGN_YAW SDK'da belgesiz -> ilk ucusta dogrula.
-        self.gorsel = IBVSGuidance(IBVSConfig(
-            SIGN_PITCH=Cfg.PITCH_SIGN, SIGN_ROLL=Cfg.ROLL_SIGN,
-            SIGN_THR=-Cfg.Z_SIGN, SIGN_YAW=+1.0))
-        self.gorsel_aktif   = False     # True iken adim() GPS YONELIM blogunu (382-436) ATLAR
-        self.son_tespit     = None      # son GECERLI tespit (dict)
-        self.gordu_sayac    = 0         # ardisik gecerli inference karesi
-        self.kayip_sayac    = 0         # ardisik kayip inference karesi
-        self.kayip_hold_t0  = None      # kayip-hold baslangici (perf_counter)
-        self._son_tespit_ts = None      # inference-kare dedup (ayni kareyi 2x sayma)
-        self._t_son_gecerli = 0.0       # son gecerli tespit zamani (perf_counter)
-        self._komut_ts      = None      # son IBVS hesabinin tespit ts'i (coast tespiti)
-        self.son_gorsel_komut = None    # son IBVS komutu (coast icin)
-        # overlay/CSV debug alanlari (server bunlari beyin_lock ile okur):
-        self.g_ex = 0.0; self.g_ey = 0.0
-        self.g_doluluk = 0.0; self.g_gate = 0.0
-        self.g_conf = 0.0
-        self.g_cmd = {'thr': 0.0, 'pitch': 0.0, 'roll': 0.0, 'yaw': 0.0}
-
         # debug olcum birikimi
         self.debug_olc = debug_olc
         self.ham_hatalar = []
         self.j_hatalar = []
         self.bozukluk_sayac = {}
+
+        # ucus logu (Cfg.LOG_ENABLE) - lazy-open, uzunca zaman-damgali dosya
+        self._log_f = None
+        self._log_w = None
+
+        # --- GORSEL GUDUM (IBVS) durumu ---
+        # son_tespit: server.dedektor_dongusu'nin beyin_lock icinde yazdigi son bbox dict.
+        self.son_tespit = None          # {cx,cy,w,h,conf,W,H,t} | None
+        self.son_tespit_t = None        # o tespitin perf_counter zamani (bayatlik kontrolu)
+        self._vis_pos_count = 0         # ardisik gecerli-tespit (kilit histerezisi)
+        self._vis_lost_count = 0        # ardisik kayip (kor-devam -> hover karari)
+        self._vis_ilan = False          # "GPS kesildi" anonsu bir kez basilsin
+        self.ibvs = AvciGorselGuduum()  # bbox -> angle-mode komut (bagimsiz modul, canli-tune)
+        self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
 
     # ----------------------------------------------------------------
     #  Guduum kaynagini CANLI degistir (v2/Gercek butonlari)
@@ -231,6 +321,7 @@ class AvciKontrol:
         self.filtre = _filtre_uret(kaynak)
         self.son_ham = None                 # yeni filtre taze beslensin
         self.son_z_anlik = None
+        self.son_xy_anlik = None
         self.son_hiz = None
         self._fresh = False
         # FAZ-1 durumunu sifirla: komutlar 0'dan rate-limit'lensin, turev/handoff temiz.
@@ -238,22 +329,30 @@ class AvciKontrol:
         self.e_prev = None
         self.t_prev = None
         self.de = [0.0, 0.0, 0.0]
+        self._ez_int = 0.0              # dikey integrali taze baslat
+        self._own_pxy = None            # kendi yatay hiz kestirimini taze baslat
+        self._own_tv = None
+        self._own_v = np.zeros(2)
         self.none_count = 0
         self.last_est = None
         self.handoff = False
         self.handoff_announced = False
         self.durum = "ARAMA"
         self._kalkis_done = (not Cfg.TAKEOFF)
-        # GORSEL GUDUM bayraklarini da sifirla (kaynak degisimi = soft-restart)
-        self.gorsel_aktif = False
+        # GORSEL GUDUM: yeni gorev -> gorsel kilit/kor-devam durumunu da taze basla
         self.son_tespit = None
-        self.gordu_sayac = 0
-        self.kayip_sayac = 0
-        self.kayip_hold_t0 = None
-        self._son_tespit_ts = None
-        self._komut_ts = None
-        self.son_gorsel_komut = None
-        self.gorsel.reset()
+        self.son_tespit_t = None
+        self._vis_pos_count = 0
+        self._vis_lost_count = 0
+        self._vis_ilan = False
+        self.ibvs.sifirla()
+        # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
+        # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
+        # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
+        if self._log_f is not None:
+            try: self._log_f.close()
+            except Exception: pass
+            self._log_f = self._log_w = None
 
     # ----------------------------------------------------------------
     #  J: bozuk hedef konumu temizle (sadece YENI telemetri gelince).
@@ -266,12 +365,14 @@ class AvciKontrol:
             self.son_ham = self.drone.get_target_location()   # debug olcumu icin tut
             dbg = self.drone.get_debug_truth()
             if dbg.get("available"):
-                self.son_temiz = np.array(dbg["target"]["position"], float)
-                self.son_z_anlik = float(self.son_temiz[2])   # gercekte lead yok -> ayni z
-                self._fresh = True
+                p = np.array(dbg["target"]["position"], float)
+                self.son_temiz = p
+                self.son_z_anlik = float(p[2])                # gercekte lead yok -> ayni z
+                self.son_xy_anlik = np.array([p[0], p[1]], float)  # carpisma-rotasi LOS'u icin
+                self.son_hiz = self._gercek_hedef_hiz(p)      # hedef hizi (truth sonlu-fark)
+                self._fresh = True                            # -> terminal vurus GERCEK modda da acilir
             else:
                 self._fresh = False
-            self.son_hiz = None               # gercek modda lead yok (saf pursuit)
             return self.son_temiz
 
         ham = self.drone.get_target_location()
@@ -288,9 +389,13 @@ class AvciKontrol:
                 if durum is None:
                     self.son_hiz = None
                     self.son_z_anlik = float(self.son_temiz[2])   # fallback
+                    self.son_xy_anlik = None
                 else:
                     self.son_hiz = np.array(durum["vel"], float)
                     self.son_z_anlik = float(durum["pos"][2])     # lead'siz anlik irtifa
+                    # lead'siz ANLIK yatay konum -> terminal vurus (carpisma-rotasi) LOS'u
+                    # bunu kullanir; lead son_temiz'de degil, hedef hizini eslemede otomatik.
+                    self.son_xy_anlik = np.array([durum["pos"][0], durum["pos"][1]], float)
             else:
                 self._fresh = False           # isinma/donma -> kestirim yok
         else:
@@ -336,6 +441,42 @@ class AvciKontrol:
         return self.de
 
     # ----------------------------------------------------------------
+    #  Kendi YATAY hiz vektoru (cm/s, dunya): temiz konum sonlu-fark + EMA.
+    #  Terminal vurus (carpisma-rotasi) hiz-izleme icin kullanir.
+    # ----------------------------------------------------------------
+    def _own_hiz(self, pxy, t):
+        if self._own_pxy is None or self._own_tv is None:
+            self._own_pxy = pxy.copy(); self._own_tv = t
+            return self._own_v
+        dt = t - self._own_tv
+        if 1e-3 < dt < 0.5:
+            raw = (pxy - self._own_pxy) / dt
+            self._own_v = 0.7 * self._own_v + 0.3 * raw
+            self._own_pxy = pxy.copy(); self._own_tv = t
+        elif dt >= 0.5:                                # bayat -> resetle
+            self._own_pxy = pxy.copy(); self._own_tv = t
+        return self._own_v
+
+    # ----------------------------------------------------------------
+    #  GERCEK modda hedef hizi (cm/s, 3B): truth konum sonlu-fark + EMA.
+    #  Carpisma-rotasi (v_des = v_hedef + V_CLOSE*LOS) icin gerekli; truth temiz
+    #  oldugundan sonlu-fark guvenli.
+    # ----------------------------------------------------------------
+    def _gercek_hedef_hiz(self, p):
+        now = time.perf_counter()
+        if self._gt_prev_p is None or self._gt_prev_t is None:
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+            return self._gt_vel
+        dt = now - self._gt_prev_t
+        if 1e-3 < dt < 0.5:
+            raw = (p - self._gt_prev_p) / dt
+            self._gt_vel = 0.7 * self._gt_vel + 0.3 * raw
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+        elif dt >= 0.5:
+            self._gt_prev_p = p.copy(); self._gt_prev_t = now
+        return self._gt_vel
+
+    # ----------------------------------------------------------------
     #  Komut gonder (rate-limit + atomik set_control_surfaces)
     # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
@@ -346,99 +487,175 @@ class AvciKontrol:
         self.prev = {'thr': thr, 'pitch': pitch, 'roll': roll, 'yaw': yaw}
         self.drone.set_control_surfaces(thr, pitch, roll, yaw, True)
 
+    # ----------------------------------------------------------------
+    #  UCUS LOGU: her tik zengin teshis satiri (Cfg.LOG_ENABLE). Lazy-open,
+    #  zaman-damgali dosya. Truth + drone/hedef rotasyon + nose_off_true burada
+    #  hesaplanir (loglama modu; her tik birkac SDK cagrisi kabul edilir).
+    #  d: cagri yerinden gelen alanlar (+ 'drone_pos','drone_yaw' -> nose_off_true icin).
+    # ----------------------------------------------------------------
+    def _log(self, phase, d):
+        if not Cfg.LOG_ENABLE:
+            return
+        if self._log_f is None:                                  # ilk yazim -> dosya ac
+            os.makedirs(_VERI_DIR, exist_ok=True)                # ciktilar veri/ altina
+            fn = time.strftime("ucus_log_%Y%m%d_%H%M%S.csv")
+            self._log_f = open(os.path.join(_VERI_DIR, fn), "w", newline="", encoding="utf-8")
+            self._log_w = csv.writer(self._log_f)
+            self._log_w.writerow(_LOG_COLS)
+            self._log_f.flush()
+        # --- truth + rotasyonlar (guvenli; hata olursa alan bos kalir) ---
+        try:
+            rot = self.drone.get_drone_rotation()
+            d["drone_roll"], d["drone_pitch"] = float(rot[0]), float(rot[1])
+        except Exception:
+            pass
+        try:
+            trot = self.drone.get_target_rotation()             # ANA (bozuk) akis - guvenilmez
+            d["tgt_roll"], d["tgt_pitch"], d["tgt_yaw"] = float(trot[0]), float(trot[1]), float(trot[2])
+        except Exception:
+            pass
+        try:
+            dbg = self.drone.get_debug_truth()
+            if dbg.get("available"):
+                tp = dbg["target"]["position"]; dp = dbg["drone"]["position"]
+                d["true_tx"], d["true_ty"], d["true_tz"] = float(tp[0]), float(tp[1]), float(tp[2])
+                d["true_dx"], d["true_dy"], d["true_dz"] = float(dp[0]), float(dp[1]), float(dp[2])
+                d["gercek_mesafe"] = math.sqrt((tp[0]-dp[0])**2 + (tp[1]-dp[1])**2 + (tp[2]-dp[2])**2)
+                dpos = d.get("drone_pos"); dyaw = d.get("drone_yaw")
+                if dpos is not None and dyaw is not None:        # burun ile GERCEK hedef acisi (deg)
+                    d["nose_off_true"] = math.degrees(
+                        wrap_pi(math.atan2(tp[1] - dpos[1], tp[0] - dpos[0]) - dyaw))
+        except Exception:
+            pass
+        d["phase"] = phase
+        d["t_wall"] = time.time()
+
+        def _c(x):
+            if x is None:
+                return ""
+            if isinstance(x, (float, np.floating)):
+                return round(float(x), 4)
+            return x
+        self._log_w.writerow([_c(d.get(k)) for k in _LOG_COLS])
+        self._log_f.flush()
+
+    def _log_early(self, phase, t, drone_pos, yaw_m, drone_yaw, v_own):
+        # Erken-donus tikleri (TAKEOFF/DROPOUT/WARMUP): sadece meta+drone+uygulanan komut.
+        if not Cfg.LOG_ENABLE:
+            return
+        self._log(phase, {
+            "t_perf": t, "kaynak": self.kaynak, "none_count": self.none_count,
+            "drone_x": drone_pos[0], "drone_y": drone_pos[1], "drone_z": drone_pos[2],
+            "drone_yaw_deg": yaw_m, "drone_yaw_rad": drone_yaw,
+            "vown_x": v_own[0], "vown_y": v_own[1],
+            "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
+            "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
+            "drone_pos": drone_pos, "drone_yaw": drone_yaw,
+        })
+
     def _loiter(self):
         # dropout / veri yok: agresifligi kes, hover (thr=0 -> irtifa korunur), seviyelen
         self._send(0.0, 0.0, 0.0, 0.0)
 
     # ----------------------------------------------------------------
-    #  GORSEL GUDUM (IBVS) — gorsel temas FSM'i + komut adimi
-    #  >>> Yarisma kurali: gorsel temas SONRASI yonelim icin GPS KULLANILMAZ.
-    #      gorsel_aktif True iken adim() GPS YONELIM blogunu (382-436) ATLAR.
+    #  GORSEL TESPIT KOPRUSU (thread-guvenli): server.dedektor_dongusu AGIR YOLO
+    #  inference'i beyin_lock DISINDA kosar, sonucu beyin_lock ICINDE buraya yazar;
+    #  adim() ayni kilit altinda _gorsel_tespit_oku ile okur -> inference tik'ten
+    #  DECOUPLE (kontrol dongusu 50Hz akici kalir).
+    #  det: {cx,cy,w,h,conf,W,H,t} | None  (gorsel_tespit.HedefDedektor.tespit_et)
     # ----------------------------------------------------------------
-    def _faz1_turev_sifirla(self):
-        """Gorsel moddan GPS yaklasmaya donerken FAZ-1 turev/None state'ini temizle
-        (prev'e DOKUNMA -> komut rate-limit surekliligi korunur)."""
-        self.e_prev = None
-        self.t_prev = None
-        self.de = [0.0, 0.0, 0.0]
-        self.none_count = 0
+    # ----------------------------------------------------------------
+    #  GUDUM PIPELINE SWITCH (test icin): hangi yol aktif?
+    #    "OTO"    -> otomatik: N_LOCK tespitte gorsel kilitlenir, kayipta GPS'e doner
+    #    "GPS"    -> ZORLA GPS: gorsel yol kapali (gorseldeysen GPS'e doner)
+    #    "GORSEL" -> ZORLA GORSEL: kilidi atla, hemen gorsel; kayipta GPS'e DONMEZ
+    # ----------------------------------------------------------------
+    def set_vis_mode(self, mode):
+        m = str(mode).upper()
+        if m not in ("OTO", "GPS", "GORSEL"):
+            return False
+        self.vis_mode = m
+        self._vis_pos_count = 0          # switch -> gorsel kilit/EMA temiz baslasin
+        self._vis_lost_count = 0
+        self._vis_ilan = False
+        self.ibvs.sifirla()
+        return True
 
-    def gorsel_guncelle(self, tespit):
-        """server kontrol dongusunden HER tikte (adim oncesi) cagrilir; giris/cikis
-        FSM'ini surer. Sayaclar INFERENCE-KARESI basina ilerler (ts-dedup): 50 Hz tik
-        ayni kareyi tekrar gorur; tik-sayimi 'N ardisik' anlamini ve tek-kare yanlis-
-        pozitif korumasini bozardi."""
-        now = time.perf_counter()
-        yeni_kare = (tespit is not None and tespit.get('ts') != self._son_tespit_ts)
-        if yeni_kare:
-            self._son_tespit_ts = tespit.get('ts')
-            gecerli = bool(tespit.get('var')) and tespit.get('conf', 0.0) >= Cfg.GORSEL_CONF_MIN
-            if gecerli:
-                self.gordu_sayac += 1
-                self.kayip_sayac = 0
-                self.son_tespit = tespit
-                self._t_son_gecerli = now
-                self.g_conf = float(tespit.get('conf', 0.0))
-            else:
-                self.kayip_sayac += 1
-                self.gordu_sayac = 0
+    def set_gorsel_tespit(self, det):
+        if det is not None:
+            self.son_tespit = det
+            self.son_tespit_t = det.get("t", time.perf_counter())
+        # det None ise ESKI tespiti SILME: tek bos kare kilidi dusurmesin. Bayatlik
+        # (VIS_STALE_S) _oku'da elenir; kayip histerezisini _vis_lost_count yonetir.
 
-        if not self.gorsel_aktif:
-            # GIRIS: N ardisik gecerli inference karesi -> GORSEL_GUDUM
-            if self.gordu_sayac >= Cfg.GORSEL_GIRIS_N and self.son_tespit is not None:
-                self.gorsel_aktif = True
-                self.durum = "GORSEL_GUDUM"
-                self.kayip_hold_t0 = None
-                self._komut_ts = None
-                self.son_gorsel_komut = None
-                self.gorsel.reset(self.son_tespit.get('cx'), self.son_tespit.get('cy'))
-                print("[GORSEL] gorsel temas (%d kare, conf=%.2f) -> GORSEL_GUDUM. "
-                      "GPS YONELIMI KAPALI." % (Cfg.GORSEL_GIRIS_N, self.g_conf))
-        else:
-            # KAYIP: M ardisik kayip VEYA inference stall -> kisa hold -> ARAMA
-            kayip = (self.kayip_sayac >= Cfg.GORSEL_KAYIP_M
-                     or (now - self._t_son_gecerli) >= Cfg.GORSEL_LOST_S)
-            if kayip:
-                if self.kayip_hold_t0 is None:
-                    self.kayip_hold_t0 = now                  # son gorsel komutu kisa sure koru
-                elif (now - self.kayip_hold_t0) >= Cfg.GORSEL_HOLD_S:
-                    self.gorsel_aktif = False                 # CIK -> ARAMA (GPS yeniden-yaklasma)
-                    self.durum = "ARAMA"
-                    self.gordu_sayac = 0
-                    self.kayip_hold_t0 = None
-                    self._faz1_turev_sifirla()                # re-approach temiz baslasin
-                    print("[GORSEL] hedef kayip (hold %.2fs doldu) -> ARAMA "
-                          "(GPS yeniden-yaklasma)." % Cfg.GORSEL_HOLD_S)
-            else:
-                self.kayip_hold_t0 = None                      # yeniden temas -> hold iptal
+    def _gorsel_tespit_oku(self):
+        """Bayat-olmayan son tespiti dondur; yoksa/bayatsa None (kayip mantigi devreye girer)."""
+        det = self.son_tespit
+        if det is None or self.son_tespit_t is None:
+            return None
+        if (time.perf_counter() - self.son_tespit_t) > Cfg.VIS_STALE_S:
+            return None
+        return det
 
-    def _ibvs_adim(self):
-        """GORSEL_GUDUM komut adimi (adim() icinden, gorsel_aktif iken cagrilir).
-        gorsel.update YALNIZ yeni tespit ts'inde cagrilir (EMA inference hizinda
-        ilerlesin); bayat tikte son komut COAST edilir. Her tik _send ile gonderilir
-        (rate-limit korunur)."""
-        t = self.son_tespit
-        if t is not None and t.get('ts') != self._komut_ts:
-            ts = t.get('ts')
-            if self._komut_ts is None or not isinstance(ts, (int, float)):
-                dt = Cfg.DT
-            else:
-                dt = ts - self._komut_ts
-                if dt < 1e-3:
-                    dt = Cfg.DT
-            out = self.gorsel.update(t['cx'], t['cy'], t['frame_w'], t['frame_h'],
-                                     t['w'], t['h'], dt)
-            self._komut_ts = ts
-            self.son_gorsel_komut = {'thr': out['throttle'], 'pitch': out['pitch'],
-                                     'roll': out['roll'], 'yaw': out['yaw']}
-            self.g_ex = out['ex']; self.g_ey = out['ey']
-            self.g_doluluk = out['doluluk']; self.g_gate = out['gate']
-            self.g_cmd = dict(self.son_gorsel_komut)
-        if self.son_gorsel_komut is None:
-            self._loiter()                  # emniyet (normalde giris N tespit garanti eder)
+    # ----------------------------------------------------------------
+    #  GORSEL_GUDUM logu (phase="VISUAL"): meta+drone+uygulanan komut + normalize
+    #  gorsel hata (vis_ex/ey), gordu/conf/area. _LOG_COLS'daki vis_* kolonlarini
+    #  doldurur; digerleri bos kalir (sema-guvenli; analiz_ucus.py etkilenmez).
+    # ----------------------------------------------------------------
+    def _log_gorsel(self, t, drone_pos, yaw_m, drone_yaw, v_own, tespit):
+        if not Cfg.LOG_ENABLE:
             return
-        k = self.son_gorsel_komut
-        self._send(k['thr'], k['pitch'], k['roll'], k['yaw'])   # coast: ayni hedefi tekrar gonder
+        d = {
+            "t_perf": t, "kaynak": self.kaynak, "durum": self.durum,
+            "none_count": self.none_count,
+            "drone_x": drone_pos[0], "drone_y": drone_pos[1], "drone_z": drone_pos[2],
+            "drone_yaw_deg": yaw_m, "drone_yaw_rad": drone_yaw,
+            "vown_x": v_own[0], "vown_y": v_own[1],
+            "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
+            "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
+            "drone_pos": drone_pos, "drone_yaw": drone_yaw,
+            "vis_ex": self.ibvs.ex_f, "vis_ey": self.ibvs.ey_f,
+            "vis_gordu": 1 if tespit is not None else 0,
+        }
+        if tespit is not None:
+            d["vis_conf"] = float(tespit.get("conf", 0.0))
+            W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
+            if W > 1 and H > 1:
+                d["vis_area"] = (float(tespit["w"]) * float(tespit["h"])) / (W * H)
+        self._log("VISUAL", d)
+
+    # ----------------------------------------------------------------
+    #  GORSEL GUDUM (DUZ IBVS) — YONELIM YALNIZCA KAMERADAN.
+    #  Gorsel temas VARKEN GPS/filtre YONELIMI KULLANILMAZ (yarisma kurali).
+    #  tespit VAR -> ibvs.hesapla(bbox merkezi -> angle-mode komut).
+    #  tespit YOK -> KADEMELI: (1) VIS_DEADRECKON_S kor-devam, (2) VIS_LOST_TO_GPS_S'e
+    #  kadar hover (ararken bekle), (3) o da asilirsa GPS guduumune GERI DON (re-acquire)
+    #  -> durumu ARAMA yap, gorsel kilidi sifirla, None dondur (adim() GPS yoluna duser).
+    #  return: (throttle,pitch,roll,yaw) | None (=GPS'e don). _send rate-limit'ler.
+    # ----------------------------------------------------------------
+    def _gorsel_guduum(self, tespit, t, revert_izin=True):
+        # revert_izin=False (manuel GORSEL switch): kayipta GPS'e DONME, hover'da kal.
+        if tespit is not None:
+            self._vis_lost_count = 0
+            bbox_merkez = (tespit["cx"], tespit["cy"])
+            bbox_boyut  = (tespit["w"], tespit["h"])
+            return self.ibvs.hesapla(bbox_merkez, tespit["W"], tespit["H"],
+                                     bbox_boyut, Cfg, dt=Cfg.DT)
+        # --- KAYIP: kademeli tepki ---
+        self._vis_lost_count += 1
+        lost_s = self._vis_lost_count * Cfg.DT
+        if lost_s <= Cfg.VIS_DEADRECKON_S:
+            return self.ibvs.kor_devam(Cfg)      # 1) son EMA yonuyle KISA kor-devam
+        if (not revert_izin) or Cfg.VIS_LOST_TO_GPS_S <= 0 or lost_s <= Cfg.VIS_LOST_TO_GPS_S:
+            return 0.0, 0.0, 0.0, 0.0            # 2) hover: ararken bekle (manuel GORSEL'de KAL)
+        # 3) UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
+        print("[GORSEL] Hedef %.1fs kayip -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)
+        self.durum = "ARAMA"
+        self._vis_pos_count = 0
+        self._vis_lost_count = 0
+        self._vis_ilan = False
+        self.ibvs.sifirla()
+        return None                              # -> adim() GPS yoluna DUSER (bu tik)
 
     # ----------------------------------------------------------------
     #  Debug olcum: J gercekten ham'dan iyi mi?
@@ -462,6 +679,7 @@ class AvciKontrol:
         yaw_m = self.drone.get_drone_rotation()[2]
         drone_yaw = math.radians(yaw_m) if Cfg.ROT_IN_DEGREES else yaw_m
         t = time.perf_counter()
+        v_own = self._own_hiz(drone_pos[:2], t)                 # kendi yatay hiz (cm/s, dunya)
 
         # 1) J ile bozuk hedefi temizle (self._fresh: yeni kestirim geldi mi?)
         self._hedef_temizle()
@@ -473,14 +691,49 @@ class AvciKontrol:
                 self._kalkis_done = True
             else:
                 self._send(Cfg.TAKEOFF_THR, 0.0, 0.0, 0.0)      # tirman, seviye
+                self._log_early("TAKEOFF", t, drone_pos, yaw_m, drone_yaw, v_own)
                 return
 
-        # 2.5) GORSEL GUDUM: gorsel temas varsa IBVS DEVRALIR ve GPS YONELIM blogu
-        #      (382-436) mimari olarak KESILIR. Yarisma kurali: gorsel temas sonrasi
-        #      yonelim GPS'ten DEGIL goruntuden (bbox merkezi) uretilir.
-        if self.gorsel_aktif:
-            self._ibvs_adim()
-            return
+        # 2.5) GUDUM PIPELINE SECIMI (switch: self.vis_mode) + GORSEL kesme.
+        #      OTO   : conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL'e kilitlenir;
+        #              kayip VIS_LOST_TO_GPS_S'i asarsa GPS'e geri doner (re-acquire).
+        #      GPS   : gorsel yol KAPALI (gorseldeysen GPS'e doner) -> hep GPS.
+        #      GORSEL: kilidi ATLA, hemen GORSEL; kayipta GPS'e DONME (zorlanmis).
+        #      GORSEL kilitliyken asagidaki TUM GPS yonelimi ATLANIR (return) -> gorsel
+        #      temas VARKEN GPS yonelimi kullanilmaz. _send prev surekliligi -> sarsintisiz.
+        tespit = self._gorsel_tespit_oku()
+        mod = getattr(self, "vis_mode", "OTO")
+        if mod == "GPS":
+            if self.durum == "GORSEL_GUDUM":              # manuel: gorselden GPS'e don
+                self.durum = "ARAMA"; self._vis_ilan = False
+            self._vis_pos_count = 0
+        elif mod == "GORSEL":
+            if self.durum != "GORSEL_GUDUM":              # manuel: hemen gorsel (kilit sayaci yok)
+                self.durum = "GORSEL_GUDUM"; self._vis_lost_count = 0
+                if not self._vis_ilan:
+                    print("[GORSEL] Manuel switch -> GORSEL GUDUM (GPS yonelimi kapali).")
+                    self._vis_ilan = True
+        else:  # OTO — otomatik kilit histerezisi
+            if self.durum != "GORSEL_GUDUM":
+                if tespit is not None and float(tespit.get("conf", 0.0)) >= Cfg.VIS_CONF_MIN:
+                    self._vis_pos_count += 1
+                else:
+                    self._vis_pos_count = 0
+                if self._vis_pos_count >= Cfg.VIS_N_LOCK:
+                    self.durum = "GORSEL_GUDUM"
+                    if not self._vis_ilan:
+                        print("[GORSEL] Gorsel temas KILITLENDI -> GPS GUDUMU KESILDI "
+                              "(yonelim yalnizca kamera).")
+                        self._vis_ilan = True
+
+        if self.durum == "GORSEL_GUDUM":
+            sonuc = self._gorsel_guduum(tespit, t, revert_izin=(mod == "OTO"))
+            if sonuc is not None:
+                thr, pitch, roll, yaw = sonuc
+                self._send(thr, pitch, roll, yaw)
+                self._log_gorsel(t, drone_pos, yaw_m, drone_yaw, v_own, tespit)
+                return
+            # sonuc None (yalnizca OTO) -> gorsel UZUN kayip -> GPS yolu BU tik calisir
 
         # 3) None yonetimi: normal donmus kare (hold) vs dropout (loiter)
         if not self._fresh:
@@ -489,6 +742,7 @@ class AvciKontrol:
                 est = self.son_temiz                            # son 2sn-lead kestirimi tut
             else:
                 self._loiter()                                  # uzun None -> dropout -> bekle
+                self._log_early("DROPOUT", t, drone_pos, yaw_m, drone_yaw, v_own)
                 return
         else:
             self.none_count = 0
@@ -496,6 +750,7 @@ class AvciKontrol:
 
         if est is None:                                          # isinma: henuz kestirim yok
             self._loiter()
+            self._log_early("WARMUP", t, drone_pos, yaw_m, drone_yaw, v_own)
             return
         self.last_est = est
 
@@ -506,6 +761,12 @@ class AvciKontrol:
         ey = float(est[1] - drone_pos[1])
         ez = float(z_ref - drone_pos[2])
         d_h = math.hypot(ex, ey)
+
+        # ZORUNLU None-init (ucus logu icin): strike/alc bloklari calismazsa bile bu
+        # degiskenler 559'daki log dict'inde referanslanir -> NameError'i onle (yoksa
+        # beyin_lock'taki try/except o log satirini sessizce yutar).
+        ex_s = ey_s = d_s = ux = uy = v_close = vdx = vdy = ax = ay = a_fwd = a_right = None
+        alc_oncelik = None
 
         # 4) HANDOFF (histerezisli) -> durum: ARAMA / KILIT
         if not self.handoff and d_h < Cfg.HANDOFF_RANGE:
@@ -536,9 +797,27 @@ class AvciKontrol:
         pitch_raw = clamp(pitch_raw, -Cfg.PITCH_MAX, Cfg.PITCH_MAX) * mag_scale
         roll_raw  = clamp(roll_raw,  -Cfg.ROLL_MAX,  Cfg.ROLL_MAX)  * mag_scale
 
-        # 8) irtifa (PD) — Z_SIGN ile dikey yon duzeltmesi (THR_DN/THR_UP duzeltilmis cercevede:
-        #    nazik alcalma -0.40, daha guclu tirmanma +0.70). KP_Z/KD_Z DEGISMEZ.
-        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KP_Z * ez + Cfg.KD_Z * de[2]), Cfg.THR_DN, Cfg.THR_UP)
+        # 7b) DIKEY-YATAY AYRISTIRMA DUZELTMESI (tani verisiyle kanitlandi):
+        #     Drone hedefin irtifasini ASTIGINDA (ez<0) hizli ileri-ucus YUKARI TASIMA
+        #     uretip alcalmayi engelliyordu (THR=-0.40'a ragmen +3 m/s tirmanis). Cozum:
+        #     ne kadar ustteyse kovalamayi (pitch/roll) o kadar KIS -> tasima dussun ->
+        #     drone alcalabilsin. Hedef irtifasina donunce tam kovalama geri gelir.
+        if ez < 0.0:
+            alc_oncelik = clamp(1.0 + ez / 800.0, 0.15, 1.0)   # ez=-8 m'de %15'e iner
+            pitch_raw *= alc_oncelik
+            roll_raw  *= alc_oncelik
+
+        # 8) irtifa (PID) — Z_SIGN ile dikey yon. P: KP_Z*ez, I: kalici acigi kapatir
+        #    (ileri-ucus tasimasina karsi ~14 m ustte dengelenmeyi onler), D: KD_Z*de[2].
+        #    KP_Z/KD_Z DEGISMEZ; THR_DN=-1.0 tam inme yetkisi.
+        #    Anti-windup: integrali sadece hedefe MAKUL yakinken (|ez|<band) biriktir ve
+        #    clamp'le; uzaktayken (tirmanis) sifirla ki windup olmasin.
+        if abs(ez) < Cfg.INT_Z_BAND:
+            self._ez_int = clamp(self._ez_int + ez * Cfg.DT, -Cfg.INT_Z_MAX, Cfg.INT_Z_MAX)
+        else:
+            self._ez_int = 0.0
+        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KP_Z * ez + Cfg.KI_Z * self._ez_int + Cfg.KD_Z * de[2]),
+                        Cfg.THR_DN, Cfg.THR_UP)
 
         # 9) yaw: nazikce burnu hedefe cevir (handoff'ta kamera ortalansin)
         bearing = math.atan2(ey, ex)
@@ -549,6 +828,43 @@ class AvciKontrol:
         if d_h < Cfg.POS_DEADBAND:
             pitch_raw = 0.0
             roll_raw = 0.0
+
+        # 10b) TERMINAL VURUS (COMMIT / RAM) — hedefin ICINE dal, delip GEC (hit).
+        #      v_des = v_hedef + v_close*LOS.  v_close = clamp(KP_CLOSE*d, V_CLOSE_MIN, V_CLOSE):
+        #      uzakta hizli, YAKINDA TABAN'da (V_CLOSE_MIN) kalir -> temasta 0'a inmez, drone
+        #      hedefin icine itmeye devam eder (GERI ATILMA yok). Hedef hizini esledigimiz
+        #      icin lead OTOMATIK. ivme = KV*(v_des - v_own). Cok yakinda (d_s<COMMIT_RANGE)
+        #      YANAL (LOS'a dik) ivme kisilir -> LOS singula rite salinimi kovalanmaz, DUZ dalinir.
+        if d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None and self.son_xy_anlik is not None:
+            # LOS = lead'siz ANLIK hedefe (carpisma icin gercek yon; lead son_temiz'de DEGIL).
+            ex_s = float(self.son_xy_anlik[0] - drone_pos[0])
+            ey_s = float(self.son_xy_anlik[1] - drone_pos[1])
+            d_s = math.hypot(ex_s, ey_s)
+            ux, uy = ex_s / max(d_s, 1e-6), ey_s / max(d_s, 1e-6)      # LOS birim (dunya)
+            v_close = clamp(Cfg.KP_CLOSE * d_s, Cfg.V_CLOSE_MIN, Cfg.V_CLOSE)  # TABAN'li -> ram
+            vdx = float(self.son_hiz[0]) + v_close * ux               # istenen hiz (cm/s, dunya)
+            vdy = float(self.son_hiz[1]) + v_close * uy
+            # 3D CARPMA (DIKEY): hedefin uzerinden/altindan GECMESIN -> mevcut irtifa-PID'ine
+            # dikey KAPANIS feedforward'u EKLE (PID'i ezme -> pozisyon+lift telafisi korunur).
+            # ez=dikey hata, d3d=3B mesafe, losz=LOS dikey bileseni. hedefin dikey hizini esle
+            # (son_hiz_z) + v_close*losz ile dikeyi yatayla SENKRON kapat. throttle olcegi: /VZ_MAX.
+            d3d = math.hypot(d_s, ez)
+            losz = ez / max(d3d, 1e-6)
+            thr_ff = (float(self.son_hiz[2]) + v_close * losz) / Cfg.VZ_MAX
+            thr_raw = clamp(thr_raw + Cfg.Z_SIGN * thr_ff, Cfg.THR_DN, Cfg.THR_UP)
+            ax = Cfg.KV_STRIKE * (vdx - float(v_own[0]))               # ivme = KV*(v_des - v_own)
+            ay = Cfg.KV_STRIKE * (vdy - float(v_own[1]))
+            if d_s < Cfg.COMMIT_RANGE:                                 # COMMIT: yanal ivmeyi kis
+                along = ax * ux + ay * uy                              # LOS boyunca (ram) bilesen
+                kperp = clamp(d_s / Cfg.COMMIT_RANGE, 0.25, 1.0)       # temasta %25'e iner
+                ax = along * ux + (ax - along * ux) * kperp
+                ay = along * uy + (ay - along * uy) * kperp
+            am = math.hypot(ax, ay)
+            if am > Cfg.A_MAX_STRIKE:                                  # TOPLAM ivme tavani
+                ax *= Cfg.A_MAX_STRIKE / am; ay *= Cfg.A_MAX_STRIKE / am
+            a_fwd, a_right = world_to_body(ax, ay, drone_yaw)          # dunya -> govde
+            pitch_raw = Cfg.PITCH_SIGN * clamp(a_fwd  / Cfg.A_MAX_STRIKE, -1.0, 1.0) * Cfg.STRIKE_TILT
+            roll_raw  = Cfg.ROLL_SIGN  * clamp(a_right / Cfg.A_MAX_STRIKE, -1.0, 1.0) * Cfg.STRIKE_TILT
 
         # --- TESHIS: irtifa kacma sorununu olcmek icin (Cfg.DEBUG_Z=False ile kapat) ---
         if Cfg.DEBUG_Z:
@@ -570,6 +886,38 @@ class AvciKontrol:
             self.handoff_announced = True
 
         self._send(thr_raw, pitch_raw, roll_raw, yaw_raw)
+
+        # --- UCUS LOGU: ana yol (APPROACH/STRIKE) tam teshis satiri ---
+        if Cfg.LOG_ENABLE:
+            mod = "STRIKE" if (d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None
+                               and self.son_xy_anlik is not None) else "APPROACH"
+            sh = self.son_hiz; sx = self.son_xy_anlik; sm = self.son_ham
+            self._log(mod, {
+                "t_perf": t, "kaynak": self.kaynak, "durum": self.durum,
+                "handoff": int(self.handoff), "fresh": int(self._fresh), "none_count": self.none_count,
+                "drone_x": drone_pos[0], "drone_y": drone_pos[1], "drone_z": drone_pos[2],
+                "drone_yaw_deg": yaw_m, "drone_yaw_rad": drone_yaw, "drone_speed": spd,
+                "vown_x": v_own[0], "vown_y": v_own[1],
+                "est_x": est[0], "est_y": est[1], "est_z": est[2], "z_ref": z_ref,
+                "xy_anlik_x": (sx[0] if sx is not None else None),
+                "xy_anlik_y": (sx[1] if sx is not None else None),
+                "son_z_anlik": self.son_z_anlik,
+                "son_hiz_x": (sh[0] if sh is not None else None),
+                "son_hiz_y": (sh[1] if sh is not None else None),
+                "son_hiz_z": (sh[2] if sh is not None else None),
+                "son_ham_x": (sm[0] if sm is not None else None),
+                "son_ham_y": (sm[1] if sm is not None else None),
+                "son_ham_z": (sm[2] if sm is not None else None),
+                "ex": ex, "ey": ey, "ez": ez, "d_h": d_h, "e_fwd": e_fwd, "e_right": e_right,
+                "vcap": vcap, "mag_scale": mag_scale, "alc_oncelik": alc_oncelik, "ez_int": self._ez_int,
+                "d_s": d_s, "v_close": v_close, "vdx": vdx, "vdy": vdy, "ax": ax, "ay": ay,
+                "a_fwd": a_fwd, "a_right": a_right,
+                "bearing": bearing, "yaw_err": yaw_err,
+                "thr_raw": thr_raw, "pitch_raw": pitch_raw, "roll_raw": roll_raw, "yaw_raw": yaw_raw,
+                "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
+                "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
+                "drone_pos": drone_pos, "drone_yaw": drone_yaw,   # _log: truth + nose_off_true icin
+            })
 
     # ----------------------------------------------------------------
     #  Gercek oyun ana donguusu

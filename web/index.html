@@ -53,6 +53,31 @@
     box-shadow:inset 0 0 0 1px var(--accent)}
   .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
 
+  /* ---- Canli Tune paneli (slider'lar) ---- */
+  .tune-panel{background:var(--panel2);border:1px solid var(--accent);
+    border-radius:8px;padding:10px 12px;margin:-2px 0 10px;max-height:52vh;overflow-y:auto}
+  .tune-panel .tnote{font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4}
+  .tune-grp{font-size:10px;letter-spacing:1px;color:var(--accent);margin:10px 0 4px;
+    text-transform:uppercase;border-top:1px solid var(--border);padding-top:6px}
+  .tune-row{margin-bottom:7px}
+  .tune-row .trlab{font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
+  .tune-row .trlab b{color:var(--text);font-family:Consolas,monospace}
+  .tune-row input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:18px;margin-top:2px}
+
+  /* ---- Güdüm pipeline switch (test: OTO / GPS / GÖRSEL) ---- */
+  .gudum-switch{margin:2px 0 10px}
+  .gudum-switch .gs-label{font-size:10px;letter-spacing:1px;color:var(--muted);
+    text-transform:uppercase;margin-bottom:5px}
+  .gudum-switch .gs-btns{display:flex;gap:6px}
+  .gs-btn{flex:1;padding:8px 4px;background:var(--panel);color:var(--muted);
+    border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;
+    cursor:pointer;transition:.12s}
+  .gs-btn:hover{border-color:var(--accent);color:var(--text)}
+  .gs-btn.active{background:#13202b;border-color:var(--accent);color:var(--accent);
+    box-shadow:inset 0 0 0 1px var(--accent)}
+  .gs-btn.gorsel.active{background:#211b10;border-color:var(--warn);color:var(--warn);
+    box-shadow:inset 0 0 0 1px var(--warn)}
+
   /* ---- Manuel mod paneli (klavye + hiz slideri) ---- */
   .manuel-panel{background:var(--panel2);border:1px solid var(--accent);
     border-radius:8px;padding:12px 14px;margin:-2px 0 10px}
@@ -91,13 +116,13 @@
   #view{flex:1;display:flex;align-items:center;justify-content:center;
     background:#06080c;border-radius:8px;position:relative;overflow:hidden}
   #view img{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
+  /* FPV overlay: goruntu uzerine bbox/merkez/durum/GPS rozeti cizen saydam katman */
+  #view canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;
+    pointer-events:none;display:none;z-index:2}
   #view .ph{text-align:center;color:var(--muted);display:flex;flex-direction:column;
     align-items:center;gap:16px;padding:20px}
   #view .ph .big{font-size:46px;opacity:.5}
   #view .ph .sub{font-size:13px;line-height:1.6}
-  .sharebtn{padding:12px 22px;background:var(--accent);color:#04241c;border:none;
-    border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}
-  .sharebtn:hover{filter:brightness(1.1);transform:translateY(-1px)}
 
   /* ---- Sağ panel: telemetri ---- */
   .card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
@@ -137,6 +162,28 @@
         <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
+        <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
+
+        <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
+        <div class="gudum-switch">
+          <div class="gs-label">🔀 Güdüm Pipeline (test)</div>
+          <div class="gs-btns">
+            <button id="gm_OTO" class="gs-btn active" onclick="visMode('OTO')">OTO</button>
+            <button id="gm_GPS" class="gs-btn" onclick="visMode('GPS')">GPS</button>
+            <button id="gm_GORSEL" class="gs-btn gorsel" onclick="visMode('GORSEL')">GÖRSEL</button>
+          </div>
+        </div>
+
+        <!-- CANLI TUNE paneli: slider'lar Cfg'yi aninda degistirir (server restart YOK) -->
+        <div id="tunePanel" class="tune-panel" style="display:none">
+          <div class="tnote"><b>Sırayla 1→6 dene.</b> Bir slider'ı oynat → drone <b>anında</b> tepki verir.
+            Kötüleşirse geri al. İyi olunca <b>Değerleri Yazdır</b> ile kopyala, Cfg'ye yapıştır.
+            (Not: değişiklikler server kapanınca sıfırlanır — kalıcı olması için yapıştırman şart.)</div>
+          <div id="tuneList"></div>
+          <button class="btn" style="margin-top:8px" onclick="tuneYazdir()">📋 Değerleri Yazdır</button>
+          <pre id="tuneDump" style="display:none;white-space:pre-wrap;font-size:11px;color:var(--accent);
+            background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px"></pre>
+        </div>
 
         <!-- Manuel mod paneli: butona basinca acilir -->
         <div id="manuelPanel" class="manuel-panel" style="display:none">
@@ -171,10 +218,11 @@
       <div class="body" style="padding:12px">
         <div id="view">
           <img id="cam" alt="FPV">
+          <canvas id="overlay"></canvas>
           <div class="ph" id="camPh">
             <div class="big">🛰️</div>
-            <div class="sub">Sunucudan oyun görüntüsü (mss) bekleniyor…<br>
-            Oyun penceresi <b>açık ve görünür</b> değilse görüntü gelmeyebilir.</div>
+            <div class="sub">Sunucudan oyun görüntüsü bekleniyor…<br>
+            Simülatör açılınca görüntü <b>otomatik</b> gelir (pencere seçmek gerekmez).</div>
           </div>
         </div>
       </div>
@@ -223,8 +271,10 @@
         </div>
 
         <div class="dist">
-          <div class="k">AVCI — HEDEF MESAFE</div>
+          <div class="k">HAM GPS — AVCI MESAFE</div>
           <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+          <div class="k" style="margin-top:10px">GERÇEK GPS — AVCI MESAFE</div>
+          <div class="v mono" style="font-size:20px;color:var(--muted)"><span id="dist_gercek">—</span> <small>m</small></div>
         </div>
       </div>
     </section>
@@ -245,6 +295,20 @@
       const d = await r.json();
       $("leftStatus").textContent = d.msg || "Komut gönderildi";
     }catch(e){ $("leftStatus").textContent = "Komut gönderilemedi (sunucu kapalı?)"; }
+  }
+
+  // GÜDÜM PIPELINE SWITCH (test): OTO | GPS | GÖRSEL — hangi yol aktif olsun?
+  let visModeSecili = "OTO";
+  function visMode(m){
+    visModeSecili = m;                 // anında UI'ı yansıt (telemetri de doğrulayacak)
+    vurgulaVisMode(m);
+    fetch("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({cmd:"vismode",mode:m})})
+      .then(r=>r.json()).then(d=>{ $("leftStatus").textContent = d.msg || ("Güdüm: "+m); })
+      .catch(()=>{ $("leftStatus").textContent = "Mod gönderilemedi (sunucu kapalı?)"; });
+  }
+  function vurgulaVisMode(m){
+    for(const k of ["OTO","GPS","GORSEL"]) $("gm_"+k).classList.toggle("active", k===m);
   }
 
   // =====================================================================
@@ -335,6 +399,64 @@
   function gercekTest(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
   function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
 
+  // ===== CANLI TUNE: slider'lar Cfg'yi ANINDA degistirir (server restart YOK) =====
+  const TUNE_DEFS = [
+    ["VURUS AYARLARI (sadece gerekli olanlar)", [
+      ["V_CLOSE_MIN","1) Carpma gucu / ram   (dusuk=yanasip durur, yuksek=deler gecer)",0,1500,50],
+      ["KV_STRIKE","2) Tepki sertligi   (dusur=daha yumusak, az salinim)",0.5,5.0,0.1],
+      ["STRIKE_TILT","3) Agresiflik   (dusur=daha yumusak)",0.2,1.0,0.05],
+      ["COMMIT_RANGE","4) Yakinda duz-dalma mesafesi (cm)   (artir=erken duz dalar, az salinim)",100,2000,100],
+      ["YAW_MAX","5) Burun donus hizi   (artir=kamera hedefte kalir)",0.05,0.60,0.05],
+      ["MAX_DELTA","6) Komut yumusakligi   (dusur=yumusak, artir=hizli/sert tepki)",0.02,0.30,0.01],
+    ]],
+    ["GÖRSEL GÜDÜM AYARLARI (görsel temas sonrası — yalnızca kamera)", [
+      ["VIS_SIGN_YAW","Yön: burun sağ/sol   (hedef ters yöne kaçıyorsa −1/+1 çevir)",-1,1,2],
+      ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
+      ["VIS_SIGN_VZ","Yön: irtifa yukarı/aşağı   (ters ortalıyorsa çevir)",-1,1,2],
+      ["VIS_K_VZ","Dikey ortalama gücü   (artır=hızlı irtifa düzeltir)",0,1.5,0.05],
+      ["VIS_K_FWD","İleri yaklaşma hızı   (artır=hızlı dalar, önce ortala)",0,1.0,0.05],
+      ["VIS_CENTER_GATE","İleri için ortalama toleransı   (büyük=erken yaklaşır)",0.1,0.8,0.05],
+      ["VIS_AREA_STOP","Durma yakınlığı (bbox alan oranı)   (küçük=daha uzakta yavaşlar)",0.05,0.6,0.01],
+      ["VIS_CONF_MIN","Tespit güven eşiği   (artır=az yanlış tespit, geç kilit)",0.10,0.90,0.05],
+      ["VIS_EMA","Titreşim yumuşatma   (küçük=pürüzsüz ama yavaş)",0.10,1.0,0.05],
+    ]],
+  ];
+  let tuneAcik=false;
+  function tuneFmt(v,st){ v=Number(v); return st<0.001? v.toFixed(5) : (st<0.1? v.toFixed(2) : v.toFixed(0)); }
+  async function tuneKur(){
+    let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
+    const list=$("tuneList"); list.innerHTML="";
+    for(const [grp,rows] of TUNE_DEFS){
+      const g=document.createElement("div"); g.className="tune-grp"; g.textContent=grp; list.appendChild(g);
+      for(const [key,lab,mn,mx,st] of rows){
+        const val=(key in cur && cur[key]!=null)? cur[key] : mn;
+        const row=document.createElement("div"); row.className="tune-row";
+        row.innerHTML='<div class="trlab"><span>'+lab+'</span><b id="tv_'+key+'">'+tuneFmt(val,st)+'</b></div>'+
+          '<input type="range" id="ts_'+key+'" min="'+mn+'" max="'+mx+'" step="'+st+'" value="'+val+'">';
+        list.appendChild(row);
+        const sl=row.querySelector("#ts_"+key);
+        sl.addEventListener("input",()=>{ $("tv_"+key).textContent=tuneFmt(sl.value,st); tuneSet(key,sl.value); });
+      }
+    }
+  }
+  function tuneSet(key,value){
+    fetch("/api/tune",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({param:key,value:parseFloat(value)})}).catch(()=>{});
+  }
+  function tuneTogle(){
+    tuneAcik=!tuneAcik;
+    $("tunePanel").style.display=tuneAcik?"block":"none";
+    $("tuneBtn").classList.toggle("active",tuneAcik);
+    if(tuneAcik) tuneKur();               // her acilista guncel Cfg degerlerini cek
+  }
+  async function tuneYazdir(){
+    let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
+    let s="    # --- Tune ile bulunan degerler (ana_kontrol.py Cfg'ye yapistir) ---\n";
+    for(const [,rows] of TUNE_DEFS)
+      for(const [key,,,,st] of rows) if(key in cur && cur[key]!=null) s+="    "+key+" = "+tuneFmt(cur[key],st)+"\n";
+    const d=$("tuneDump"); d.style.display="block"; d.textContent=s;
+  }
+
   // Hız slideri: anlık olarak çarpanı güncelle ve komutu tazele
   (function(){
     const sl = $("hizSlider"), lab = $("hizVal");
@@ -355,8 +477,58 @@
 
   const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
   const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
-  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist"]
+  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist","dist_gercek"]
                     .forEach(id=>$(id).textContent="—");
+
+  // ---- FPV overlay: bbox + merkez + durum + "GPS GÜDÜMÜ" rozeti (telemetriden cizilir) ----
+  // Normalize koordinat (cx,cy,w,h ∈ [0,1]) kullanildigindan cozunurluk onemsiz; video
+  // object-fit:contain oldugundan letterbox icerik dikdortgeni hesaplanir.
+  function _icerikRect(el){
+    const cw=el.clientWidth, ch=el.clientHeight, vw=el.naturalWidth, vh=el.naturalHeight;
+    if(!vw||!vh) return {x:0,y:0,w:cw,h:ch};
+    const s=Math.min(cw/vw, ch/vh), w=vw*s, h=vh*s;
+    return {x:(cw-w)/2, y:(ch-h)/2, w:w, h:h};
+  }
+  function drawOverlay(gs){
+    const ov=$("overlay"), camEl=$("cam");
+    if(!ov || !camEl) return;
+    const cw=ov.clientWidth, ch=ov.clientHeight;
+    if(ov.width!==cw)  ov.width=cw;                 // cizim tamponunu ekrana esitle (bulanikligi onler)
+    if(ov.height!==ch) ov.height=ch;
+    const ctx=ov.getContext("2d"); ctx.clearRect(0,0,cw,ch);
+    if(camEl.style.display!=="block" || !gs) return; // paylasim yoksa / veri yoksa temiz birak
+    const rc=_icerikRect(camEl);
+    const mcx=rc.x+rc.w/2, mcy=rc.y+rc.h/2;
+    ctx.strokeStyle="rgba(120,200,255,.7)"; ctx.lineWidth=1.5;      // goruntu merkezi +
+    ctx.beginPath(); ctx.moveTo(mcx-12,mcy); ctx.lineTo(mcx+12,mcy);
+    ctx.moveTo(mcx,mcy-12); ctx.lineTo(mcx,mcy+12); ctx.stroke();
+    const det=gs.tespit;
+    if(det){
+      const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
+      ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2.5;                // bbox
+      ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
+      ctx.fillStyle="#25e0a0"; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
+      ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // merkez -> hedef sapma cizgisi
+      ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke();
+      ctx.font="12px monospace"; ctx.fillStyle="#cfe";
+      ctx.fillText("ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+
+                   "  conf="+Number(det.conf).toFixed(2), bx-bw/2, by-bh/2-6);
+    }
+    ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
+    const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
+    const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
+    ctx.fillText("DURUM: "+dur+modTxt, rc.x+10, rc.y+22);
+    if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
+      ctx.fillStyle="#8aa"; ctx.fillText("KİLİT: "+(gs.pos_count||0)+"/"+gs.n_lock, rc.x+10, rc.y+40);
+    }
+    const kapali=!!gs.gps_kesildi;                                  // GPS rozeti (sag-ust)
+    const bt = kapali ? "GPS GÜDÜMÜ: KAPALI" : "GPS GÜDÜMÜ: AÇIK";
+    const tw=ctx.measureText(bt).width, pad=8;
+    const rx=rc.x+rc.w-tw-2*pad-10, ry=rc.y+10;
+    ctx.fillStyle = kapali ? "rgba(220,40,40,.9)" : "rgba(20,140,90,.85)";
+    ctx.fillRect(rx, ry, tw+2*pad, 24);
+    ctx.fillStyle="#fff"; ctx.fillText(bt, rx+pad, ry+17);
+  }
 
   let lastOk = 0;
   async function tick(){
@@ -388,6 +560,8 @@
       $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
+      // GERCEK GPS-avci mesafe (debug truth varsa; yoksa "—")
+      $("dist_gercek").textContent = (t.gercek_mesafe_m != null) ? f1(t.gercek_mesafe_m) : "—";
 
       // 🔎 İrtifa / Z teşhis — Gerçek GPS modunda drone neden inmiyor?
       // Güdüm dikey komutu: throttle ≈ (Hedef Z gerçek − Drone Z). + → tırman, − → alçal.
@@ -415,30 +589,36 @@
             : f1(ort)+' <small>m · kötü '+f1(mx)+'</small>';
       $("kHam").innerHTML = ky.ham_ort_m!=null ? f1(ky.ham_ort_m)+' <small>m</small>' : "—";
       $("kJ").innerHTML   = kfmt(ky.j_ort_m, ky.j_max_m);
+
+      if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i gerçek moda eşitle
+      drawOverlay(t.gorsel);   // FPV overlay: bbox/merkez/durum/GPS rozeti
     }catch(e){
       setConn("bad"); dash();
+      drawOverlay(null);       // hata: overlay'i temizle
     }
   }
   setInterval(tick, 200);
   tick();
 
-  // ---- Canlı görüntü: SUNUCU TARAFI FPV (/api/frame — mss kare + gömülü overlay) ----
-  // Sunucu oyun penceresini kendi yakalar; getDisplayMedia/pencere seçimi GEREKMEZ.
-  // Onload-zincirli pump: her kare yüklenince bir sonrakini ister -> FPV hızı sunucuya
-  // doğal throttle (~30 fps tavan). Overlay (bbox, merkez, "GPS GÜDÜMÜ: KAPALI", ex/ey)
-  // sunucu tarafında kareye GÖMÜLÜ gelir.
+  // ---- Canlı görüntü: SUNUCU TARAFI FPV (/api/frame — pencere seçmek GEREKMEZ) ----
+  // Sunucu oyun penceresinin İÇERİĞİNİ kendisi yakalar (windows-capture; oyun arkada
+  // olsa bile doğru kare). Onload-zincirli pompa: her kare yüklenince bir sonrakini
+  // ister (~30 fps tavan). Overlay (bbox/rozet) telemetriden canvas'a çizilir.
   const cam = $("cam"), camPh = $("camPh");
-  let fpvAcik = true;
-  function fpvSonraki(){ if(fpvAcik) cam.src = "/api/frame?t=" + Date.now(); }
+  function fpvSonraki(){ cam.src = "/api/frame?t=" + Date.now(); }
   cam.onload = ()=>{
-    cam.style.display = "block"; camPh.style.display = "none";
-    if(fpvAcik) setTimeout(fpvSonraki, 33);            // ~30 fps tavan
+    cam.style.display = "block";
+    $("overlay").style.display = "block";       // FPV overlay katmanini ac
+    camPh.style.display = "none";
+    setTimeout(fpvSonraki, 33);                 // ~30 fps tavan
   };
   cam.onerror = ()=>{
-    cam.style.display = "none"; camPh.style.display = "flex";
-    setTimeout(fpvSonraki, 600);                        // oyun/sunucu yoksa yeniden dene
+    cam.style.display = "none";
+    $("overlay").style.display = "none";
+    camPh.style.display = "flex";
+    setTimeout(fpvSonraki, 600);                // oyun/sunucu yoksa yeniden dene
   };
-  fpvSonraki();                                         // otomatik başla
+  fpvSonraki();                                 // otomatik başla (buton yok)
 </script>
 </body>
 </html>

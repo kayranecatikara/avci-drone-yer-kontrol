@@ -23,9 +23,10 @@ import time
 
 import numpy as np
 
-HERE = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))            # .../arac
+VERI_DIR = os.path.join(os.path.dirname(HERE), "veri")       # ucus loglari artik veri/ altinda
 
-# --- Kontrolcu sabitleri (ana_kontrol.py Cfg ile ayni; teshis esikleri) ---
+# --- Kontrolcu sabitleri (guidance/ana_kontrol.py Cfg ile ayni; teshis esikleri) ---
 FOV_HALF_DEG = 65.77        # KAMERA_FOV_YARIM (131.54/2)
 KAMERA_MENZIL_CM = 5000.0   # 50 m
 STRIKE_RANGE_CM = 6000.0
@@ -41,8 +42,12 @@ EPS = 1e-9
 
 
 def en_yeni_log():
-    fs = sorted(glob.glob(os.path.join(HERE, "ucus_log_*.csv")))
-    return fs[-1] if fs else None
+    # once veri/ (yeni duzen), yoksa arac/ ve depo koku (eski duz-yapi loglari)
+    for d in (VERI_DIR, HERE, os.path.dirname(HERE)):
+        fs = sorted(glob.glob(os.path.join(d, "ucus_log_*.csv")))
+        if fs:
+            return fs[-1]
+    return None
 
 
 def yukle(path):
@@ -291,7 +296,8 @@ def analiz(path):
                  max_nose_off=float(np.nanmax(nose_abs)))
 
     # ================= METRIK SATIRI =================
-    mfile = os.path.join(HERE, "ucus_metrikler.csv")
+    os.makedirs(VERI_DIR, exist_ok=True)
+    mfile = os.path.join(VERI_DIR, "ucus_metrikler.csv")
     yeni = not os.path.exists(mfile)
     with open(mfile, "a", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
