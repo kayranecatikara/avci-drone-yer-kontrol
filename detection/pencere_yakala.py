@@ -136,48 +136,58 @@ class PencereYakala:
                       "gorunur pencere yok). Oyun acik ve PLAY modunda mi? -> server mss'e duser.")
             return False
 
-        # Once hwnd ile (en saglam) dene; olmazsa pencere adiyla dene.
-        cap = None
-        denemeler = []
+        # Hedef (hwnd en saglam, sonra pencere adi) x yakalama ayarlari kombinasyonlari.
+        # Bazi Windows surumlerinde (orn. Win10 LTSC 19044) 'capture border' / 'cursor'
+        # API'leri YOK -> bunlara False gecirmek OTURUMU patlatir. Once istedigimiz
+        # ayarlar, olmazsa ayarlara HIC dokunmayan (None=varsayilan) kombinasyon.
+        hedefler = []
         if hwnd:
-            denemeler.append(("hwnd", dict(window_hwnd=int(hwnd))))
+            hedefler.append(("hwnd", dict(window_hwnd=int(hwnd))))
         if ad:
-            denemeler.append(("ad", dict(window_name=ad)))
-        for yontem, kw in denemeler:
-            try:
-                cap = self._WindowsCapture(cursor_capture=False, draw_border=False, **kw)
-                break
-            except Exception as e:
-                print("[PENCERE_YAKALA] capture olusturulamadi (%s=%r): %s" % (yontem, ad or hwnd, e))
-                cap = None
-        if cap is None:
-            return False
+            hedefler.append(("ad", dict(window_name=ad)))
+        ayar_setleri = [dict(cursor_capture=False, draw_border=False),
+                        dict(cursor_capture=None, draw_border=None)]
+        son_hata = None
+        for yontem, hkw in hedefler:
+            for akw in ayar_setleri:
+                try:
+                    cap = self._WindowsCapture(**dict(akw, **hkw))
+                except Exception as e:
+                    son_hata = "olusturma(%s): %s" % (yontem, e)
+                    continue
 
-        @cap.event
-        def on_frame_arrived(frame, capture_control):
-            try:
-                bgr = np.ascontiguousarray(frame.convert_to_bgr().frame_buffer)
-                with self._lock:
-                    self._latest = bgr
-            except Exception:
-                pass
+                @cap.event
+                def on_frame_arrived(frame, capture_control):
+                    try:
+                        bgr = np.ascontiguousarray(frame.convert_to_bgr().frame_buffer)
+                        with self._lock:
+                            self._latest = bgr
+                    except Exception:
+                        pass
 
-        @cap.event
-        def on_closed():
-            # Pencere kapandi: kareyi temizle ve restart edilebilmesi icin control'u birak.
-            with self._lock:
-                self._latest = None
-            self._control = None
+                @cap.event
+                def on_closed():
+                    # Pencere kapandi: kareyi temizle; control birakilir -> restart edilebilir.
+                    with self._lock:
+                        self._latest = None
+                    self._control = None
 
-        try:
-            self._control = cap.start_free_threaded()
-        except Exception as e:
-            print("[PENCERE_YAKALA] start_free_threaded hatasi: %s" % e)
-            self._control = None
-            return False
-        self.aktif_pencere = ad if ad else ("hwnd:%s" % hwnd)
-        print("[PENCERE_YAKALA] yakalama basladi: %s" % self.aktif_pencere)
-        return True
+                try:
+                    self._control = cap.start_free_threaded()
+                    self.aktif_pencere = ad if ad else ("hwnd:%s" % hwnd)
+                    print("[PENCERE_YAKALA] yakalama basladi: %s" % self.aktif_pencere)
+                    return True
+                except Exception as e:
+                    son_hata = "baslatma(%s): %s" % (yontem, e)
+                    self._control = None
+
+        # Tum kombinasyonlar basarisiz: ~10 sn'de bir raporla (2 sn'lik retry SPAM'i yok).
+        import time as _t
+        simdi = _t.monotonic()
+        if simdi - getattr(self, "_son_uyari_t", 0.0) > 10.0:
+            self._son_uyari_t = simdi
+            print("[PENCERE_YAKALA] baslatilamadi (%s) -> mss fallback." % son_hata)
+        return False
 
     def durdur(self):
         c = self._control

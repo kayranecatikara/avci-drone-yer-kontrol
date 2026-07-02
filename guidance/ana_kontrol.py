@@ -172,9 +172,13 @@ class Cfg:
     YAW_DEADBAND = math.radians(3)
 
     # --- None YONETIMI (tik @50Hz) ---
-    # GPS ~1Hz -> normal donmus kare serisi ~50 tik. Dropout bundan UZUN.
-    HOLD_TICKS = 75            # ~1.5s: bu sureye kadar son kestirimi tut
-    DROPOUT_TICKS = 75         # otesi: dropout -> loiter
+    # YENI SIM (v2.2) GOZLEMI: hedef GPS normalde 1 Hz, ama 'Guncelleme hizi siniri'
+    # bozulmasi 0.25 Hz'e (4 sn'de 1 paket) dusurebiliyor + 1 sn gecikme ekliyor.
+    # Eski 1.5 sn tutma penceresi her paket arasinda DROPOUT/loiter'a dusuruyordu
+    # (gorev duraksiyordu). Filtre kestirimi lead'li oldugundan son kestirimi
+    # ~6 sn tasimak guvenli; loiter yalnizca GERCEK uzun kesintide devreye girer.
+    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (0.25 Hz'e dayanikli)
+    DROPOUT_TICKS = 300        # otesi: dropout -> loiter
 
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
     # True: ~2Hz konsola [Z] satiri basar. drone_z vs hedef irtifasi (filtre & GERCEK),

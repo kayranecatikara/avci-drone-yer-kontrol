@@ -124,12 +124,21 @@ def grab_frame_jpeg():
 #  windows-capture yoksa hazir=False -> mss ekran-bolgesine duser (cokme yok).
 #  connection_manager oyun penceresi acilinca yakalamayi otomatik baslatir.
 # ----------------------------------------------------------
-try:
-    from detection.pencere_yakala import PencereYakala
-    pencere_yakala_motoru = PencereYakala(title_hints=GAME_TITLE_HINTS)
-except Exception as _py_e:
-    pencere_yakala_motoru = None
-    print("[SERVER] pencere_yakala yuklenemedi (%s) -> mss fallback." % _py_e)
+# windows-capture bu makinede (Win10 LTSC 19044) KARARSIZ: 'capture border' API'si
+# desteklenmiyor -> her baslatmada oturum hatasi + native kutuphane cokmesi riski
+# (sunucunun sessizce olmesine yol acabiliyor). KAPALI tutuyoruz; dedektor kare
+# kaynagi mss'tir (oyun penceresi gorunur olmali). Win11'de denemek icin True yap.
+PENCERE_YAKALA_AKTIF = False
+pencere_yakala_motoru = None
+if PENCERE_YAKALA_AKTIF:
+    try:
+        from detection.pencere_yakala import PencereYakala
+        pencere_yakala_motoru = PencereYakala(title_hints=GAME_TITLE_HINTS)
+    except Exception as _py_e:
+        print("[SERVER] pencere_yakala yuklenemedi (%s) -> mss fallback." % _py_e)
+else:
+    print("[SERVER] pencere-yakalama KAPALI -> dedektor kare kaynagi mss "
+          "(oyun penceresi gorunur/kucultulmemis olmali).")
 
 
 def _olcekle_bgr(bgr):
@@ -734,13 +743,24 @@ class Handler(BaseHTTPRequestHandler):
 #  Ana program
 # ----------------------------------------------------------
 def main():
+    # SESSIZ OLUM TESHISI: native bir kutuphane (torch/cv2/windows-capture...) coker
+    # ya da beklenmedik bir istisna serve_forever'i dusururse konsolda SEBEBI gorunsun
+    # ("Sunucu durdu" ama neden belli degil durumunu bitirir).
+    import faulthandler, traceback
+    faulthandler.enable()
+
     # Arka planda baglanti yoneticisini ve gorev kontrol beynini baslat
     threading.Thread(target=connection_manager, daemon=True).start()
     threading.Thread(target=kontrol_dongusu, daemon=True).start()
     # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
 
-    server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
+    try:
+        server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
+    except OSError as e:
+        print("[HATA] %d portu acilamadi (baska bir arayuz ornegi calisiyor olabilir): %s"
+              % (WEB_PORT, e))
+        return
     print("=" * 52)
     print("  AVCI DRONE - YER KONTROL ISTASYONU calisiyor")
     print("  Tarayicida ac:  http://127.0.0.1:%d" % WEB_PORT)
@@ -749,7 +769,10 @@ def main():
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nKapatiliyor...")
+        print("\nKapatiliyor... (Ctrl+C)")
+    except Exception:
+        print("\n[HATA] Sunucu beklenmedik istisnayla dustu:")
+        traceback.print_exc()
     finally:
         drone.disconnect()
 
