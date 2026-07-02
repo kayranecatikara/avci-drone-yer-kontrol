@@ -17,23 +17,69 @@ ZARIF BOZULMA: windows-capture yoksa / pencere bulunamazsa hazir=False, get_late
 import threading
 
 
+GAME_PROC_HINTS = ("dronesofwar",)      # oyun exe/surec adi bunu icermeli (kucuk harf)
+# Baslik-ipucu fallback'inde ELENECEK surecler: tarayici sekmesi/editor basligi
+# "Drones of War" icerebilir (orn. GitHub/Drive sayfasi) -> YANLIS pencere yakalanir.
+_TARAYICI_EXE = ("brave", "chrome", "msedge", "firefox", "opera", "vivaldi", "code")
+_TARAYICI_BASLIK = (" - brave", " - google chrome", " - microsoft edge",
+                    " - mozilla firefox", " - opera", "visual studio code")
+
+
+def _pencere_pid(hwnd):
+    """hwnd -> sahibi surecin PID'i (ctypes; hata olursa None)."""
+    try:
+        import ctypes
+        pid = ctypes.c_ulong(0)
+        ctypes.windll.user32.GetWindowThreadProcessId(int(hwnd), ctypes.byref(pid))
+        return int(pid.value) or None
+    except Exception:
+        return None
+
+
+def _surec_adi(pid):
+    """PID -> surec exe adi (kucuk harf; psutil yoksa/bilinmiyorsa bos string)."""
+    if not pid:
+        return ""
+    try:
+        import psutil
+        return (psutil.Process(pid).name() or "").lower()
+    except Exception:
+        return ""
+
+
 def pencere_bul(title_hints):
-    """title_hints (kucuk harf) ile eslesen ilk gorunur pencerenin (baslik, hwnd)
-    ciftini doner. Bulamazsa (None, None)."""
+    """Oyun penceresini bul; (baslik, hwnd) doner, bulamazsa (None, None).
+    ONCE pencerenin SAHIBI SUREC ADIYLA esler (DronesOfWar*.exe) — en saglami:
+    tarayici sekmesinin basligi 'Drones of War' icerse bile yanilmaz.
+    Surec eslesmezse baslik ipucuna duser; orada da tarayici/editor pencereleri elenir."""
     try:
         import pygetwindow as gw
     except Exception:
         return None, None
+    adaylar = []
     try:
         for w in gw.getAllWindows():
             t = (w.title or "").strip()
-            if not t:
-                continue
-            if any(h in t.lower() for h in title_hints):
-                if w.width > 100 and w.height > 100:
-                    return t, getattr(w, "_hWnd", None)
+            if t and w.width > 100 and w.height > 100:
+                adaylar.append((t, getattr(w, "_hWnd", None)))
     except Exception:
-        pass
+        return None, None
+    # 1) SUREC ADI eslesmesi (dogru pencere garantisi)
+    for t, hwnd in adaylar:
+        ad = _surec_adi(_pencere_pid(hwnd)) if hwnd else ""
+        if ad and any(h in ad for h in GAME_PROC_HINTS):
+            return t, hwnd
+    # 2) BASLIK ipucu (fallback) — tarayici/editor pencerelerini ELE
+    for t, hwnd in adaylar:
+        tl = t.lower()
+        if not any(h in tl for h in title_hints):
+            continue
+        ad = _surec_adi(_pencere_pid(hwnd)) if hwnd else ""
+        if any(b in ad for b in _TARAYICI_EXE):
+            continue                          # tarayici sekmesi basligi -> yanlis pencere
+        if not ad and any(b in tl for b in _TARAYICI_BASLIK):
+            continue                          # psutil yoksa baslik sonekiyle ele
+        return t, hwnd
     return None, None
 
 
@@ -81,17 +127,30 @@ class PencereYakala:
         if ad is None and hwnd is None:
             ad, hwnd = pencere_bul(self.title_hints)
         if ad is None and hwnd is None:
+            # Oyun penceresi henuz bulunamadi: ~her 10 sn bir kez bilgilendir (spam yok).
+            import time as _t
+            simdi = _t.monotonic()
+            if simdi - getattr(self, "_son_uyari_t", 0.0) > 10.0:
+                self._son_uyari_t = simdi
+                print("[PENCERE_YAKALA] Oyun penceresi bulunamadi (DronesOfWar surecine ait "
+                      "gorunur pencere yok). Oyun acik ve PLAY modunda mi? -> server mss'e duser.")
             return False
 
-        try:
-            if hwnd:
-                cap = self._WindowsCapture(cursor_capture=False, draw_border=False,
-                                           window_hwnd=int(hwnd))
-            else:
-                cap = self._WindowsCapture(cursor_capture=False, draw_border=False,
-                                           window_name=ad)
-        except Exception as e:
-            print("[PENCERE_YAKALA] capture olusturulamadi (%r): %s" % (ad or hwnd, e))
+        # Once hwnd ile (en saglam) dene; olmazsa pencere adiyla dene.
+        cap = None
+        denemeler = []
+        if hwnd:
+            denemeler.append(("hwnd", dict(window_hwnd=int(hwnd))))
+        if ad:
+            denemeler.append(("ad", dict(window_name=ad)))
+        for yontem, kw in denemeler:
+            try:
+                cap = self._WindowsCapture(cursor_capture=False, draw_border=False, **kw)
+                break
+            except Exception as e:
+                print("[PENCERE_YAKALA] capture olusturulamadi (%s=%r): %s" % (yontem, ad or hwnd, e))
+                cap = None
+        if cap is None:
             return False
 
         @cap.event

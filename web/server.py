@@ -77,13 +77,19 @@ def _get_sct():
 
 def _find_game_region():
     """Oyun penceresinin (left, top, width, height) bolgesini doner.
-    Bulamazsa None (o zaman tum ekran yakalanir)."""
+    Bulamazsa None (o zaman tum ekran yakalanir). Pencere secimi
+    detection.pencere_yakala.pencere_bul ile yapilir (SUREC-ADI oncelikli;
+    tarayici sekmesi basliginda 'Drones of War' gecmesi yaniltamaz)."""
     if gw is None:
         return None
     try:
+        from detection.pencere_yakala import pencere_bul
+        baslik, hwnd = pencere_bul(GAME_TITLE_HINTS)
+        if baslik is None:
+            return None
         for w in gw.getAllWindows():
-            title = (w.title or "").lower()
-            if any(h in title for h in GAME_TITLE_HINTS):
+            if (hwnd is not None and getattr(w, "_hWnd", None) == hwnd) or \
+               (hwnd is None and (w.title or "").strip() == baslik):
                 if w.width > 0 and w.height > 0 and w.visible:
                     return (w.left, w.top, w.width, w.height)
     except Exception:
@@ -136,50 +142,70 @@ def _olcekle_bgr(bgr):
     return bgr, w, h
 
 
-def grab_frame_bgr():
-    """(BGR numpy kare, W, H) doner — YOLO dedektorunun kare kaynagi.
-    ONCE pencere-icerigi (occlusion-proof); kare henuz yoksa (None,0,0) -> dedektor
-    o turu atlar (ayna/yanlis kare islemez). windows-capture yoksa mss'e duser."""
-    pym = pencere_yakala_motoru
-    if pym is not None and pym.hazir:
-        if pym.calisiyor():
-            bgr = pym.get_latest_bgr()
-            if bgr is not None:
-                return _olcekle_bgr(bgr)
-        return None, 0, 0                                  # pencere-yakalama tercih; kare yok
+# FPV kaynagi DEGISTIGINDE bir kez konsola yaz (spam yok; tani icin).
+_fpv_kaynak = {"ad": None}
+def _fpv_log(ad, ekstra=""):
+    if _fpv_kaynak["ad"] != ad:
+        _fpv_kaynak["ad"] = ad
+        print("[FPV] goruntu kaynagi -> %s%s" % (ad, ekstra))
 
-    # Fallback: mss ekran-bolgesi (windows-capture yoksa)
+
+def _mss_grab_bgr():
+    """mss ile oyun BOLGESINI (pencere_bul bulursa), yoksa TUM EKRANI BGR ndarray yakala.
+    (kaynak_adi, bgr) doner. Tum-ekran modunda tarayici FPV'yi kaplarsa AYNA olusabilir
+    -> oyunu KENARLIKSIZ PENCERE yapmak veya windows-capture bunu cozer."""
     sct = _get_sct()
     region = _find_game_region()
     if region:
         left, top, width, height = region
         bbox = {"left": left, "top": top, "width": width, "height": height}
+        kaynak = "mss (oyun penceresi bolgesi)"
     else:
-        bbox = sct.monitors[1]
+        bbox = sct.monitors[1]                             # birincil monitor (tum ekran)
+        kaynak = "mss (TUM EKRAN - oyun penceresi bulunamadi; ayna olursa oyunu KENARLIKSIZ PENCERE yap)"
     raw = sct.grab(bbox)
     frame = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)
-    return _olcekle_bgr(frame[:, :, :3].copy())            # BGRA -> BGR (alpha at)
+    return kaynak, frame[:, :, :3].copy()                  # BGRA -> BGR (alpha at)
+
+
+def grab_frame_bgr():
+    """(BGR kare, W, H) doner — hem YOLO dedektoru hem FPV bunu kullanir.
+    HER ZAMAN kare uretmeye calisir (fallback zinciri):
+      1) windows-capture canli karesi (occlusion-proof; oyun arkada olsa bile dogru)
+      2) mss oyun-penceresi bolgesi (oyun goruunur/onde ise)
+      3) mss tum ekran (son care; ayna riski)
+    Yalnizca mss de basarisizsa (None, 0, 0)."""
+    pym = pencere_yakala_motoru
+    if pym is not None and pym.hazir and pym.calisiyor():
+        bgr = pym.get_latest_bgr()
+        if bgr is not None:
+            _fpv_log("windows-capture (pencere icerigi)")
+            return _olcekle_bgr(bgr)
+    # Fallback: mss (windows-capture yok / henuz kare uretmedi / pencere bulunamadi)
+    try:
+        kaynak, bgr = _mss_grab_bgr()
+        _fpv_log(kaynak)
+        return _olcekle_bgr(bgr)
+    except Exception as e:
+        _fpv_log("KARE YOK", " (%s)" % e)
+        return None, 0, 0
 
 
 def fpv_jpeg():
     """/api/frame'in dondurdugu HAM oyun karesi (overlay YOK — bbox/rozet istemci
-    canvas'inda cizilir). Oncelik: pencere-icerigi karesi; windows-capture yoksa mss.
-    Kare yoksa None (-> 503 -> arayuz placeholder gosterip yeniden dener)."""
-    pym = pencere_yakala_motoru
-    if pym is not None and pym.hazir:
-        bgr = pym.get_latest_bgr() if pym.calisiyor() else None
-        if bgr is None:
-            return None                                    # oyun penceresi henuz yok
-        b2, _w, _h = _olcekle_bgr(bgr)
-        if cv2 is not None:
-            ok, enc = cv2.imencode(".jpg", b2, [int(cv2.IMWRITE_JPEG_QUALITY), CAM_JPEG_QUALITY])
-            if ok:
-                return enc.tobytes()
-        img = Image.fromarray(b2[:, :, ::-1].copy())       # BGR->RGB (cv2 yoksa PIL ile)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
-        return buf.getvalue()
-    return grab_frame_jpeg()                               # windows-capture yok -> mss
+    canvas'inda cizilir). grab_frame_bgr fallback zincirini kullanir -> gorunur bir
+    oyun/ekran varsa HER ZAMAN kare doner. Hicbir kaynak yoksa None (-> 503)."""
+    bgr, _w, _h = grab_frame_bgr()
+    if bgr is None:
+        return None
+    if cv2 is not None:
+        ok, enc = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), CAM_JPEG_QUALITY])
+        if ok:
+            return enc.tobytes()
+    img = Image.fromarray(bgr[:, :, ::-1].copy())          # BGR->RGB (cv2 yoksa PIL ile)
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
+    return buf.getvalue()
 
 
 # ----------------------------------------------------------
