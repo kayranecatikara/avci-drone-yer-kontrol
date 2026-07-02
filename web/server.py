@@ -262,6 +262,8 @@ TUNE_ALLOW = {
     "YAW_MAX", "KP_YAW",
     # yatay yaklasma
     "KP_H", "KD_H",
+    # yaklasma hiz profili (kontrollu yaklasma; speed_cap her tik Cfg okur -> canli)
+    "V_CAP_FAR", "V_CAP_NEAR", "BRAKE_DIST",
     # dikey (irtifa) PID
     "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
     # GORSEL GUDUM (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)

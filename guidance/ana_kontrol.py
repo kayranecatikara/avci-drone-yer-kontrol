@@ -857,6 +857,14 @@ class AvciKontrol:
             ey_s = float(self.son_xy_anlik[1] - drone_pos[1])
             d_s = math.hypot(ex_s, ey_s)
             ux, uy = ex_s / max(d_s, 1e-6), ey_s / max(d_s, 1e-6)      # LOS birim (dunya)
+            # BURUN/KAMERA DUZELTMESI: terminalde burun ANLIK hedefe doner (2sn-lead
+            # noktasina DEGIL). Carpisma lead'i hiz-eslemede ZATEN var (v_des =
+            # v_hedef + v_close*LOS); burnu lead'e cevirmek kamerayi gercek hedeften
+            # kaciriyordu (yakin mesafede manevrali hedefte ~50 dereceye varan sapma
+            # -> gorsel temas kaybi). Kamera gorsel fazin sensorudur; hep hedefte kalsin.
+            bearing = math.atan2(ey_s, ex_s)
+            yaw_err = deadband(wrap_pi(bearing - drone_yaw), Cfg.YAW_DEADBAND)
+            yaw_raw = Cfg.YAW_SIGN * clamp(Cfg.KP_YAW * yaw_err, -Cfg.YAW_MAX, Cfg.YAW_MAX)
             v_close = clamp(Cfg.KP_CLOSE * d_s, Cfg.V_CLOSE_MIN, Cfg.V_CLOSE)  # TABAN'li -> ram
             vdx = float(self.son_hiz[0]) + v_close * ux               # istenen hiz (cm/s, dunya)
             vdy = float(self.son_hiz[1]) + v_close * uy

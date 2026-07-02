@@ -413,6 +413,15 @@
       ["YAW_MAX","5) Burun donus hizi   (artir=kamera hedefte kalir)",0.05,0.60,0.05],
       ["MAX_DELTA","6) Komut yumusakligi   (dusur=yumusak, artir=hizli/sert tepki)",0.02,0.30,0.01],
     ]],
+    ["GPS GÜDÜM — GELİŞMİŞ (gerekmedikçe dokunma; rehberdeki aşamalara göre)", [
+      ["KP_YAW","Burun kazancı   (burun tembelse artır, sağlı-sollu vuruyorsa azalt)",0.3,2.0,0.05],
+      ["STRIKE_RANGE","Terminal moda giriş mesafesi (cm)   (artır=erken hız-eşleme, stabil kovalama)",2000,10000,500],
+      ["V_CLOSE","Kapanış hızı TAVANI (cm/s)   (uzaktaki dalış hızı)",400,2000,50],
+      ["KP_CLOSE","Kapanış hızı / mesafe oranı   (artır=uzakta hızlı kapanır)",0.2,1.5,0.05],
+      ["V_CAP_FAR","Uzak yaklaşma hız tavanı (cm/s)",1000,3300,100],
+      ["V_CAP_NEAR","Terminale giriş hız tavanı (cm/s)   (savruluyorsan düşür)",200,1500,50],
+      ["BRAKE_DIST","Frenleme başlangıç mesafesi (cm)   (yanından geçip savruluyorsa artır)",3000,12000,500],
+    ]],
     ["GÖRSEL GÜDÜM AYARLARI (görsel temas sonrası — yalnızca kamera)", [
       ["VIS_SIGN_YAW","Yön: burun sağ/sol   (hedef ters yöne kaçıyorsa −1/+1 çevir)",-1,1,2],
       ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
