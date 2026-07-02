@@ -59,8 +59,8 @@ pip install torch torchvision
 pip install -r requirements.txt
 ```
 `requirements.txt` içeriği: numpy, mss, Pillow, pygetwindow, **ultralytics**,
-**opencv-python**, **windows-capture**. Eğitilmiş model **`models/best.pt` repoda
-hazır gelir** — ayrıca bir şey indirilmez.
+**opencv-python**. Eğitilmiş model **`models/best.pt` repoda hazır gelir** —
+ayrıca bir şey indirilmez.
 
 ### 4) Kurulumu doğrula (repo kökünden)
 ```
@@ -200,7 +200,7 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
    - GPU varsa ÖNCE: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
      GPU yoksa: pip install torch torchvision
    - Sonra: pip install -r requirements.txt
-     (ultralytics, opencv-python, windows-capture, mss, Pillow, pygetwindow, numpy kurulur.)
+     (ultralytics, opencv-python, mss, Pillow, pygetwindow, numpy kurulur.)
    - Model dosyası models\best.pt REPODA HAZIR gelir; ekstra indirme yok.
 
 5) DOĞRULAMA (hepsi repo kökünden; herhangi biri hata verirse önce onu çöz)
@@ -229,16 +229,20 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
      web portu 8000. Yeniden başlatmadan önce eski süreci kapat.
    - ultralytics/torch kurulamazsa sistem yine açılır: görsel faz pasif kalır, GPS
      güdümü çalışır (konsolda "[GORSEL] Dedektor YUKLENEMEDI" görürsün).
-   - windows-capture kurulamazsa FPV mss ekran yakalamaya düşer; o modda oyun penceresi
-     görünür/önde olmalı.
+   - Tespit (YOLO) karesi sunucu tarafında mss EKRAN yakalamayla alınır → görev
+     sırasında OYUN PENCERESİ görünür/önde olmalı (küçültme). Konsoldaki
+     "[FPV] goruntu kaynagi -> ..." satırı hangi kaynağın kullanıldığını söyler.
+     (windows-capture bilinçli KAPALIDIR: bazı Windows sürümlerinde kararsız;
+     server.py'de PENCERE_YAKALA_AKTIF=False.)
    - Çalışma çıktıları (ucus_log_*.csv, kiyas_log.csv) veri\ klasörüne yazılır.
    - Oyun + arayüz AYNI makinede çalışmalı (bağlantı 127.0.0.1).
 
 8) BİTİŞ RAPORU
    Kurulum bitince bana kısaca raporla: Python/torch sürümleri, CUDA durumu,
    doğrulama sonuçları, oyun bağlantısı ve FPV durumu, arayüzü nasıl başlatacağım.
-   İlk uçuş kalibrasyonu için beni repo README'sindeki "İlk uçuş kalibrasyonu"
-   bölümüne yönlendir (VIS_EY_REF turuncu çizgi + işaret kalibrasyonu).
+   Sonraki adımlar için beni yönlendir: ilk uçuş kalibrasyonu README'nin
+   "İlk uçuş kalibrasyonu" bölümünde (VIS_EY_REF turuncu çizgi + işaretler);
+   GPS güdüm parametre ayarı için repodaki TUNE_REHBERI.md dosyası.
 ```
 
 ---

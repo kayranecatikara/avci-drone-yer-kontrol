@@ -13,7 +13,9 @@ pygetwindow
 ultralytics
 opencv-python
 
-# --- Pencere-icerigi yakalama (occlusion-proof FPV) ---
-# Oyun penceresinin ICERIGINI yakalar: arayuz goruntusu pencere SECMEDEN otomatik
-# gelir; oyun tarayicinin arkasinda olsa bile dogru kare. Yoksa mss'e duser.
-windows-capture
+# --- windows-capture: SU AN KULLANILMIYOR (kurma) ---
+# Pencere-icerigi yakalama motoru bazi Windows surumlerinde (orn. Win10 LTSC)
+# kararsiz oldugundan bilincli KAPALI (web/server.py: PENCERE_YAKALA_AKTIF=False).
+# FPV goruntusu tarayici ekran paylasimiyla (Goruntuyu Bagla), YOLO karesi mss ile
+# alinir. Win11'de denemek istersen: pip install windows-capture + bayragi True yap.
+# windows-capture
