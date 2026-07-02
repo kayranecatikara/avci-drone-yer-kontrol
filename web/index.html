@@ -115,7 +115,7 @@
   /* ---- Orta panel: görüntü ---- */
   #view{flex:1;display:flex;align-items:center;justify-content:center;
     background:#06080c;border-radius:8px;position:relative;overflow:hidden}
-  #view img{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
+  #view video{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
   /* FPV overlay: goruntu uzerine bbox/merkez/durum/GPS rozeti cizen saydam katman */
   #view canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;
     pointer-events:none;display:none;z-index:2}
@@ -123,6 +123,9 @@
     align-items:center;gap:16px;padding:20px}
   #view .ph .big{font-size:46px;opacity:.5}
   #view .ph .sub{font-size:13px;line-height:1.6}
+  .sharebtn{padding:12px 22px;background:var(--accent);color:#04241c;border:none;
+    border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:.15s}
+  .sharebtn:hover{filter:brightness(1.1);transform:translateY(-1px)}
 
   /* ---- Sağ panel: telemetri ---- */
   .card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
@@ -217,12 +220,13 @@
       <h2>Kamera / Görüntü</h2>
       <div class="body" style="padding:12px">
         <div id="view">
-          <img id="cam" alt="FPV">
+          <video id="cam" autoplay muted playsinline></video>
           <canvas id="overlay"></canvas>
           <div class="ph" id="camPh">
-            <div class="big">🛰️</div>
-            <div class="sub">Sunucudan oyun görüntüsü bekleniyor…<br>
-            Simülatör açılınca görüntü <b>otomatik</b> gelir (pencere seçmek gerekmez).</div>
+            <div class="big">🖥️</div>
+            <div class="sub">Oyun görüntüsünü bağlamak için butona bas,<br>
+            açılan listeden <b>oyun penceresini (Drones of War)</b> seç.</div>
+            <button id="shareBtn" class="sharebtn">📡 Görüntüyü Bağla</button>
           </div>
         </div>
       </div>
@@ -485,7 +489,7 @@
   // Normalize koordinat (cx,cy,w,h ∈ [0,1]) kullanildigindan cozunurluk onemsiz; video
   // object-fit:contain oldugundan letterbox icerik dikdortgeni hesaplanir.
   function _icerikRect(el){
-    const cw=el.clientWidth, ch=el.clientHeight, vw=el.naturalWidth, vh=el.naturalHeight;
+    const cw=el.clientWidth, ch=el.clientHeight, vw=el.videoWidth, vh=el.videoHeight;
     if(!vw||!vh) return {x:0,y:0,w:cw,h:ch};
     const s=Math.min(cw/vw, ch/vh), w=vw*s, h=vh*s;
     return {x:(cw-w)/2, y:(ch-h)/2, w:w, h:h};
@@ -609,25 +613,27 @@
   setInterval(tick, 200);
   tick();
 
-  // ---- Canlı görüntü: SUNUCU TARAFI FPV (/api/frame — pencere seçmek GEREKMEZ) ----
-  // Sunucu oyun penceresinin İÇERİĞİNİ kendisi yakalar (windows-capture; oyun arkada
-  // olsa bile doğru kare). Onload-zincirli pompa: her kare yüklenince bir sonrakini
-  // ister (~30 fps tavan). Overlay (bbox/rozet) telemetriden canvas'a çizilir.
-  const cam = $("cam"), camPh = $("camPh");
-  function fpvSonraki(){ cam.src = "/api/frame?t=" + Date.now(); }
-  cam.onload = ()=>{
-    cam.style.display = "block";
-    $("overlay").style.display = "block";       // FPV overlay katmanini ac
-    camPh.style.display = "none";
-    setTimeout(fpvSonraki, 33);                 // ~30 fps tavan
-  };
-  cam.onerror = ()=>{
-    cam.style.display = "none";
-    $("overlay").style.display = "none";
-    camPh.style.display = "flex";
-    setTimeout(fpvSonraki, 600);                // oyun/sunucu yoksa yeniden dene
-  };
-  fpvSonraki();                                 // otomatik başla (buton yok)
+  // ---- Canlı görüntü: tarayıcının ekran/pencere paylaşımı (getDisplayMedia) ----
+  // Butona bas → açılan listeden OYUN PENCERESİNİ seç. Overlay (bbox/rozet/REF)
+  // telemetriden canvas'a çizilir; normalize koordinat kullandığından çözünürlük
+  // fark etmez (paylaşılan pencere = sunucunun tespit yaptığı oyun penceresi).
+  const cam = $("cam"), camPh = $("camPh"), shareBtn = $("shareBtn");
+  let stream = null;
+  async function startShare(){
+    try{
+      stream = await navigator.mediaDevices.getDisplayMedia({ video:{frameRate:30}, audio:false });
+      cam.srcObject = stream;
+      cam.style.display = "block";
+      $("overlay").style.display = "block";     // FPV overlay katmanini ac
+      camPh.style.display = "none";
+      stream.getVideoTracks()[0].addEventListener("ended", stopShare);
+    }catch(e){ console.log("Görüntü paylaşımı iptal/hata:", e); }
+  }
+  function stopShare(){
+    if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
+    cam.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
+  }
+  shareBtn.onclick = startShare;
 </script>
 </body>
 </html>

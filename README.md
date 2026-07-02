@@ -4,7 +4,7 @@ TEKNOFEST **"Drones of War"** avcı drone projesinin yazılımı. Simülatörden
 **bozuk hedef GNSS'ini** İnovasyonlu J (CT-EKF) ile temizler, **GPS güdümüyle** hedefe
 yaklaşır, görsel temas kurulunca **YOLO (best.pt) + DÜZ IBVS** ile yönelimi **yalnızca
 kameradan** üretir (yarışma kuralı) ve hepsini tarayıcı tabanlı bir arayüzden yönetir:
-canlı FPV (otomatik, pencere seçmeden), telemetri, canlı tune panelleri, güdüm
+canlı FPV (tarayıcı ekran/pencere paylaşımı), telemetri, canlı tune panelleri, güdüm
 pipeline anahtarı (OTO / GPS / GÖRSEL).
 
 ```
@@ -75,9 +75,10 @@ Son komut `best.pt siniflari (model.names): {0: 'talon'}` yazmalı.
 ## ▶️ Çalıştırma
 1. **Oyunu aç:** `1_Oyunu_Baslat.bat` (veya `Drones of War Teknofest\DronesOfWar.exe`) → **PLAY** moduna geç.
 2. **Arayüzü aç:** `2_Arayuzu_Baslat.bat` (veya repo kökünden `python main.py`).
-3. Tarayıcı: **http://127.0.0.1:8000** — sol üstte "Oyuna bağlı" yeşil olmalı; **FPV
-   görüntüsü OTOMATİK gelir** (pencere seçme/paylaşma YOK; sunucu oyun penceresinin
-   içeriğini kendisi yakalar — oyun başka pencerenin arkasında olsa bile).
+3. Tarayıcı: **http://127.0.0.1:8000** — sol üstte "Oyuna bağlı" yeşil olmalı.
+4. Orta paneldeki **"📡 Görüntüyü Bağla"** butonuna bas → açılan listeden **oyun
+   penceresini (Drones of War)** seç. FPV görüntüsü bu pencereden akar; üstüne
+   tespit overlay'i (bbox / REF çizgisi / rozet) çizilir.
 
 > ⚠️ Aynı anda **tek bir** arayüz örneği çalışsın (oyun tek TCP bağlantısı kabul
 > eder). Yeniden başlatmadan önce eski pencereyi kapat.
@@ -90,7 +91,7 @@ Son komut `best.pt siniflari (model.names): {0: 'talon'}` yazmalı.
 | Panel | İçerik |
 |-------|--------|
 | **Sol** | Görev Başlat (İnovasyonlu J) / Gerçek GPS (test) / Durdur / Manuel mod / **Tune (canlı ayar)** / **Güdüm Pipeline anahtarı: OTO · GPS · GÖRSEL** |
-| **Orta** | Otomatik FPV + overlay: hedef bbox'ı, görüntü merkezi `+`, **turuncu REF çizgisi** (25° kamera tilt telafisi), ex/ey/conf, durum, **"GPS GÜDÜMÜ: KAPALI/AÇIK" rozeti** |
+| **Orta** | FPV (Görüntüyü Bağla → oyun penceresi) + overlay: hedef bbox'ı, görüntü merkezi `+`, **turuncu REF çizgisi** (25° kamera tilt telafisi), ex/ey/conf, durum, **"GPS GÜDÜMÜ: KAPALI/AÇIK" rozeti** |
 | **Sağ** | Telemetri (avcı + hedef), İnovasyonlu J sapma ölçümü (ham vs filtre, gerçeğe hata), mesafeler |
 
 **Güdüm akışı:** ARAMA (GPS yaklaşma) → best.pt hedefi 5 ardışık karede görünce
@@ -114,7 +115,8 @@ görüntü merkezine değil **turuncu REF çizgisine** oturtur. İlk uçuşta Tu
 ## 🔧 Sorun giderme
 | Belirti | Sebep / Çözüm |
 |---|---|
-| FPV yok, "kare yok (503)" | Oyun açık değil ya da pencere başlığında "DronesOfWar" geçmiyor. Oyunu aç, PLAY'e geç. |
+| FPV görüntüsü yok | "📡 Görüntüyü Bağla"ya bastın mı? Açılan listeden **oyun penceresini** seç. Tarayıcı ekran paylaşımına izin vermeli. |
+| Overlay (bbox/REF) çizilmiyor | Görüntü var ama tespit yoksa: oyun görünür/önde mi (sunucu tespiti mss ile oyun penceresinden yapar), model yüklendi mi (`{0:'talon'}`)? |
 | "Sunucu kapalı" | `python main.py` çalışmıyor ya da 8000 portu başka süreçte. Eski pencereyi kapat, tekrar başlat. |
 | Telemetri gelmiyor ama FPV var | Oyun PLAY modunda değil; ya da 12345 portunu başka bir arayüz örneği tutuyor. |
 | `[GORSEL] Dedektor YUKLENEMEDI` | ultralytics/torch kurulu değil → sistem **çökmez**, GPS güdümüyle devam eder. Paketleri kur. |
@@ -215,11 +217,10 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
      DronesOfWar.exe) ve oyunda PLAY moduna geçmemi bekle.
    - Sonra arayüzü başlat: python main.py   (arka planda çalıştır ve çıktıyı izle;
      alternatif: 2_Arayuzu_Baslat.bat)
-   - http://127.0.0.1:8000 aç(tır): sol üst "Oyuna bağlı" YEŞİL olmalı ve orta panelde
-     oyun görüntüsü OTOMATİK akmalı — pencere seçme/paylaşma YOKTUR, sunucu oyun
-     penceresini kendisi yakalar. curl ile de kontrol edebilirsin:
-     "curl -s -o NUL -w "%{http_code}" http://127.0.0.1:8000/api/frame" -> 200 olmalı
-     (503 = oyun penceresi bulunamıyor: oyun açık mı, küçültülmüş mü bak).
+   - http://127.0.0.1:8000 aç(tır): sol üst "Oyuna bağlı" YEŞİL olmalı. FPV görüntüsü
+     için orta paneldeki "📡 Görüntüyü Bağla" butonuna basıp açılan listeden OYUN
+     PENCERESİNİ (Drones of War) seçmem gerektiğini bana hatırlat (tarayıcı ekran
+     paylaşımı; otomatik değildir).
 
 7) BİLİNEN TUZAKLAR (bunlara dikkat et)
    - Arayüz HEP repo kökünden "python main.py" ile başlatılır; "python web\server.py"
