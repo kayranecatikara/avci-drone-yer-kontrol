@@ -414,6 +414,7 @@
       ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
       ["VIS_SIGN_VZ","Yön: irtifa yukarı/aşağı   (ters ortalıyorsa çevir)",-1,1,2],
       ["VIS_K_VZ","Dikey ortalama gücü   (artır=hızlı irtifa düzeltir)",0,1.5,0.05],
+      ["VIS_EY_REF","Dikey referans — 25° tilt telafisi   (hedef AYNI irtifadayken bbox'un oturduğu turuncu çizgi)",-0.8,0.8,0.01],
       ["VIS_K_FWD","İleri yaklaşma hızı   (artır=hızlı dalar, önce ortala)",0,1.0,0.05],
       ["VIS_CENTER_GATE","İleri için ortalama toleransı   (büyük=erken yaklaşır)",0.1,0.8,0.05],
       ["VIS_AREA_STOP","Durma yakınlığı (bbox alan oranı)   (küçük=daha uzakta yavaşlar)",0.05,0.6,0.01],
@@ -502,14 +503,22 @@
     ctx.strokeStyle="rgba(120,200,255,.7)"; ctx.lineWidth=1.5;      // goruntu merkezi +
     ctx.beginPath(); ctx.moveTo(mcx-12,mcy); ctx.lineTo(mcx+12,mcy);
     ctx.moveTo(mcx,mcy-12); ctx.lineTo(mcx,mcy+12); ctx.stroke();
+    // DİKEY REFERANS çizgisi (kamera 25° yukarı tilt telafisi): güdüm hedefi bu
+    // TURUNCU çizgide tutar; kalibrasyon = hedef aynı irtifadayken bbox buraya otursun.
+    const refY = mcy + (Number(gs.ey_ref)||0)*rc.h/2;
+    ctx.strokeStyle="rgba(255,170,60,.85)"; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(mcx-28,refY); ctx.lineTo(mcx+28,refY); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.font="11px monospace"; ctx.fillStyle="rgba(255,170,60,.95)";
+    ctx.fillText("REF", mcx+33, refY+4);
     const det=gs.tespit;
     if(det){
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2.5;                // bbox
       ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
       ctx.fillStyle="#25e0a0"; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
-      ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // merkez -> hedef sapma cizgisi
-      ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke();
+      ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // REFERANS -> hedef sapma cizgisi (gudum hatasi)
+      ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();
       ctx.font="12px monospace"; ctx.fillStyle="#cfe";
       ctx.fillText("ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+
                    "  conf="+Number(det.conf).toFixed(2), bx-bw/2, by-bh/2-6);

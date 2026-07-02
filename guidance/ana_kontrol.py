@@ -201,9 +201,18 @@ class Cfg:
                                # davranisi). Sure _vis_lost_count ile olculur -> son gorusten
                                # itibaren ~ (VIS_STALE_S + bu) toplam kayipta GPS'e doner.
     VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
+    # DIKEY REFERANS — KAMERA 25 DERECE YUKARI TILT TELAFISI (SDK v2.2 resmilesti).
+    # Kamera burnu 25 derece yukari baktigindan "bbox tam merkezde" = hedef burnun
+    # 25 derece USTUNDE demek -> drone dengelenmek icin hedefin ALTINA iner (20 m'de
+    # ~9 m!). Cozum: hedefi merkezin ALTINDAKI su referans cizgide tut; dikey hata
+    # (ey - VIS_EY_REF) olur -> yaklasma DUZ/ayni-irtifa geometrisinde kalir.
+    # Deger: tan(25)/tan(FOV_dikey/2). FOV 125 YATAYSA (16:9, UE varsayimi) ~0.43;
+    # 125 dikeyse ~0.24. SIM'DE KALIBRE ET: hedef seninle AYNI irtifadayken slider'i
+    # bbox merkezinin oturdugu cizgiye getir (overlay'de turuncu REF cizgisi).
+    VIS_EY_REF       = 0.43
     # Isaretler (SIM'de kalibre et: komut hatayi AZALTMALI; artiriyorsa isareti ters cevir)
     VIS_SIGN_YAW     = +1.0     # ex>0 (hedef SAGDA) -> burnu hedefe cevir
-    VIS_SIGN_VZ      = -1.0     # ey>0 (hedef ALTTA) -> ALCAL (throttle<0). Ters cikarsa +1.0
+    VIS_SIGN_VZ      = -1.0     # (ey-VIS_EY_REF)>0 (hedef REFERANSIN altinda) -> ALCAL (thr<0). Ters cikarsa +1.0
     VIS_SIGN_PITCH   = +1.0     # ileri yaklasma +pitch (Cfg.PITCH_SIGN ile ayni mantik)
     # Kazanclar / kapilar
     VIS_K_YAW        = 0.5      # yatay ortalama kazanci (yaw = SIGN*K*ex)
@@ -246,7 +255,7 @@ def speed_cap(d_horiz):
 
 
 # --- kamera devir esikleri (gorus fazi hook'u icin) ---
-KAMERA_FOV_YARIM = math.radians(65.77)  # 131.54 derece / 2
+KAMERA_FOV_YARIM = math.radians(62.5)   # 125 derece / 2 (SDK v2.2 resmi FOV)
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
 

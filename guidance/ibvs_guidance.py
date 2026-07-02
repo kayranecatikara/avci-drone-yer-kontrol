@@ -13,10 +13,14 @@ Goruntu ekseni: sol-ust orijin, x -> SAGA, y -> ASAGI.
 EKSEN ESLEME (SDK fizigi ile TUTARLI):
   SDK'da  pitch/roll = YATAY ivme (ileri/sag),  throttle = DIKEY hiz (tirman/alc).
   Kullanicinin niyeti "hedefi ortala + yaklas". Fizige gore dogru eslesme:
-    yaw      <- ex     : hedefi YATAYDA ortala (burnu/govdeyi dondur)
-    throttle <- ey     : hedefi DIKEYDE ortala (irtifa ile: hedef alttaysa alc / usttyeyse tirman)
-    pitch    <- ILERI  : merkeze yakinsa YAKLAS (bbox buyudukce yavasla)
-    roll     = 0       : bu asamada kapali (agility/sonraki asama)
+    yaw      <- ex            : hedefi YATAYDA ortala (burnu/govdeyi dondur)
+    throttle <- (ey - EY_REF) : hedefi DIKEY REFERANSTA tut. SDK v2.2: kamera 25
+                                derece YUKARI tilt'li -> ayni irtifadaki hedef
+                                merkezin ALTINDA gorunur; referans cizgisi
+                                (VIS_EY_REF~0.43) o noktadir. Tam merkeze ortalamak
+                                drone'u hedefin ALTINA oturturdu (tilt telafisi).
+    pitch    <- ILERI         : referansa yakinsa YAKLAS (bbox buyudukce yavasla)
+    roll     = 0              : bu asamada kapali (agility/sonraki asama)
   (Kullanici spec'inde pitch<-ey yaziyordu; SDK'da pitch=YATAY oldugundan dikey
    ortalama throttle'a takaslandi. SIGN_* + canli tune ile dogrulanir.)
 
@@ -81,14 +85,16 @@ class AvciGorselGuduum:
     def _komut(self, exf, eyf, area, p):
         # YATAY ortala: burnu/govdeyi hedefe dondur (yaw hiz komutu)
         yaw = clamp(p.VIS_SIGN_YAW * p.VIS_K_YAW * exf, -1.0, 1.0)
-        # DIKEY ortala: irtifa ile (hedef altta ey>0 -> genelde alc; SIGN ile kalibre)
-        throttle = clamp(p.VIS_SIGN_VZ * p.VIS_K_VZ * eyf, -1.0, 1.0)
+        # DIKEY: hedefi REFERANS cizgisinde tut (kamera 25 derece tilt telafisi).
+        # eyd = referansa gore hata; referans=0 ise eski "tam merkeze ortala" davranisi.
+        eyd = eyf - float(getattr(p, "VIS_EY_REF", 0.0))
+        throttle = clamp(p.VIS_SIGN_VZ * p.VIS_K_VZ * eyd, -1.0, 1.0)
         roll = 0.0                                             # bu asamada kapali
-        # ILERI yaklas: SADECE hedef makul ortalandiysa (merkez-kapisi) ve bbox kucukse
-        # (uzak). bbox buyudukce (area -> AREA_STOP) yaklasma hizi 0'a iner -> yavasla.
-        if abs(exf) < p.VIS_CENTER_GATE and abs(eyf) < p.VIS_CENTER_GATE:
+        # ILERI yaklas: SADECE hedef makul hizalandiysa (kapi REFERANSA gore) ve bbox
+        # kucukse (uzak). bbox buyudukce (area -> AREA_STOP) yaklasma hizi 0'a iner.
+        if abs(exf) < p.VIS_CENTER_GATE and abs(eyd) < p.VIS_CENTER_GATE:
             fwd = max(0.0, p.VIS_K_FWD * (1.0 - area / max(p.VIS_AREA_STOP, 1e-6)))  # >=0: geri gitme YOK, sadece yavasla
             pitch = clamp(p.VIS_SIGN_PITCH * fwd, -p.VIS_FWD_MAX, p.VIS_FWD_MAX)
         else:
-            pitch = 0.0                                        # once ortala, sonra yaklas
+            pitch = 0.0                                        # once hizala, sonra yaklas
         return float(throttle), float(pitch), float(roll), float(yaw)

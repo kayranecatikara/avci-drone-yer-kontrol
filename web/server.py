@@ -233,6 +233,7 @@ TUNE_ALLOW = {
     "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH",
     "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
     "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
+    "VIS_EY_REF",   # kamera 25 derece tilt telafisi (dikey referans; sim'de kalibre)
 }
 
 # ----------------------------------------------------------
@@ -508,6 +509,7 @@ def build_telemetry():
     gorsel = {
         "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
         "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
+        "ey_ref": float(getattr(Cfg, "VIS_EY_REF", 0.0)),   # dikey referans (tilt telafisi; overlay cizer)
         "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),

@@ -27,7 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))            # .../arac
 VERI_DIR = os.path.join(os.path.dirname(HERE), "veri")       # ucus loglari artik veri/ altinda
 
 # --- Kontrolcu sabitleri (guidance/ana_kontrol.py Cfg ile ayni; teshis esikleri) ---
-FOV_HALF_DEG = 65.77        # KAMERA_FOV_YARIM (131.54/2)
+FOV_HALF_DEG = 62.5         # KAMERA_FOV_YARIM (125/2; SDK v2.2 resmi FOV)
 KAMERA_MENZIL_CM = 5000.0   # 50 m
 STRIKE_RANGE_CM = 6000.0
 MAX_DELTA = 0.05
