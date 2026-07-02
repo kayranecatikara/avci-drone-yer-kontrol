@@ -172,12 +172,13 @@ class Cfg:
     YAW_DEADBAND = math.radians(3)
 
     # --- None YONETIMI (tik @50Hz) ---
-    # YENI SIM (v2.2) GOZLEMI: hedef GPS normalde 1 Hz, ama 'Guncelleme hizi siniri'
-    # bozulmasi 0.25 Hz'e (4 sn'de 1 paket) dusurebiliyor + 1 sn gecikme ekliyor.
-    # Eski 1.5 sn tutma penceresi her paket arasinda DROPOUT/loiter'a dusuruyordu
-    # (gorev duraksiyordu). Filtre kestirimi lead'li oldugundan son kestirimi
-    # ~6 sn tasimak guvenli; loiter yalnizca GERCEK uzun kesintide devreye girer.
-    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (0.25 Hz'e dayanikli)
+    # SIM v0.0.5: hedef GPS NOMINAL 5 Hz (yarisma kosulu; eskiden 1 Hz'di) ve
+    # KESINTI ZAMANLAMASI tanimlandi: 30. saniyeden sonra her 10 sn'de bir ~2 sn
+    # veri gelmeyebilir (+ gecikme/gurultu bozulmalari surer, degerleri aciklanmaz).
+    # 6 sn'lik tutma penceresi 2 sn'lik kesintileri bol marjla kapatir; filtre
+    # kestirimi lead'li oldugundan tasimak guvenli. Loiter yalnizca GERCEK uzun
+    # kesintide devreye girer.
+    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (2 sn kesintilere bol marj)
     DROPOUT_TICKS = 300        # otesi: dropout -> loiter
 
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---

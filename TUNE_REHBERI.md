@@ -80,7 +80,8 @@ Her tikte (50 Hz): İnovasyonlu J kestirimi (yatay=2sn lead, dikey=anlık, hedef
 ### İki kaynaklı strateji (önemli)
 - Önce **"Gerçek GPS (test)"** ile tune: filtresiz, güdümün tavanı; neden-sonuç net.
 - Sonra **İnovasyonlu J** ile doğrula: bozulmalar koşudan koşuya değişir
-  (0.25 Hz + 1 sn gecikme görülebilir) → **3-5 koşu**, ortalamaya bak.
+  (v0.0.5: hedef GPS nominal **5 Hz**; 30. sn'den sonra her 10 sn'de ~2 sn kesinti
+  + gecikme/gürültü görülebilir) → **3-5 koşu**, ortalamaya bak.
 - Gerçek-GPS'te iyi ama J'de kötüyse sorun toleranstır → sertleştirme;
   `COMMIT_RANGE` ↑ / `STRIKE_RANGE` ↑ (erken hız-eşleme) dene.
 
@@ -130,7 +131,7 @@ Nerede: **S** = slider · **A** = canlı API (slider yok; Cfg'den de olur) · **
 | Param | Vars. | Ne yapar |
 |---|---|---|
 | `MAX_DELTA` S | 0.05 | Tik başına maks komut değişimi (TÜM eksenler!). 0.03 yumuşak/hantal · 0.05 denge · 0.08+ tepkili/titrek |
-| `HOLD_TICKS` C | 300 | ~6 sn veri tutma (0.25 Hz için ayarlı — dokunma) |
+| `HOLD_TICKS` C | 300 | ~6 sn veri tutma (v0.0.5'in 2 sn'lik kesintilerine bol marj — dokunma) |
 
 **Dokunma:** `A_MAX_STRIKE, VZ_MAX, Z_SIGN, PITCH/ROLL_MAX, DERIV_EMA, POS_DEADBAND`, filtre `telafi_sn`.
 

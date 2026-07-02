@@ -9,7 +9,7 @@ pipeline anahtarı (OTO / GPS / GÖRSEL).
 
 ```
 Oyun (Unreal, TCP 127.0.0.1:12345)
-   │ bozuk hedef GPS (cm, max 1 Hz)          ┌──────────────────────────────┐
+   │ bozuk hedef GPS (cm, 5 Hz)              ┌──────────────────────────────┐
    ▼                                          │  models/best.pt (YOLO, talon)│
 sdk/drone_sdk.py ──► web/server.py ◄── detection/ (pencere yakalama + tespit)
                         │                                   ▲ oyun penceresi karesi
