@@ -1,0 +1,2 @@
+# .bat dosyalari cmd.exe icin HER ZAMAN CRLF ile checkout edilsin
+*.bat text eol=crlf
