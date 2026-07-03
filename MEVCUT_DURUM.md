@@ -5,6 +5,24 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 FAZ 0 — K sanity bulgusu (2026-07-04, truth-tabanlı ölçüm):**
+> **Zincir (K + 25° tilt + attitude) AÇISAL olarak doğrulandı; mutlak kanat-genişliği
+> ölçümü küçük-hedef limitinde başarısız — kök neden K DEĞİL, ölçüm prosedürü.**
+> Ölçüm: 240 sn pasif/yerden, 3013 kare, siluet yöntemi. Sonuç: w_ölçülen medyan
+> ~7-9 px, w_beklenen (kanat uçları tam-zincir izdüşümü, yatış dahil) ~16-18 px,
+> oran ~0.40 (sapma −%54, eşik %5). **Ama bu bir K/HFOV hatası değil:** (1) hareket-farkı
+> hakemi 3 koşuda tutarlı açısal offset verdi (yatay ~0°, dikey ~−1°, MAD ~4-6°) —
+> reprojeksiyon hedefin açısal konumunu doğru koyuyor; fx %54 yanlış olsaydı merkez-dışı
+> hedefte offset onlarca derece olurdu. (2) w_ölçülen mesafeden **bağımsız** ~7 px sabit
+> (fiziksel değil; yakında büyümesi gerekirdi) — siluet Talon'un tam kanadını değil, hep
+> aynı yüksek-kontrast gövde çekirdeğini yakalıyor. Sebep: Talon render'da soluk/küçük
+> (40-115 m'de 7-24 px), kanat uçları düşük kontrast (eşik kesiyor) + FPV kromatik
+> aberasyon + hedef ara ara güneşe yakın geçiyor + truth GPS gecikmeli (reproj ~100-130 px
+> kayıyor). **Karar bekliyor:** K açısal-doğrulama ile kabul edilip FAZ 1'e geçilecek
+> (öneri) veya tek pasif koşuyla K pozitif-doğrulaması (offset-vs-merkez-dışılık regresyonu,
+> `veri/_tani_hareket.py`) kesinleştirilecek. `models/best.pt`'nin küçük hedefi görememesi
+> ayrı bir model işi (FAZ 1+), K sanity YOLO'suz siluetle yapıldı.
+
 > **🔔 Güncelleme — Sim v0.0.5 saha davranışları (2026-07-04, FAZ 0 ölçüm oturumları):**
 > İki kritik sim davranışı tekrarlanabilir şekilde doğrulandı:
 > **(1) TCP dinleyici tıkanması:** art arda bağlan/kop döngülerinden sonra oyun yeni
