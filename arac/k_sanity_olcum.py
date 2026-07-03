@@ -71,7 +71,9 @@ GAME_TITLE_HINTS = ["dronesofwar", "drones of war", "drone of war"]
 VERI_DIR = os.path.join(_PROJ_ROOT, "veri")
 
 # --- Analiz kapilari (olcume girecek kareler) ---
-CONF_MIN = 0.45               # uretim esigiyle ayni (Cfg.VIS_CONF_MIN)
+CONF_MIN = 0.45               # uretim esigiyle ayni (Cfg.VIS_CONF_MIN); --conf ile ezilebilir
+                              # (geometri olcumu kilit karari degildir; dusuk-conf kutunun
+                              # genisligi de genelde dogrudur, gerekirse 0.35'e inilebilir)
 PROJ_MIN = 0.90               # kanat cizgisi ~goruntu duzlemine paralel (onden/arkadan)
 W_PX_MIN = 6.0                # cok kucuk bbox -> kuantizasyon gurultusu
 W_BEK_MIN = 5.0               # beklenen genislik de cok kucukse (hedef cok uzak) alma
@@ -274,7 +276,7 @@ def _zaman_indeksi(t_kare, i, dt_hedef):
     return j
 
 
-def analiz(csv_yolu):
+def analiz(csv_yolu, conf_min=CONF_MIN):
     rows = _yukle(csv_yolu)
     if not rows:
         print("[HATA] CSV bos: %s" % csv_yolu)
@@ -313,7 +315,7 @@ def analiz(csv_yolu):
             ele["tespit_yok"] += 1
             continue
         conf = _f(r["conf"]) or 0.0
-        if conf < CONF_MIN:
+        if conf < conf_min:
             ele["conf"] += 1
             continue
         if int(float(r["W"])) != W or int(float(r["H"])) != H:
@@ -437,14 +439,17 @@ def main():
     ap.add_argument("--analiz", type=str, default=None,
                     help="yakalama YAPMADAN var olan CSV'yi analiz et")
     ap.add_argument("--csv", type=str, default=None, help="cikti CSV yolu")
+    ap.add_argument("--conf", type=float, default=CONF_MIN,
+                    help="analiz conf kapisi (varsayilan uretim esigi %.2f; geometri "
+                         "olcumu icin gerekirse 0.35'e inilebilir)" % CONF_MIN)
     arg = ap.parse_args()
     if arg.analiz:
-        sonuc = analiz(arg.analiz)
+        sonuc = analiz(arg.analiz, conf_min=arg.conf)
     else:
         yol = arg.csv or os.path.join(
             VERI_DIR, time.strftime("k_sanity_%Y%m%d_%H%M%S.csv"))
         yol = olc(arg.sure, arg.tirman, yol, imgsz=arg.imgsz)
-        sonuc = analiz(yol) if yol else None
+        sonuc = analiz(yol, conf_min=arg.conf) if yol else None
     sys.exit(0 if (sonuc and sonuc.get("gecti")) else 1)
 
 
