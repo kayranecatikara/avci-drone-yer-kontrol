@@ -5,6 +5,16 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 Güncelleme — SERT AYRIM / truth politikası (2026-07-03, yarisma-pipeline branch):**
+> Truth kanalı (`get_debug_truth`) yalnızca **geliştirme/doğrulama** içindir ve artık
+> YALNIZCA `arac/` altında yaşar (CLAUDE.md "SERT AYRIM" + "TESLİM PAKETİ" bölümleri).
+> Uçuş pipeline'ından (detection/guidance/fusion/web/main.py) **tüm truth izleri söküldü**:
+> "Gerçek GPS (test)" kaynağı, kıyas/SAPMA paneli, Z-teşhis truth satırları, uçuş
+> logundaki true_*/gercek_mesafe/nose_off_true kolonları ve `_kamera_kontrol` stub'ı
+> KALDIRILDI. Bu belgedeki eski kıyas paneli / kaynak geçişi anlatımları TARİHSELDİR.
+> Filtre doğrulama yeni araçla yapılır: `arac/filtre_dogrulama.py` (RMSE/max/gecikme);
+> paket temizliği `arac/paket_kontrol.py` ile denetlenir.
+
 > **🔔 Güncelleme — Simülasyon v0.0.5 (2026-07-02, koordinatörlük maili):**
 > (1) **Hedef GPS artık 5 Hz** (yarışma koşulu; önceki sürümlerde 1 Hz idi). (2) Simülasyonda **performans iyileştirmeleri** yapıldı.
 > **✅ Uyum UYGULANDI (2026-07-03):** İnovasyonlu J'nin PREDICT zaman adımı **`dt` 1.0 → 0.2** yapıldı ve ilk hız tahmini `(Δkonum)/dt` ile cm/s'ye ölçeklendi (`fusion/inovasyonlu_j_v2.py`; tüm kullanım yerleri varsayılanla kurulduğundan tek noktadan düzeldi). Sentetik testte (50 Hz tik + 5 Hz GPS) eski `dt=1.0` **hız kestirimini bozuyordu** (hata ~16 m/s); `dt=0.2` ile ~1.2 m/s'ye indi. **Kalan:** R/Qp/Qw/gate'i v0.0.5 sim'inde yeniden doğrula. Detaylar §5 (fusion) ve §6.

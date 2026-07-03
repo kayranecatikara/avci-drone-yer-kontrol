@@ -144,8 +144,9 @@ def analiz(path):
     A = np.where(active)[0]
     t_a = t[A]
 
-    # --- truth var mi? ---
-    gm = cols["gercek_mesafe"]
+    # --- truth var mi? (YENI ucus loglarinda truth kolonlari HIC YOK — SERT AYRIM:
+    #     ucus pipeline'i truth yazamaz; eski loglar icin geriye uyumlu okunur) ---
+    gm = cols.get("gercek_mesafe", np.full(n, np.nan))
     truth_var = np.sum(~np.isnan(gm[A])) > 0.5 * len(A)
     if truth_var:
         menzil = gm.copy()
@@ -153,9 +154,9 @@ def analiz(path):
     else:
         menzil = np.sqrt(np.nan_to_num(cols["ex"])**2 + np.nan_to_num(cols["ey"])**2
                          + np.nan_to_num(cols["ez"])**2)
-        menzil_kaynak = "FILTRELI kestirim (truth yok!)"
-        print("\n[!] TRUTH YOK - FOV/geri-cekilme metrikleri FILTRELI kestirime dayali "
-              "(bias olabilir). Temiz teshis icin oyunda debug truth acik / gercek modda uc.")
+        menzil_kaynak = "FILTRELI kestirim (truth kolonu yok)"
+        print("\n[!] TRUTH KOLONU YOK (yeni ucus loglari truth icermez - SERT AYRIM) ->")
+        print("    FOV/geri-cekilme metrikleri FILTRELI kestirime dayali (bias olabilir).")
     print("  Menzil kaynagi :", menzil_kaynak, " | Mod: terminal istatistik APPROACH+STRIKE")
 
     menzil_a = menzil[A]
@@ -254,11 +255,11 @@ def analiz(path):
     print("\n" + "-" * 78)
     print("(c) GORSEL TEMAS KAYBI (burun FOV konisi disinda)")
     print("-" * 78)
-    nose = cols["nose_off_true"][A]
+    nose = cols.get("nose_off_true", np.full(n, np.nan))[A]
     if np.all(np.isnan(nose)):
-        # truth yok -> yaw_err'e dus (filtreye gore; uyari)
+        # truth kolonu yok (yeni loglar) -> yaw_err'e dus (filtreye gore; uyari)
         nose = np.degrees(np.abs(cols["yaw_err"][A]))
-        print("  [!] nose_off_true yok (truth yok) -> |yaw_err| (FILTREYE gore) kullaniliyor.")
+        print("  [!] nose_off_true kolonu yok -> |yaw_err| (FILTREYE gore) kullaniliyor.")
         nose_abs = nose
     else:
         nose_abs = np.abs(nose)

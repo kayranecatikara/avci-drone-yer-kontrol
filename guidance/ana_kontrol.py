@@ -3,7 +3,11 @@
 ================================================================================
 AVCI DRONE — ANA KONTROL DONGUSU  (FAZ 1: GNSS ile Yaklasma)
 ================================================================================
-J (GNSSDuzeltici) + FAZ-1 guduum + handoff + debug olcumu, tek dosyada.
+J (GNSSDuzeltici) + FAZ-1 guduum + handoff, tek dosyada.
+
+>>> SERT AYRIM (CLAUDE.md): Bu dosya UCUS PIPELINE'idir; yalnizca yarismada
+    mevcut telemetriyle calisir, sim'in ozel dogrulama kanallarina erisemez.
+    Filtre/gudum dogrulamasi arac/ altindaki gelistirme scriptlerinin isidir. <<<
 
 >>> BU DOSYA YENI GUDUM ILE DEGISTIRILDI <<<
     Eski "RAM / hiz-takipli kuyruk takibi" yaklasma mantigi (V_RAM, STANDOFF,
@@ -24,7 +28,8 @@ AKIS:
   2. Kendi TEMIZ konumunu al (get_drone_location)
   3. Bagil hatayi GOVDE cercevesine cevir -> PD ile yaklasma komutu uret
   4. Tespit menziline (HANDOFF_RANGE) girince -> durum "KILIT" (gorus devralabilir)
-  5. Gorus/CV fazi [YAPILACAK]: _kamera_kontrol stub'i yerine YOLO baglanacak
+  5. Gorus/CV fazi: YOLO tespiti son_tespit koprusunden gelir (server yazar);
+     yarisma pipeline refaktoruyle takip/PnP katmanlari eklenecek
 
 KULLANIM (gercek oyun):
     import drone_sdk
@@ -69,15 +74,14 @@ _LOG_COLS = [
     # hedef (FILTRE): est=2sn lead, anlik=lead'siz, ham=bozuk
     "est_x", "est_y", "est_z", "z_ref", "xy_anlik_x", "xy_anlik_y", "son_z_anlik",
     "son_hiz_x", "son_hiz_y", "son_hiz_z", "son_ham_x", "son_ham_y", "son_ham_z",
-    # hedef (GERCEK / truth) + drone truth + gercek mesafe + hedef rotasyon (guvenilmez)
-    "true_tx", "true_ty", "true_tz", "true_dx", "true_dy", "true_dz", "gercek_mesafe",
+    # hedef rotasyonu (ANA bozuk akis - guvenilmez, referans icin)
     "tgt_roll", "tgt_pitch", "tgt_yaw",
     # hata / guduum ici
     "ex", "ey", "ez", "d_h", "e_fwd", "e_right", "vcap", "mag_scale", "alc_oncelik", "ez_int",
     # terminal vurus (strike)
     "d_s", "v_close", "vdx", "vdy", "ax", "ay", "a_fwd", "a_right",
-    # yaw & FOV (nose_off_true = burun ile GERCEK hedef arasi aci, DERECE)
-    "bearing", "yaw_err", "nose_off_true",
+    # yaw
+    "bearing", "yaw_err",
     # ham komut (rate-limit ONCESI) vs uygulanan komut (rate-limit SONRASI = self.prev)
     "thr_raw", "pitch_raw", "roll_raw", "yaw_raw", "thr_cmd", "pitch_cmd", "roll_cmd", "yaw_cmd",
     # GORSEL GUDUM (VISUAL fazi): normalize bbox-merkez hatasi + gordu/conf/alan
@@ -183,7 +187,7 @@ class Cfg:
     DROPOUT_TICKS = 300        # otesi: dropout -> loiter
 
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
-    # True: ~2Hz konsola [Z] satiri basar. drone_z vs hedef irtifasi (filtre & GERCEK),
+    # True: ~2Hz konsola [Z] satiri basar: drone_z vs hedef irtifasi (filtre/ham),
     # ez, thr, hiz, pitch. Sorun cozulunce False yap.
     DEBUG_Z = True
 
@@ -269,18 +273,11 @@ KAMERA_FOV_YARIM = math.radians(kamera_model.HFOV_DEG / 2.0)   # YATAY yarim aci
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
 
-# Guduum kaynagi -> filtre fabrikasi. "gercek" filtre kullanmaz (truth'a gider).
-def _filtre_uret(kaynak):
-    if kaynak == "gercek":
-        return None                # Gercek GPS: filtre yok, truth'a git (sim/test)
-    return V2Filtre()              # varsayilan ve tek uretim filtresi: v2
-
-
 class AvciKontrol:
-    def __init__(self, drone, debug_olc=True, kaynak="v2"):
+    def __init__(self, drone, kaynak="v2"):
         self.drone = drone
-        self.kaynak = kaynak           # "v2" | "gercek"
-        self.filtre = _filtre_uret(kaynak)
+        self.kaynak = kaynak           # tek kaynak: "v2" (Inovasyonlu J)
+        self.filtre = V2Filtre()       # tek uretim filtresi
         self.durum = "ARAMA"            # ARAMA(yaklasma) -> KILIT(handoff/gorus)
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
@@ -299,21 +296,11 @@ class AvciKontrol:
         self._own_pxy = None            # onceki kendi yatay konum (cm)
         self._own_tv = None             # onceki olcum zamani
         self._own_v = np.zeros(2)       # kendi yatay hiz (cm/s, dunya)
-        # GERCEK modda hedef hizi (truth konum sonlu-fark) - carpisma-rotasi icin
-        self._gt_prev_p = None          # onceki truth hedef konum (cm)
-        self._gt_prev_t = None
-        self._gt_vel = np.zeros(3)      # hedef hizi (cm/s, 3B)
         self.none_count = 0
         self.last_est = None
         self.handoff = False
         self.handoff_announced = False
         self._kalkis_done = (not Cfg.TAKEOFF)
-
-        # debug olcum birikimi
-        self.debug_olc = debug_olc
-        self.ham_hatalar = []
-        self.j_hatalar = []
-        self.bozukluk_sayac = {}
 
         # ucus logu (Cfg.LOG_ENABLE) - lazy-open, uzunca zaman-damgali dosya
         self._log_f = None
@@ -330,14 +317,14 @@ class AvciKontrol:
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
 
     # ----------------------------------------------------------------
-    #  Guduum kaynagini CANLI degistir (v2/Gercek butonlari)
-    #  Yeni filtre taze baslar; FAZ-1 durumu da sifirlanir (temiz soft-start).
+    #  Gorev durumunu TAZE baslat (yeni filtre + FAZ-1 sifirlama; soft-start).
+    #  Tek kaynak: "v2" (Inovasyonlu J). Ayni kaynak tekrar secilirse dokunmaz.
     # ----------------------------------------------------------------
     def set_kaynak(self, kaynak):
-        if kaynak == self.kaynak and (self.filtre is not None or kaynak == "gercek"):
+        if kaynak == self.kaynak and self.filtre is not None:
             return                          # zaten o kaynak -> dokunma
         self.kaynak = kaynak
-        self.filtre = _filtre_uret(kaynak)
+        self.filtre = V2Filtre()
         self.son_ham = None                 # yeni filtre taze beslensin
         self.son_z_anlik = None
         self.son_xy_anlik = None
@@ -379,21 +366,6 @@ class AvciKontrol:
     #  None yonetimi (hold vs dropout) bunu kullanir.
     # ----------------------------------------------------------------
     def _hedef_temizle(self):
-        # GERCEK GPS modu: filtreyi atla, oyunun GERCEK hedef konumunu hedef al.
-        if self.kaynak == "gercek":
-            self.son_ham = self.drone.get_target_location()   # debug olcumu icin tut
-            dbg = self.drone.get_debug_truth()
-            if dbg.get("available"):
-                p = np.array(dbg["target"]["position"], float)
-                self.son_temiz = p
-                self.son_z_anlik = float(p[2])                # gercekte lead yok -> ayni z
-                self.son_xy_anlik = np.array([p[0], p[1]], float)  # carpisma-rotasi LOS'u icin
-                self.son_hiz = self._gercek_hedef_hiz(p)      # hedef hizi (truth sonlu-fark)
-                self._fresh = True                            # -> terminal vurus GERCEK modda da acilir
-            else:
-                self._fresh = False
-            return self.son_temiz
-
         ham = self.drone.get_target_location()
         if ham != self.son_ham:               # yeni telemetri paketi
             self.son_ham = ham
@@ -420,28 +392,6 @@ class AvciKontrol:
         else:
             self._fresh = False               # ratelimit ile donmus kare (yeni bilgi yok)
         return self.son_temiz                  # None olabilir (isinma)
-
-    # ----------------------------------------------------------------
-    #  Kamera: hedef goruus alaninda mi?  (STUB — GORUS FAZI HOOK'U)
-    #  >>> GERCEK SISTEM: burayi YOLO ile degistir. YOLO Talon'u kutu icine
-    #      alirsa (gordu=True) ve goruntuden bagil konum cikarirsa onu dondur.
-    #      Debug truth SADECE testte var; yarismada YOLO sart. FAZ-1 handoff
-    #      proximity-tabanlidir; gorus fazi devraldiginda bu hook kullanilacak.
-    # ----------------------------------------------------------------
-    def _kamera_kontrol(self, drone_pos, drone_yaw):
-        dbg = self.drone.get_debug_truth()
-        if not dbg.get("available"):
-            return False, None                 # Gercek yarisma: YOLO buraya baglanir
-        hedef_gercek = np.array(dbg["target"]["position"])
-        v = hedef_gercek[:2] - drone_pos[:2]
-        mesafe = np.linalg.norm(hedef_gercek - drone_pos)
-        if mesafe > KAMERA_MENZIL:
-            return False, None
-        bearing = math.atan2(v[1], v[0])
-        aci = abs(wrap_pi(bearing - drone_yaw))
-        if aci < KAMERA_FOV_YARIM:
-            return True, hedef_gercek
-        return False, None
 
     # ----------------------------------------------------------------
     #  EMA-filtreli hata turevi (degisken update-rate'e dayanikli)
@@ -477,25 +427,6 @@ class AvciKontrol:
         return self._own_v
 
     # ----------------------------------------------------------------
-    #  GERCEK modda hedef hizi (cm/s, 3B): truth konum sonlu-fark + EMA.
-    #  Carpisma-rotasi (v_des = v_hedef + V_CLOSE*LOS) icin gerekli; truth temiz
-    #  oldugundan sonlu-fark guvenli.
-    # ----------------------------------------------------------------
-    def _gercek_hedef_hiz(self, p):
-        now = time.perf_counter()
-        if self._gt_prev_p is None or self._gt_prev_t is None:
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-            return self._gt_vel
-        dt = now - self._gt_prev_t
-        if 1e-3 < dt < 0.5:
-            raw = (p - self._gt_prev_p) / dt
-            self._gt_vel = 0.7 * self._gt_vel + 0.3 * raw
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-        elif dt >= 0.5:
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-        return self._gt_vel
-
-    # ----------------------------------------------------------------
     #  Komut gonder (rate-limit + atomik set_control_surfaces)
     # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
@@ -508,9 +439,8 @@ class AvciKontrol:
 
     # ----------------------------------------------------------------
     #  UCUS LOGU: her tik zengin teshis satiri (Cfg.LOG_ENABLE). Lazy-open,
-    #  zaman-damgali dosya. Truth + drone/hedef rotasyon + nose_off_true burada
-    #  hesaplanir (loglama modu; her tik birkac SDK cagrisi kabul edilir).
-    #  d: cagri yerinden gelen alanlar (+ 'drone_pos','drone_yaw' -> nose_off_true icin).
+    #  zaman-damgali dosya. Drone/hedef rotasyonlari burada okunur (loglama
+    #  modu; her tik birkac SDK cagrisi kabul edilir). d: cagri yerinden gelen alanlar.
     # ----------------------------------------------------------------
     def _log(self, phase, d):
         if not Cfg.LOG_ENABLE:
@@ -522,7 +452,7 @@ class AvciKontrol:
             self._log_w = csv.writer(self._log_f)
             self._log_w.writerow(_LOG_COLS)
             self._log_f.flush()
-        # --- truth + rotasyonlar (guvenli; hata olursa alan bos kalir) ---
+        # --- rotasyonlar (guvenli; hata olursa alan bos kalir) ---
         try:
             rot = self.drone.get_drone_rotation()
             d["drone_roll"], d["drone_pitch"] = float(rot[0]), float(rot[1])
@@ -531,19 +461,6 @@ class AvciKontrol:
         try:
             trot = self.drone.get_target_rotation()             # ANA (bozuk) akis - guvenilmez
             d["tgt_roll"], d["tgt_pitch"], d["tgt_yaw"] = float(trot[0]), float(trot[1]), float(trot[2])
-        except Exception:
-            pass
-        try:
-            dbg = self.drone.get_debug_truth()
-            if dbg.get("available"):
-                tp = dbg["target"]["position"]; dp = dbg["drone"]["position"]
-                d["true_tx"], d["true_ty"], d["true_tz"] = float(tp[0]), float(tp[1]), float(tp[2])
-                d["true_dx"], d["true_dy"], d["true_dz"] = float(dp[0]), float(dp[1]), float(dp[2])
-                d["gercek_mesafe"] = math.sqrt((tp[0]-dp[0])**2 + (tp[1]-dp[1])**2 + (tp[2]-dp[2])**2)
-                dpos = d.get("drone_pos"); dyaw = d.get("drone_yaw")
-                if dpos is not None and dyaw is not None:        # burun ile GERCEK hedef acisi (deg)
-                    d["nose_off_true"] = math.degrees(
-                        wrap_pi(math.atan2(tp[1] - dpos[1], tp[0] - dpos[0]) - dyaw))
         except Exception:
             pass
         d["phase"] = phase
@@ -569,7 +486,6 @@ class AvciKontrol:
             "vown_x": v_own[0], "vown_y": v_own[1],
             "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
             "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
-            "drone_pos": drone_pos, "drone_yaw": drone_yaw,
         })
 
     def _loiter(self):
@@ -632,7 +548,6 @@ class AvciKontrol:
             "vown_x": v_own[0], "vown_y": v_own[1],
             "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
             "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
-            "drone_pos": drone_pos, "drone_yaw": drone_yaw,
             "vis_ex": self.ibvs.ex_f, "vis_ey": self.ibvs.ey_f,
             "vis_gordu": 1 if tespit is not None else 0,
         }
@@ -677,19 +592,6 @@ class AvciKontrol:
         return None                              # -> adim() GPS yoluna DUSER (bu tik)
 
     # ----------------------------------------------------------------
-    #  Debug olcum: J gercekten ham'dan iyi mi?
-    # ----------------------------------------------------------------
-    def _debug_olc(self):
-        dbg = self.drone.get_debug_truth()
-        if not dbg.get("available") or self.son_temiz is None: return
-        gercek = np.array(dbg["target"]["position"])
-        ham = np.array(self.son_ham)
-        self.ham_hatalar.append(np.linalg.norm(ham - gercek))
-        self.j_hatalar.append(np.linalg.norm(self.son_temiz - gercek))
-        for ad in self.drone.get_active_corruption():
-            self.bozukluk_sayac[ad] = self.bozukluk_sayac.get(ad, 0) + 1
-
-    # ----------------------------------------------------------------
     #  TEK kontrol adimi (donguude bir kez cagrilir) — FAZ-1 guduum
     # ----------------------------------------------------------------
     def adim(self):
@@ -702,7 +604,6 @@ class AvciKontrol:
 
         # 1) J ile bozuk hedefi temizle (self._fresh: yeni kestirim geldi mi?)
         self._hedef_temizle()
-        if self.debug_olc: self._debug_olc()
 
         # 2) KALKIS (non-blocking): arama irtifasina tirman, sonra yaklasmaya gec.
         if not self._kalkis_done:
@@ -897,16 +798,12 @@ class AvciKontrol:
         if Cfg.DEBUG_Z:
             self._dbgz = getattr(self, "_dbgz", 0) + 1
             if self._dbgz % 25 == 0:                         # ~2 Hz
-                dbg = self.drone.get_debug_truth()
-                ztrue = (dbg["target"]["position"][2] if dbg.get("available") else None)
                 raw_z = (self.son_ham[2] if self.son_ham is not None else None)
-                ztrue_s = f"{ztrue:8.0f}" if ztrue is not None else "    NA  "
-                raw_s   = f"{raw_z:8.0f}" if raw_z is not None else "    NA  "
-                corr = ",".join(self.drone.get_active_corruption()) or "-"
-                print(f"[Z] dz={drone_pos[2]:8.0f} zref={z_ref:8.0f} ztrue={ztrue_s} "
+                raw_s = f"{raw_z:8.0f}" if raw_z is not None else "    NA  "
+                print(f"[Z] dz={drone_pos[2]:8.0f} zref={z_ref:8.0f} "
                       f"zlead={float(est[2]):8.0f} rawz={raw_s} ez={ez:+7.0f} dez={de[2]:+7.0f} "
                       f"thr={thr_raw:+.2f} spd={spd:6.0f} pit={pitch_raw:+.2f} dh={d_h:7.0f} "
-                      f"{self.durum} corr=[{corr}]")
+                      f"{self.durum}")
 
         if self.handoff and not self.handoff_announced:
             print(f"[HANDOFF] tespit menzilinde (mesafe<{Cfg.HANDOFF_RANGE:.0f}cm). Gorus devralabilir.")
@@ -943,7 +840,6 @@ class AvciKontrol:
                 "thr_raw": thr_raw, "pitch_raw": pitch_raw, "roll_raw": roll_raw, "yaw_raw": yaw_raw,
                 "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
                 "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
-                "drone_pos": drone_pos, "drone_yaw": drone_yaw,   # _log: truth + nose_off_true icin
             })
 
     # ----------------------------------------------------------------
@@ -963,17 +859,3 @@ class AvciKontrol:
             self.drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)   # hover ile birak
             self.drone.disconnect()
 
-    # ----------------------------------------------------------------
-    #  Debug ozet (test sonrasi)
-    # ----------------------------------------------------------------
-    def ozet(self):
-        if not self.ham_hatalar:
-            return "Debug olcum yok."
-        h = np.array(self.ham_hatalar)/100; j = np.array(self.j_hatalar)/100
-        s = []
-        s.append(f"Ham hedef hatasi : {h.mean():.1f} m")
-        s.append(f"J hedef hatasi   : {j.mean():.1f} m")
-        s.append(f"J kazanci        : %{100*(h.mean()-j.mean())/h.mean():.0f}  "
-                 f"({'J IYI' if j.mean()<h.mean() else 'J KOTU!'})")
-        s.append(f"Aktif bozukluklar: {self.bozukluk_sayac}")
-        return "\n".join(s)

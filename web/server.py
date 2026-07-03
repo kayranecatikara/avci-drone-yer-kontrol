@@ -20,13 +20,15 @@ import json
 import os
 import threading
 import time
-from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sdk import drone_sdk as drone
 from guidance.ana_kontrol import AvciKontrol, Cfg
-from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
 import numpy as np
+
+# >>> SERT AYRIM (CLAUDE.md): web/ UCUS PIPELINE'inin parcasidir; yalnizca
+#     yarismada mevcut telemetriyle calisir. Filtre dogrulama/sapma olcumu
+#     arac/ altindaki gelistirme scriptlerinin isidir (arayuzden kaldirildi). <<<
 
 # Ekran yakalama icin
 import mss
@@ -289,62 +291,6 @@ MANUEL_TIMEOUT = 0.7         # sn: bu sureden uzun giris gelmezse HOVER'a gec
 
 # Telafi tarama testi tamamlandi -> en iyi telafi_sn=2.0 (Efe'nin orijinal ayari).
 
-# ----------------------------------------------------------
-#  SAPMA OLCUMU: tek uretim filtresi Inovasyonlu J, GERCEGE hatasi.
-#  Ham taban cizgisiyle birlikte. Gudume DOKUNMAZ; sadece sim/debug olcum.
-#  (Eski v1 / v2.4 kiyas adaylari kaldirildi; tek filtre kaldi.)
-# ----------------------------------------------------------
-_kiyas_j = JFiltre()        # Inovasyonlu J: uretim filtresi (sapma olcumu)
-_kiyas_idx = 0
-_kiyas_son_ham = None
-# Son ~80 olcumun penceresi (anlik performans; eski veriye takilmaz)
-_kiyas_ham_hata = deque(maxlen=80)
-_kiyas_j_hata = deque(maxlen=80)
-
-# Olcum CSV log: her paket icin ham/J hatasi (m). Her baslangicta sifirlanir.
-_KIYAS_LOG = os.path.join(VERI_DIR, "kiyas_log.csv")
-try:
-    _kiyas_log_f = open(_KIYAS_LOG, "w", encoding="utf-8")
-    _kiyas_log_f.write("paket,ham_m,j_m\n")
-    _kiyas_log_f.flush()
-except Exception:
-    _kiyas_log_f = None
-
-
-def _kiyas_guncelle():
-    """Her YENI ham pakette Inovasyonlu J'yi besle, gercege hatasini olc."""
-    global _kiyas_idx, _kiyas_son_ham
-    ham = drone.get_target_location()
-    if ham == _kiyas_son_ham:
-        return
-    _kiyas_son_ham = ham
-    truth = drone.get_debug_truth()
-    if not truth.get("available"):
-        return
-    gercek = np.array(truth["target"]["position"], float)
-    idx = _kiyas_idx
-    _kiyas_idx += 1
-    hx, hy, hz = ham
-    ham_e = float(np.linalg.norm(np.array(ham, float) - gercek))
-    _kiyas_ham_hata.append(ham_e)
-    j_e = None
-
-    # Inovasyonlu J (uretim): anlik cikti -> su anki gercekle karsilastir
-    j_out = _kiyas_j.guncelle(hx, hy, hz)
-    if j_out is not None:
-        j_e = float(np.linalg.norm(np.array(j_out, float) - gercek))
-        _kiyas_j_hata.append(j_e)
-
-    # CSV log (metre): bos sutun = o pakette cikti yok (None/isinma)
-    if _kiyas_log_f is not None:
-        he = "%.2f" % (ham_e / 100.0)
-        js = ("%.2f" % (j_e / 100.0)) if j_e is not None else ""
-        try:
-            _kiyas_log_f.write("%d,%s,%s\n" % (idx, he, js))
-            _kiyas_log_f.flush()
-        except Exception:
-            pass
-
 
 def _manuel_uygula():
     """Manuel modda: tarayicidan gelen son kontrol komutunu drona gonderir.
@@ -373,11 +319,7 @@ def kontrol_dongusu():
                     elif gorev_aktif:
                         beyin.adim()              # tam kontrol (drone hedefe gider)
                     else:
-                        beyin._hedef_temizle()    # sadece J'yi guncelle (olcum)
-                        if beyin.debug_olc:
-                            beyin._debug_olc()    # ham vs J hatasini olc
-                    # Kiyas HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
-                    _kiyas_guncelle()             # Inovasyonlu J sapma olcumu (ham vs J)
+                        beyin._hedef_temizle()    # sadece J'yi guncelle (pasif izleme)
             except Exception:
                 pass
         time.sleep(0.02)   # 50 Hz
@@ -466,36 +408,15 @@ def build_telemetry():
     target_spd_ms = tspd * CM_TO_M
 
     # Avci-hedef 3B mesafe — HAM GPS ile (bozuk). Ekranda gosterilen ana deger budur;
-    # bozuk GPS spoof/sicramasinda ziplayabilir (bu normal, ham veri gostergesi).
+    # bozuk GPS sicramasinda ziplayabilir (bu normal, ham veri gostergesi).
     distance_m = ((dx - tx) ** 2 + (dy - ty) ** 2 + (dz - tz) ** 2) ** 0.5
 
-    # (Debug) Gercek (bozulmamis) degerler - oyunda debug acikken gelir.
-    truth = drone.get_debug_truth()
-    debug_info = {"available": bool(truth.get("available"))}
-    gercek_mesafe_m = None                       # avci <-> GERCEK hedef 3B mesafe (debug varsa)
-    if debug_info["available"]:
-        adx, ady, adz = (c * CM_TO_M for c in truth["drone"]["position"])
-        tgx, tgy, tgz = (c * CM_TO_M for c in truth["target"]["position"])
-        debug_info["drone_real"] = {"x": adx, "y": ady, "z": adz}
-        debug_info["target_real"] = {"x": tgx, "y": tgy, "z": tgz}
-        # GERCEK mesafe: gercek avci konumu <-> gercek hedef konumu (bozulmamis)
-        gercek_mesafe_m = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
-        # Hedef HAM GPS ile GERCEK konum arasindaki fark (bozulma miktari, metre)
-        debug_info["target_raw_error_m"] = (
-            (tx - tgx) ** 2 + (ty - tgy) ** 2 + (tz - tgz) ** 2) ** 0.5
-        # Avci okumasi ile gercegi arasindaki fark (temiz olmali ~0)
-        debug_info["drone_error_m"] = (
-            (dx - adx) ** 2 + (dy - ady) ** 2 + (dz - adz) ** 2) ** 0.5
-        debug_info["corruptions"] = list(truth.get("corruption_active", []))
-
-    # J (GNSS duzeltici) durumu ve canli olcum (beyin_lock ile guvenli oku)
+    # J (GNSS duzeltici) durumu (beyin_lock ile guvenli oku)
     with beyin_lock:
         j_durum = beyin.durum
-        j_kaynak = beyin.kaynak           # aktif guduum kaynagi (Inovasyonlu J / gercek)
+        j_kaynak = beyin.kaynak           # aktif guduum kaynagi (Inovasyonlu J)
         j_temiz = None if beyin.son_temiz is None else (
             float(beyin.son_temiz[0]), float(beyin.son_temiz[1]), float(beyin.son_temiz[2]))
-        ham_list = list(beyin.ham_hatalar)
-        j_list = list(beyin.j_hatalar)
         vis_tespit = _son_tespit_ui       # normalize son tespit (dedektor thread yazar)
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
@@ -505,32 +426,6 @@ def build_telemetry():
         j_info["temiz"] = {"x": j_temiz[0] * CM_TO_M,
                            "y": j_temiz[1] * CM_TO_M,
                            "z": j_temiz[2] * CM_TO_M}
-    if ham_list:
-        n = len(ham_list)
-        ham_ort = float(sum(ham_list)) / n / 100.0   # cm -> m, ortalama
-        j_ort = float(sum(j_list)) / n / 100.0
-        j_info["ham_hata_ort_m"] = ham_ort
-        j_info["j_hata_ort_m"] = j_ort
-        j_info["kazanc_pct"] = (100.0 * (ham_ort - j_ort) / ham_ort) if ham_ort > 0 else 0.0
-        j_info["ornek"] = n
-
-    # Sapma ozeti (gercege hata, metre): uretim Inovasyonlu J + Ham taban cizgisi
-    with beyin_lock:
-        ham_h = list(_kiyas_ham_hata)
-        j_h = list(_kiyas_j_hata)
-    kiyas = {}
-    if ham_h:
-        kiyas["ham_ort_m"] = sum(ham_h) / len(ham_h) / 100.0
-    # Ozet: ortalama (tipik), std (dalgalanma), max (en kotu sapma).
-    def _ozet(ad, hlist):
-        if not hlist:
-            return
-        a = np.array(hlist, float) / 100.0          # cm -> m
-        kiyas[ad + "_ort_m"] = float(a.mean())
-        kiyas[ad + "_std_m"] = float(a.std())
-        kiyas[ad + "_max_m"] = float(a.max())
-        kiyas[ad + "_ornek"] = int(a.size)
-    _ozet("j", j_h)
 
     # (GECICI TANI) kontrolcunun SON gonderdigi dikey/ileri komut -> tani_irtifa.py icin.
     # Drone davranisini DEGISTIRMEZ; sadece son komutu gosterir. Sorun cozulunce silinebilir.
@@ -569,13 +464,10 @@ def build_telemetry():
             "speed_kmh": target_spd_ms * MS_TO_KMH,
         },
         "distance_m": distance_m,               # HAM GPS-avci mesafe (ekrandaki ana deger)
-        "gercek_mesafe_m": gercek_mesafe_m,     # GERCEK GPS-avci mesafe (debug; bozulmamis)
-        "debug": debug_info,
         "j": j_info,
         "gorev_aktif": gorev_aktif,
         "manuel_aktif": manuel_aktif,
         "kaynak": j_kaynak,
-        "kiyas": kiyas,
         "gorsel": gorsel,
     }
 
@@ -635,15 +527,12 @@ class Handler(BaseHTTPRequestHandler):
                 data = {}
             cmd = data.get("cmd", "")
             msg = "Bilinmeyen komut"
-            if cmd in ("start", "start_v2", "start_gercek"):
-                kaynak = {"start": "v2", "start_v2": "v2", "start_gercek": "gercek"}[cmd]
+            if cmd in ("start", "start_v2"):
                 with beyin_lock:
-                    beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
+                    beyin.set_kaynak("v2")    # tek guduum kaynagi: Inovasyonlu J
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
-                _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
-                msg = "GOREV BASLATILDI - kaynak: %s%s" % (
-                    _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
+                msg = "GOREV BASLATILDI - kaynak: Inovasyonlu J"
             elif cmd == "stop":
                 gorev_aktif = False
                 manuel_aktif = False

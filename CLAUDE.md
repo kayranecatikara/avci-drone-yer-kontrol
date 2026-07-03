@@ -13,8 +13,32 @@ EKSİKSİZ karşılayacak şekilde alınır.
   Senaryoya aşırı-uydurulmuş sabitler (örn. "lock 5.2 sn", death_plunge) kullanılmaz.
 - **Hazır güdüm yazılımı doğrudan kullanılmaz** (kural 6). Kullandığımız her yöntem
   (filtre, öngörülü yönelim) bizim temiz implementasyonumuzdur ve takımca açıklanabilir.
-- **Mevcut çalışan sistemi bozma:** server.py + index.html (web arayüzü), manuel mod,
-  kıyas paneli, kaynak geçişi korunur. Güdüm değişiklikleri `AvciKontrol` içine gömülür.
+- **Mevcut çalışan sistemi bozma:** server.py + index.html (web arayüzü), manuel mod
+  korunur. Güdüm değişiklikleri `AvciKontrol` içine gömülür.
+  *(Not 2026-07-03: truth'a dayalı kıyas paneli ve "Gerçek GPS" kaynak geçişi SERT
+  AYRIM gereği arayüzden kaldırıldı; filtre doğrulama artık `arac/` altındadır.)*
+
+## SERT AYRIM — TRUTH POLİTİKASI (kalıcı, ihlal edilmez)
+Sim'in bozulmamış "truth" kanalı (`get_debug_truth` / `get_active_corruption`,
+resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
+- **Truth erişimi YALNIZCA `arac/` altındaki geliştirme/doğrulama scriptlerinde
+  yaşayabilir.** (`arsiv/` ve `test/` de uçuş dışıdır; paketlenmez.)
+- **Uçuş pipeline'ı (`detection/`, `guidance/`, `fusion/`, `web/`, `main.py`)
+  truth'a ASLA erişemez:** import, çağrı, yorum, log dizesi dahil hiçbir iz
+  bulunamaz. Görürsen hata say, kaldır. (İstisna: `sdk/drone_sdk.py` resmî verili
+  dosyadır; truth API'sinin orada TANIMLI olması bizim kullanmamız değildir.)
+- **Truth kullanan her scriptin başına şerh:** "GELİŞTİRME/DOĞRULAMA ARACI —
+  görev uçuşunda ve değerlendirme koşusunda kullanılmaz."
+- **Görev zinciri değişmez:** bozuk hedef GPS → fusion filtresi → midcourse
+  yaklaşma; görsel temas sonrası hedef konumu YALNIZCA görsel (bbox/PnP).
+
+## TESLİM PAKETİ KURALI
+Yarışmaya gidecek kod paketi = uçuş pipeline'ı (`main.py`, `detection/`,
+`guidance/`, `fusion/`, `web/`, `sdk/`, `models/`, requirements, README).
+`arac/` altındaki truth-erişimli geliştirme scriptleri pakete GİRMEZ.
+`arac/paket_kontrol.py` paket içeriğini truth anahtar kelimeleri için tarar;
+TEK eşleşmede paketlemeyi reddeder. **Gönderilecek video koşusu da bu paketin
+kodundan yapılır.**
 
 ## GPS GÜDÜMÜNÜN ROLÜ (net sınır)
 GPS güdümü **öldürücü faz değildir.** Görevi:
@@ -27,9 +51,9 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 - `drone_sdk.py`        → simülasyon I/O (input/telemetri); şartname "input.py" muadili.
 - `inovasyonlu_j_v2.py` → sensör füzyonu / filtreleme / tahmin (GNSS temizleme + hız kestirimi).
 - `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + ARAMA→KILIT FSM).
-- `server.py`+`index.html` → görev arayüzü, telemetri, bozuk-GNSS/sapma görünürlüğü (video çıktıları).
-- [YAPILACAK] görüntü işleme + hedef tespit + tracking (YOLOv8/v11 .pt) → görsel faz; şu an
-  `_kamera_kontrol` stub'ı yerine bağlanacak. Teslim .zip'i bu modülü + model dosyasını içermeli.
+- `server.py`+`index.html` → görev arayüzü, telemetri, bozuk-GNSS görünürlüğü (video çıktıları).
+- [SÜRÜYOR] görüntü işleme + hedef tespit + tracking (YOLO .pt) → görsel faz; yarışma
+  pipeline refaktörüyle genişliyor (takip/PnP). Teslim .zip'i bu modülü + model dosyasını içermeli.
 
 ## VİDEO İSTERLERİ (karşılanması zorunlu — özet)
 İlk 3 dk (hızlandırma YOK, sesli teknik anlatım): sistem mimarisi; bozuk GNSS'in girdi
