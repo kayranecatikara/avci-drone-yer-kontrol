@@ -23,18 +23,30 @@
 #   [FIX-5] Joseph-form kovaryans  -> sayisal saglamlik (davranis ayni).
 # Yatay tuning'e (R,Qp,Qw,gate,telafi,dt) DOKUNULMADI. Donma tespiti
 # v1'deki gibi: tekrar eden paket -> None (ZAMAN ILERLETILMEZ).
+#
+# ------------------------------------------------------------
+# SIM v0.0.5 UYUMU (2026-07-03): Hedef GPS artik 5 Hz (yarisma kosulu;
+# yukaridaki NEDEN paragrafi 1 Hz'li eski surumleri anlatir). Taze paket
+# araligi ~1.0 s -> ~0.2 s dustugu icin PREDICT'in sabit zaman adimi
+# dt varsayilani 1.0 -> 0.2 yapildi; ilk hiz tahmini de (fark/dt) ile
+# cm/s'ye olceklendi (dt=1.0 iken davranis birebir ayniydi). Tekrarlanan
+# paket tekilleme (allclose -> None) mantigi 5 Hz'de de aynen gecerli:
+# 50 Hz kontrol dongusu taze paketler arasinda ~9 kez ayni paketi gorur.
+# R/Qp/Qw/gate degerleri 1 Hz doneminden kalma; v0.0.5 sim'inde yeniden
+# dogrulanacak (bkz. MEVCUT_DURUM.md). telafi_sn=2.0 fiziksel lead, sabit.
+# ------------------------------------------------------------
 # ============================================================
 import numpy as np
 
 
 class GNSSDuzeltici:
 
-    def __init__(self, telafi_sn=2.0, dt=1.0,
+    def __init__(self, telafi_sn=2.0, dt=0.2,
                  R=100.0, Qp=2000.0, Qw=1e-5, Rz=150.0, Qz=10.0, gate=200.0,
                  w_max=0.4, hiz_max=3000.0,
                  vz_max=2500.0, gate_z=None, joseph=True):   # vz_max: 25 m/s (ucak zarfi). None=kapali.
         self.telafi_sn = telafi_sn
-        self.dt   = dt
+        self.dt   = dt          # taze GPS paket araligi [s] (sim v0.0.5: 5 Hz -> 0.2)
         self.gate = gate
         self.w_max   = w_max
         self.hiz_max = hiz_max
@@ -97,8 +109,11 @@ class GNSSDuzeltici:
         if not self._baslandi:
             if self._ilk is None:
                 self._ilk = np.array([bx,by,bz]); return None
+            # Ilk hiz tahmini: ardisik iki TAZE paket dt saniye arayla gelir
+            # -> (fark)/dt = cm/s. (dt=1.0 iken bolme no-op'tu, davranis ayni.)
             self._x  = np.array([self._ilk[0], self._ilk[1],
-                                  bx-self._ilk[0], by-self._ilk[1], 0.05])
+                                  (bx-self._ilk[0])/self.dt,
+                                  (by-self._ilk[1])/self.dt, 0.05])
             self._P  = np.eye(5)*1e6
             self._z  = np.array([self._ilk[2], 0.0])
             self._Pz = np.eye(2)*1e6
