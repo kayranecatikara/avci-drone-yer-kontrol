@@ -12,16 +12,37 @@ sim goruntusuyle tutarliligini OLCMEK. Beklenen kanat-genisligi:
   171.8: Talon kanat acikligi (1718 mm, SDK'da teyitli)
   proj : bakis-acisi izdusum faktoru = sqrt(1-(s.u)^2)  (s: kanat yonu birim
          vektoru = hiza dik yatay; u: LOS birim). Onden/arkadan bakista ~1.
-  Z_c  : hedefin KAMERA-ILERI derinligi (tam zincirle: dunya->govde->kamera;
-         merkez disi bakis acisinin cos duzeltmesini otomatik icerir)
+  Z_c  : hedefin KAMERA-ILERI derinligi (tam zincirle: dunya->govde->kamera)
 
-KARAR: |medyan(w_olculen / w_beklenen) - 1| <= %10 -> GECTI.
-       Sapma > %10 -> DUR ve ISARETLE (HFOV bilgisi, cozunurluk varsayimi veya
-       olcum proseduru hatali demektir; korlemesine devam edilmez).
+TRUTH'SUZ YONTEM (sim v0.0.5 gercegi: debug truth kanali YOK; arayuzdeki
+anahtar guduum modu secicidir, telemetri bozulmalari KAPATILAMAZ — SDK_README):
 
-TANI (ekstra): ayni zincirle hedef merkezinin reprojeksiyonu vs YOLO bbox merkezi
-(px offset). Buyuk offset attitude KONVANSIYON hatasina isaret eder (kamera_model
-basligindaki VARSAYIM'lar) — genislik oranindan bagimsiz rapor edilir.
+ 1) Z REFERANSI = hedef GPS'inin KAYAN MEDYANI (merkezli pencere ~1.2 s,
+    tekillestirilmis TAZE paketler). Medyan spike'lari tamamen eler,
+    sifir-ortalamali gurultuyu bastirir; SABIT OFFSET/DRIFT medyanda KALIR
+    (bu yuzden 3. madde sart). Dropout 30. sn'den sonra baslar: taze-paket
+    boslugu (>0.6 s) pencereye tasarsa o kareler ELENIR; olcumun ilk 30 sn'si
+    onceliklidir (olcumu Play'e gecer gecmez baslat).
+ 2) GECIKME AYRIMI: GPS gecikmesi hareketli hedefte Z'ye sistematik hata katar
+    (15-18 m/s hedefte 0.5-1 s gecikme ~ 8-18 m). Kareler Z-trendine gore
+    YAKLASAN / UZAKLASAN diye ikiye ayrilir; sapma grup basina ayri raporlanir
+    ve KARAR iki grubun ORTALAMASINA uygulanir — gecikme hatasi iki yonde zit
+    isaretlidir (yaklasirken Z buyuk, uzaklasirken kucuk gorunur), simetrik
+    orneklemde birinci mertebede iptal olur.
+ 3) K / OFFSET AYRIMI: 2-3 MESAFE BANDI; her bandin degeri GECIKME-IPTALLI
+    (bant ici yaklasan/uzaklasan medyan ortalamasi). Sapma Z ile orantiliysa
+    (bantlarda sabit YUZDE) OLCEK/K sorunudur; mesafeden bagimsiz sabit METRE
+    ise GPS OFFSET'idir. Nicel ayrim: bant noktalarina oran = A + B*(1/Zc) fit'i
+      oran = (fx_gercek/fx_varsayim) * (Z_ref/Z_gercek) ~ k * (1 + o_r/Z)
+    => A = k (OLCEK; offset VE gecikmeden arindirilmis), B/A = o_r (sabit
+    radyal GPS offset, cm). Kare/grup-bazli fit BILEREK kullanilmaz: gecikme
+    terimi tau*|dR/dt|/Z grup icinde de Z ile degisir, egrilik intercept'e
+    sizar (sentetik testte kanitli). En az 2 cift-yonlu bant ve bant medyanlari
+    arasi Zmax/Zmin >= 1.25 gerekir; degilse yalniz grup ortalamasi kullanilir.
+ 4) KARAR: %10 esigi TEK KAREYE degil GRUP ORTALAMALARINA uygulanir:
+    |ort(medyan_yaklasan, medyan_uzaklasan) - 1| <= 0.10 -> GECTI.
+    Grup basina en az 15 gecerli kare gerekir; yetersizse sureyi uzat veya
+    --tirman ile hedef rotasina yaklas.
 
 KULLANIM (once oyunu ac, Play moduna al; WEB ARAYUZUNU KAPAT — oyun TEK TCP
 baglantisi kabul eder, bu arac dogrudan baglanir):
@@ -31,12 +52,10 @@ baglantisi kabul eder, bu arac dogrudan baglanir):
     python arac/k_sanity_olcum.py --tirman 6      # once 6 sn tirman, hover'da olc
     python arac/k_sanity_olcum.py --analiz veri/k_sanity_XXXX.csv   # offline analiz
 
-GEREKSINIM: oyunda DEBUG TRUTH ACIK olmali (kiyas panelinin kullandigi kanal)
-— Z her karede temiz konum farkindan gelir. Truth kapaliysa arac uyarir ve
-ham-GPS-medyan fallback'ine duser (yalnizca SABIT DURAN hedefte anlamli).
-Hedef DUZ UCUSTA olmali; sana dogru / senden uzaga ucan bacaklar olcume girer
-(proj kapisi digerlerini otomatik eler). Oyun penceresi olcum boyunca GORUNUR
-ve SABIT boyutta kalmali (mss bolge yakalar; kenarliksiz pencere onerilir).
+Hedef DUZ UCUSTA olmali ve rotasi hem YAKLASAN hem UZAKLASAN bacak icermeli
+(gidis-donus / yanindan gecis). Kullanilabilir pencere ~70 m alti (960 px'te
+bbox >= 6 px). Oyun penceresi olcum boyunca GORUNUR ve SABIT boyutta kalmali
+(kenarliksiz pencere onerilir; tasima/boyutlandirma yapma).
 ================================================================================
 """
 import argparse
@@ -61,12 +80,22 @@ VERI_DIR = os.path.join(_PROJ_ROOT, "veri")
 
 # --- Analiz kapilari (olcume girecek kareler) ---
 CONF_MIN = 0.45               # uretim esigiyle ayni (Cfg.VIS_CONF_MIN)
-PROJ_MIN = 0.90               # kanat cizgisi ~goruntu duzlemine paralel (onden/arkadan +-25 der)
+PROJ_MIN = 0.90               # kanat cizgisi ~goruntu duzlemine paralel (onden/arkadan)
 W_PX_MIN = 6.0                # cok kucuk bbox -> kuantizasyon gurultusu
 W_BEK_MIN = 5.0               # beklenen genislik de cok kucukse (hedef cok uzak) alma
 EX_EY_MAX = 0.50              # goruntu kenarindaki tespitleri alma (merkez en guvenli)
-VHIZ_MIN = 200.0              # cm/s; hedef yatay hizi bunun altindaysa yon guvenilmez
-SAPMA_ESIK = 0.10             # KARAR esigi: medyan oran sapmasi <= %10
+VHIZ_MIN = 200.0              # cm/s; hedef yatay hizi altindaysa kanat yonu guvenilmez
+
+# --- Truth'suz yontem parametreleri ---
+MED_PENCERE_S = 0.6           # kayan medyan YARIM penceresi (toplam 1.2 s ~ 6 taze paket @5Hz)
+TAZE_MIN = 4                  # pencerede en az taze paket (medyan anlamli olsun)
+GAP_S = 0.6                   # taze paketler arasi bosluk esigi (dropout/donma tespiti)
+TREND_S = 0.5                 # Z-trend / hedef hizi icin +-bakis suresi
+TREND_ESIK = 150.0            # cm/s; |dZ/dt| altinda "duragan" (gruba girmez, bilgi)
+GRUP_N_MIN = 15               # karar icin grup basina asgari kare
+SAPMA_ESIK = 0.10             # KARAR esigi: birlesik grup-ortalamasi sapmasi <= %10
+REG_N_MIN = 20                # regresyon icin GRUP basina asgari kare
+REG_Z_ORAN = 1.4              # regresyon kosullanmasi: grup ici Zmax/Zmin alt siniri
 
 
 # ----------------------------------------------------------------------------
@@ -110,7 +139,7 @@ def kare_al(sct, cv2):
 
 CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
              "dx", "dy", "dz", "droll", "dpitch", "dyaw",
-             "ttx", "tty", "ttz", "hamx", "hamy", "hamz", "truth", "corr"]
+             "hamx", "hamy", "hamz"]
 
 
 def olc(sure_s, tirman_s, csv_yolu):
@@ -130,6 +159,7 @@ def olc(sure_s, tirman_s, csv_yolu):
         drone.disconnect()
         return None
     print("[OK] Oyuna baglanildi; best.pt yuklendi (device=%s)." % ded.device)
+    print("[NOT] Dropout 30. sn'den sonra baslar -> ILK 30 SN EN DEGERLI VERI.")
 
     if tirman_s > 0:
         print("[UCUS] %d sn tirmaniliyor (thr=0.5), sonra hover'da olcum..." % tirman_s)
@@ -161,10 +191,6 @@ def olc(sure_s, tirman_s, csv_yolu):
         dpos = drone.get_drone_location()
         drot = drone.get_drone_rotation()
         ham = drone.get_target_location()
-        truth = drone.get_debug_truth()
-        tvar = bool(truth.get("available"))
-        tpos = truth["target"]["position"] if tvar else (None, None, None)
-        corr = ";".join(drone.get_active_corruption())
         try:
             fr, kaynak = kare_al(sct, cv2)
         except Exception as e:
@@ -184,8 +210,7 @@ def olc(sure_s, tirman_s, csv_yolu):
         else:
             satir = [t, fr.shape[1], fr.shape[0], "", "", "", "", ""]
         satir += [dpos[0], dpos[1], dpos[2], drot[0], drot[1], drot[2],
-                  tpos[0] if tvar else "", tpos[1] if tvar else "", tpos[2] if tvar else "",
-                  ham[0], ham[1], ham[2], int(tvar), corr]
+                  ham[0], ham[1], ham[2]]
         wcsv.writerow(["%.4f" % x if isinstance(x, float) else x for x in satir])
         if n_kare % 50 == 0:
             f.flush()
@@ -200,15 +225,11 @@ def olc(sure_s, tirman_s, csv_yolu):
 
 
 # ----------------------------------------------------------------------------
-#  Analiz
+#  Analiz — truth'suz yontem (kayan medyan + yon ayrimi + K/offset regresyonu)
 # ----------------------------------------------------------------------------
 def _yukle(csv_yolu):
-    satirlar = []
     with open(csv_yolu, "r", encoding="utf-8") as f:
-        rd = csv.DictReader(f)
-        for r in rd:
-            satirlar.append(r)
-    return satirlar
+        return list(csv.DictReader(f))
 
 
 def _f(x):
@@ -218,37 +239,61 @@ def _f(x):
         return None
 
 
+def _taze_paketler(t, ham):
+    """Tekillestirilmis TAZE hedef-GPS paketleri: (zamanlar, konumlar).
+    SDK rate-limit ayni paketi kareler boyu tekrarlar; degisim aninda taze sayilir.
+    Zaman damgasi = degisimin ILK gorulduguu kare (hata <= kare araligi)."""
+    tz, pz = [], []
+    onceki = None
+    for i in range(len(t)):
+        p = ham[i]
+        if onceki is None or not np.allclose(p, onceki):
+            tz.append(t[i])
+            pz.append(p)
+            onceki = p
+    return np.array(tz), np.array(pz)
+
+
+def _kayan_medyan(t_kare, tz, pz):
+    """Her kare icin merkezli pencerede taze-paket MEDYANI. Pencerede TAZE_MIN'den
+    az paket varsa veya GAP_S'ten buyuk bosluk (dropout) pencereye tasiyorsa NaN."""
+    n = len(t_kare)
+    med = np.full((n, 3), np.nan)
+    for i in range(n):
+        t = t_kare[i]
+        lo = np.searchsorted(tz, t - MED_PENCERE_S)
+        hi = np.searchsorted(tz, t + MED_PENCERE_S, side="right")
+        if hi - lo < TAZE_MIN:
+            continue
+        tt = tz[lo:hi]
+        # pencere ici + kenar bosluklari: dropout pencereye tasmis mi?
+        sinir = np.concatenate(([t - MED_PENCERE_S], tt, [t + MED_PENCERE_S]))
+        if np.max(np.diff(sinir)) > GAP_S:
+            continue
+        med[i] = np.median(pz[lo:hi], axis=0)
+    return med
+
+
+def _zaman_indeksi(t_kare, i, dt_hedef):
+    """t_kare[i]+dt_hedef anina en yakin kare indeksi; tolerans disinda None."""
+    j = int(np.searchsorted(t_kare, t_kare[i] + dt_hedef))
+    j = min(max(j, 0), len(t_kare) - 1)
+    if abs(t_kare[j] - (t_kare[i] + dt_hedef)) > 0.3:
+        return None
+    return j
+
+
 def analiz(csv_yolu):
     rows = _yukle(csv_yolu)
     if not rows:
         print("[HATA] CSV bos: %s" % csv_yolu)
-        return False
+        return {"gecti": False, "yetersiz": True, "n": 0}
 
-    n_truth = sum(1 for r in rows if r["truth"] == "1")
-    truth_var = n_truth > len(rows) * 0.5
-    if not truth_var:
-        print("[UYARI] Debug truth YOK (%d/%d satir). Ham-GPS-medyan fallback'i "
-              "kullanilacak - yalnizca SABIT hedefte anlamli; sonucu ihtiyatla oku."
-              % (n_truth, len(rows)))
-
-    # Hedef konum dizisi (truth varsa truth; yoksa ham) + zaman
-    t = np.array([_f(r["t"]) for r in rows], dtype=float)
-    if truth_var:
-        tp = np.array([[_f(r["ttx"]) or np.nan, _f(r["tty"]) or np.nan,
-                        _f(r["ttz"]) or np.nan] for r in rows], dtype=float)
-    else:
-        tp = np.array([[_f(r["hamx"]), _f(r["hamy"]), _f(r["hamz"])] for r in rows],
-                      dtype=float)
-        med = np.nanmedian(tp, axis=0)                 # sabit hedef varsayimi
-        tp = np.tile(med, (len(rows), 1))
-
-    # Hedef hizi: +-3 kare merkezi fark (truth temiz ve surekli)
-    K3 = 3
-    hiz = np.full_like(tp, np.nan)
-    for i in range(K3, len(rows) - K3):
-        dt = t[i + K3] - t[i - K3]
-        if dt > 1e-3:
-            hiz[i] = (tp[i + K3] - tp[i - K3]) / dt
+    t_kare = np.array([_f(r["t"]) for r in rows], dtype=float)
+    ham = np.array([[_f(r["hamx"]), _f(r["hamy"]), _f(r["hamz"])] for r in rows],
+                   dtype=float)
+    tz, pz = _taze_paketler(t_kare, ham)
+    med = _kayan_medyan(t_kare, tz, pz)
 
     # Modal cozunurluk (pencere boyutu degistiyse o kareler elenir)
     Ws = [int(float(r["W"])) for r in rows if r["W"]]
@@ -258,9 +303,17 @@ def analiz(csv_yolu):
     Km = km.K_matrisi(W, H)
     fx = km.fx_px(W)
 
-    kayit = []           # (oran, w_olc, w_bek, Zc, proj, ex, ey, off_px, w_zincir)
-    ele = {"tespit_yok": 0, "conf": 0, "cozunurluk": 0, "hiz_yok": 0, "yavas": 0,
-           "proj": 0, "kenar": 0, "kucuk": 0, "arkada": 0}
+    # Menzil serisi (trend icin): |medyan_hedef - drone|
+    dpos_a = np.array([[_f(r["dx"]), _f(r["dy"]), _f(r["dz"])] for r in rows],
+                      dtype=float)
+    R_seri = np.linalg.norm(med - dpos_a, axis=1)          # NaN'li kareler NaN kalir
+
+    kayit = []   # (oran, Zc, grup, w_olc, w_bek, proj, off_px, err_cm, t)
+    ele = {"tespit_yok": 0, "conf": 0, "cozunurluk": 0, "medyan_yok": 0,
+           "trend_yok": 0, "yavas": 0, "proj": 0, "kenar": 0, "kucuk": 0,
+           "arkada": 0}
+    n_duragan = 0
+    duragan_oran = []
     for i, r in enumerate(rows):
         if not r["cx"]:
             ele["tespit_yok"] += 1
@@ -272,25 +325,32 @@ def analiz(csv_yolu):
         if int(float(r["W"])) != W or int(float(r["H"])) != H:
             ele["cozunurluk"] += 1
             continue
-        if np.any(np.isnan(hiz[i])) or np.any(np.isnan(tp[i])):
-            ele["hiz_yok"] += 1
+        if np.any(np.isnan(med[i])):
+            ele["medyan_yok"] += 1                          # dropout/pencere yetersiz
             continue
-        vh = np.array([hiz[i][0], hiz[i][1], 0.0])
+        # Z-trend + hedef hizi: +-TREND_S bakisiyla medyan serisinden
+        j1 = _zaman_indeksi(t_kare, i, -TREND_S)
+        j2 = _zaman_indeksi(t_kare, i, +TREND_S)
+        if (j1 is None or j2 is None or j1 == j2 or
+                np.any(np.isnan(med[j1])) or np.any(np.isnan(med[j2])) or
+                np.isnan(R_seri[j1]) or np.isnan(R_seri[j2])):
+            ele["trend_yok"] += 1
+            continue
+        dt = t_kare[j2] - t_kare[j1]
+        v_t = (med[j2] - med[j1]) / dt                      # hedef hizi (medyan serisi)
+        dRdt = (R_seri[j2] - R_seri[j1]) / dt               # menzil trendi
+        vh = np.array([v_t[0], v_t[1], 0.0])
         nvh = np.linalg.norm(vh)
-        if truth_var and nvh < VHIZ_MIN:
-            ele["yavas"] += 1                      # yon guvenilmez (sabit hedefte proj=1 varsay)
+        if nvh < VHIZ_MIN:
+            ele["yavas"] += 1                               # kanat yonu guvenilmez
             continue
-        dpos = np.array([_f(r["dx"]), _f(r["dy"]), _f(r["dz"])])
+        dpos = dpos_a[i]
         att = (_f(r["droll"]), _f(r["dpitch"]), _f(r["dyaw"]))
-        los = tp[i] - dpos
-        R = np.linalg.norm(los)
-        u = los / max(R, 1e-9)
-        if truth_var:
-            s = np.array([-vh[1], vh[0], 0.0]) / nvh   # kanat yonu: hiza dik yatay
-            proj = math.sqrt(max(0.0, 1.0 - float(np.dot(s, u)) ** 2))
-        else:
-            s = None
-            proj = 1.0                                  # sabit hedef: onden bakis varsayimi
+        los = med[i] - dpos
+        Rm = np.linalg.norm(los)
+        u = los / max(Rm, 1e-9)
+        s = np.array([-vh[1], vh[0], 0.0]) / nvh            # kanat yonu: hiza dik yatay
+        proj = math.sqrt(max(0.0, 1.0 - float(np.dot(s, u)) ** 2))
         if proj < PROJ_MIN:
             ele["proj"] += 1
             continue
@@ -300,84 +360,168 @@ def analiz(csv_yolu):
         if abs(ex) > EX_EY_MAX or abs(ey) > EX_EY_MAX:
             ele["kenar"] += 1
             continue
-        pk = km.dunya_to_kamera(tp[i], dpos, att[0], att[1], att[2])
+        pk = km.dunya_to_kamera(med[i], dpos, att[0], att[1], att[2])
         if pk[2] <= 0:
-            ele["arkada"] += 1                          # zincir hedefi arkada saniyor (KONVANSIYON tanisi!)
+            ele["arkada"] += 1          # zincir hedefi arkada saniyor (KONVANSIYON tanisi!)
             continue
         Zc = float(pk[2])
         w_bek = fx * (TALON_KANAT_CM * proj) / Zc
         if wpx < W_PX_MIN or w_bek < W_BEK_MIN:
             ele["kucuk"] += 1
             continue
-        # --- tani: tam zincir merkez reprojeksiyonu + uc-nokta genisligi ---
-        off_px = w_zincir = None
+        oran = wpx / w_bek
+        # bbox'in ima ettigi mesafe vs GPS-medyan mesafe (bant tanisi: metre hatasi)
+        Zc_ima = fx * (TALON_KANAT_CM * proj) / wpx
+        err_cm = Zc - Zc_ima
+        off_px = None
         uv = km.izdusur(pk, Km)
         if uv is not None:
             off_px = math.hypot(uv[0] - cx, uv[1] - cy)
-        if s is not None:
-            p1 = km.izdusur(km.dunya_to_kamera(tp[i] + s * (TALON_KANAT_CM / 2.0),
-                                               dpos, *att), Km)
-            p2 = km.izdusur(km.dunya_to_kamera(tp[i] - s * (TALON_KANAT_CM / 2.0),
-                                               dpos, *att), Km)
-            if p1 and p2:
-                w_zincir = math.hypot(p1[0] - p2[0], p1[1] - p2[1])
-        kayit.append((wpx / w_bek, wpx, w_bek, Zc, proj, ex, ey, off_px, w_zincir))
+        if dRdt <= -TREND_ESIK:
+            grup = "yaklasan"
+        elif dRdt >= TREND_ESIK:
+            grup = "uzaklasan"
+        else:
+            n_duragan += 1
+            duragan_oran.append(oran)
+            continue                                        # karara girmez (bilgi)
+        kayit.append((oran, Zc, grup, wpx, w_bek, proj, off_px, err_cm, t_kare[i]))
 
     # ---------------- RAPOR ----------------
-    print("\n" + "=" * 64)
-    print(" K SANITY RAPORU  (%s)" % os.path.basename(csv_yolu))
-    print("=" * 64)
+    print("\n" + "=" * 68)
+    print(" K SANITY RAPORU (truth'suz yontem)  (%s)" % os.path.basename(csv_yolu))
+    print("=" * 68)
     print(" cozunurluk       : %dx%d  (f_x = %.1f px; f_x/W = %.4f)" % (W, H, fx, fx / W))
-    print(" kare / tespit    : %d / %d" % (len(rows), sum(1 for r in rows if r["cx"])))
+    print(" kare / tespit    : %d / %d   taze GPS paketi: %d"
+          % (len(rows), sum(1 for r in rows if r["cx"]), len(tz)))
     print(" elenen           : %s" % ", ".join("%s=%d" % kv for kv in ele.items() if kv[1]))
-    print(" olcume giren     : %d kare" % len(kayit))
-    if len(kayit) < 10:
-        print("\n[SONUC] YETERSIZ VERI (<10 gecerli kare). Hedefin onden/arkadan,")
-        print("        merkeze yakin gectigi daha uzun bir kosu gerekli.")
-        return {"gecti": False, "yetersiz": True, "n": len(kayit)}
-    a = np.array([[k[0], k[1], k[2], k[3], k[4]] for k in kayit], dtype=float)
-    oran, wolc, wbek, Zc, proj = a[:, 0], a[:, 1], a[:, 2], a[:, 3], a[:, 4]
-    m_oran = float(np.median(oran))
-    mad = float(np.median(np.abs(oran - m_oran)))
-    sapma = m_oran - 1.0
-    offs = np.array([k[7] for k in kayit if k[7] is not None], dtype=float)
-    wz = np.array([(k[8], k[1]) for k in kayit if k[8]], dtype=float)
-    print("\n --- PROMPT TABLOSU (Z, w_px olculen, w_px beklenen, sapma %%) ---")
-    print(" Z (kamera-ileri) : medyan %.1f m   (aralik %.1f-%.1f m)"
-          % (np.median(Zc) / 100, Zc.min() / 100, Zc.max() / 100))
-    print(" w_px olculen     : medyan %.1f px" % np.median(wolc))
-    print(" w_px beklenen    : medyan %.1f px  (f_x*171.8cm*proj/Zc; medyan proj=%.3f)"
-          % (np.median(wbek), np.median(proj)))
-    print(" oran (olc/bek)   : medyan %.4f  (MAD %.4f)  ->  SAPMA = %+.1f%%"
-          % (m_oran, mad, 100 * sapma))
-    print("\n --- TANI (attitude/montaj zinciri; genislikten bagimsiz) ---")
+    n30 = sum(1 for k in kayit if k[8] < 30.0)
+    print(" olcume giren     : %d kare (%d tanesi ilk 30 sn'de) + %d duragan (bilgi)"
+          % (len(kayit), n30, n_duragan))
+
+    yak = np.array([k[0] for k in kayit if k[2] == "yaklasan"])
+    uzk = np.array([k[0] for k in kayit if k[2] == "uzaklasan"])
+    sonuc = {"gecti": False, "yetersiz": False, "n": len(kayit),
+             "n_yak": int(yak.size), "n_uzk": int(uzk.size), "ele": ele,
+             "W": W, "H": H, "fx": fx, "A": None, "A_sapma": None,
+             "ofset_m": None, "reg_kosullu": False}
+    if yak.size < GRUP_N_MIN or uzk.size < GRUP_N_MIN:
+        print("\n[SONUC] YETERSIZ VERI: yaklasan=%d, uzaklasan=%d (gerek: >=%d/grup)."
+              % (yak.size, uzk.size, GRUP_N_MIN))
+        print("        Sureyi uzat (--sure), hedef rotasina yaklas (--tirman) veya")
+        print("        hedefe gidis-donus bacakli rota ver (her iki grup da dolmali).")
+        sonuc["yetersiz"] = True
+        return sonuc
+
+    r_yak = float(np.median(yak))
+    r_uzk = float(np.median(uzk))
+    mad_yak = float(np.median(np.abs(yak - r_yak)))
+    mad_uzk = float(np.median(np.abs(uzk - r_uzk)))
+    birlesik = 0.5 * (r_yak + r_uzk)
+    sapma = birlesik - 1.0
+    a = np.array([[k[0], k[1], k[7]] for k in kayit], dtype=float)
+    oran_a, Zc_a, err_a = a[:, 0], a[:, 1], a[:, 2]
+
+    print("\n --- GRUP AYRIMI (gecikme iki yonde zit isaretli -> ortalama iptal) ---")
+    print(" GRUP        N    medyan oran   MAD      sapma")
+    print(" yaklasan  %4d     %.4f     %.4f    %+.1f%%" % (yak.size, r_yak, mad_yak,
+                                                           100 * (r_yak - 1)))
+    print(" uzaklasan %4d     %.4f     %.4f    %+.1f%%" % (uzk.size, r_uzk, mad_uzk,
+                                                           100 * (r_uzk - 1)))
+    if duragan_oran:
+        print(" duragan   %4d     %.4f     (bilgi; karara girmez)"
+              % (n_duragan, float(np.median(duragan_oran))))
+    print(" BIRLESIK (grup ort.)  %.4f    ->  SAPMA = %+.1f%%   <- KARAR (esik %%10)"
+          % (birlesik, 100 * sapma))
+    print("\n Z (kamera-ileri) : medyan %.1f m  (aralik %.1f-%.1f m)"
+          % (np.median(Zc_a) / 100, Zc_a.min() / 100, Zc_a.max() / 100))
+    print(" w_px olculen/beklenen (medyan): %.1f / %.1f px"
+          % (float(np.median([k[3] for k in kayit])),
+             float(np.median([k[4] for k in kayit]))))
+
+    # --- Mesafe bantlari: sabit yuzde (K) mi, sabit metre (offset) mi?
+    #     Bant ici deger GECIKME-IPTALLI hesaplanir (yaklasan/uzaklasan medyan
+    #     ortalamasi); tek-yonlu bantlar isaretlenir (gecikme iptal edilemez).
+    print("\n --- MESAFE BANTLARI (sabit %% -> olcek/K; sabit metre -> GPS offset) ---")
+    grup_a = np.array([k[2] for k in kayit])
+    sirali = np.argsort(Zc_a)
+    n_bant = 3 if len(kayit) >= 45 else (2 if len(kayit) >= 30 else 1)
+    bant_nokta = []                     # (Zc_med_cm, birlesik_oran, birlesik_err_cm)
+    print(" bant   Zc medyan   N(yak/uzk)   birlesik oran   birlesik err")
+    for b in range(n_bant):
+        idx = sirali[b * len(sirali) // n_bant:(b + 1) * len(sirali) // n_bant]
+        if idx.size == 0:
+            continue
+        iy = idx[grup_a[idx] == "yaklasan"]
+        iu = idx[grup_a[idx] == "uzaklasan"]
+        if iy.size >= 5 and iu.size >= 5:
+            o_b = 0.5 * (float(np.median(oran_a[iy])) + float(np.median(oran_a[iu])))
+            e_b = 0.5 * (float(np.median(err_a[iy])) + float(np.median(err_a[iu])))
+            zb = float(np.median(Zc_a[idx]))
+            bant_nokta.append((zb, o_b, e_b))
+            print("  %d      %5.1f m   %4d/%-4d       %.4f        %+.1f m"
+                  % (b + 1, zb / 100, iy.size, iu.size, o_b, e_b / 100))
+        else:
+            print("  %d      %5.1f m   %4d/%-4d         -  (tek yonlu; gecikme iptal edilemez)"
+                  % (b + 1, np.median(Zc_a[idx]) / 100, iy.size, iu.size))
+
+    # --- K vs OFFSET ayrimi: bant noktalarina oran = A + B*(1/Zc) fit'i.
+    #     Kare-bazli/grup-bazli fit YANILIR: gecikme terimi tau*|dR/dt|/Z grup
+    #     ICINDE de Z'yle degisir (egrilik intercept'e sizar). Bant noktalari ise
+    #     zaten gecikme-iptalli oldugundan geriye k*(1 + o_r/Z) kalir:
+    #       A = k (OLCEK: K/HFOV sapmasi), B/A = o_r (sabit radyal GPS offset).
+    print("\n --- K / OFFSET AYRIMI (gecikme-iptalli bant noktalarina A + B/Zc) ---")
+    reg_kosullu = False
+    if len(bant_nokta) >= 2:
+        zb = np.array([p[0] for p in bant_nokta])
+        ob = np.array([p[1] for p in bant_nokta])
+        z_yayilim = float(zb.max() / max(zb.min(), 1e-9))
+        if z_yayilim >= 1.25:
+            X = np.column_stack([np.ones(len(bant_nokta)), 1.0 / zb])
+            katsayi, *_ = np.linalg.lstsq(X, ob, rcond=None)
+            A, B = float(katsayi[0]), float(katsayi[1])
+            ofset_m = (B / A) / 100.0 if abs(A) > 1e-9 else None
+            reg_kosullu = True
+            sonuc.update({"A": A, "A_sapma": A - 1.0, "ofset_m": ofset_m,
+                          "reg_kosullu": True})
+            print(" A (olcek; offset+gecikmeden arindirilmis) : %.4f -> K sapmasi %+.1f%%"
+                  % (A, 100 * (A - 1)))
+            print(" B/A (sabit radyal GPS offset kestirimi)   : %+.1f m" % ofset_m)
+            print(" kosullanma: %d bant, Zmax/Zmin = %.2f" % (len(bant_nokta), z_yayilim))
+        else:
+            print(" [dar mesafe yayilimi] bant Zmax/Zmin = %.2f < 1.25 -> fit guvenilmez;"
+                  % z_yayilim)
+            print(" 2-3 FARKLI mesafe bandinda tekrar olc (yakin + uzak gecisler).")
+    else:
+        print(" Cift-yonlu bant sayisi < 2 -> K/offset ayrimi yapilamadi;")
+        print(" 2-3 farkli mesafe bandinda TEKRARLA (yakin + uzak gecisler).")
+
+    offs = np.array([k[6] for k in kayit if k[6] is not None], dtype=float)
     if offs.size:
-        print(" merkez reproj    : medyan offset %.1f px (goruntu genisliginin %%%.1f'i)"
-              % (np.median(offs), 100 * np.median(offs) / W))
-        print("                    buyukse (>%%5): kamera_model attitude VARSAYIMI supheli")
-    if wz.size:
-        print(" zincir genislik  : medyan (olc/zincir-bek) = %.4f"
-              % float(np.median(wz[:, 1] / wz[:, 0])))
+        print("\n TANI: merkez reproj offset medyan %.1f px (GECIKMEYE ACIK - hedef"
+              % float(np.median(offs)))
+        print("       hareketliyken buyur; yalniz cok buyukse (>%%10 W) konvansiyon supheli)")
+
     gecti = abs(sapma) <= SAPMA_ESIK
-    print("\n" + "=" * 64)
+    print("\n" + "=" * 68)
     if gecti:
-        print(" SONUC: GECTI  (|%.1f%%| <= %%10) - K/HFOV varsayimi DOGRULANDI."
+        print(" SONUC: GECTI  (birlesik |%+.1f%%| <= %%10) - K/HFOV varsayimi TUTARLI."
               % (100 * sapma))
     else:
-        print(" SONUC: KALDI  (|%.1f%%| > %%10) - DUR VE ISARETLE:" % (100 * sapma))
-        print("   HFOV bilgisi, cozunurluk varsayimi veya olcum proseduru hatali.")
-        print("   Korlemesine devam ETME (master prompt FAZ 0 kurali).")
-    print("=" * 64)
-    return {"gecti": gecti, "yetersiz": False, "n": len(kayit), "sapma": sapma,
-            "m_oran": m_oran, "mad": mad,
-            "z_med_m": float(np.median(Zc)) / 100.0,
-            "w_olc_med": float(np.median(wolc)), "w_bek_med": float(np.median(wbek)),
-            "off_med_px": (float(np.median(offs)) if offs.size else None),
-            "W": W, "H": H, "fx": fx}
+        print(" SONUC: KALDI  (birlesik |%+.1f%%| > %%10) - DUR VE ISARETLE:" % (100 * sapma))
+        print("   once K/OFFSET ayrimina bak: A sapmasi kucuk + offset buyukse sorun")
+        print("   GPS offset'idir (K dogru olabilir); A sapmasi da buyukse HFOV/")
+        print("   cozunurluk varsayimi veya olcum proseduru hatali. Korlemesine devam ETME.")
+    print("=" * 68)
+    sonuc.update({"gecti": gecti, "sapma": sapma, "r_yak": r_yak, "r_uzk": r_uzk,
+                  "birlesik": birlesik,
+                  "z_med_m": float(np.median(Zc_a)) / 100.0,
+                  "off_med_px": (float(np.median(offs)) if offs.size else None)})
+    return sonuc
 
 
 def main():
-    ap = argparse.ArgumentParser(description="FAZ 0 K sanity olcumu")
+    ap = argparse.ArgumentParser(description="FAZ 0 K sanity olcumu (truth'suz)")
     ap.add_argument("--sure", type=float, default=45.0, help="olcum suresi (sn)")
     ap.add_argument("--tirman", type=float, default=0.0,
                     help="olcumden once N sn tirman (arm eder; sonra hover)")
