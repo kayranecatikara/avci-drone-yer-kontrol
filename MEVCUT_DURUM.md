@@ -5,6 +5,23 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 Güncelleme — Sim v0.0.5 saha davranışları (2026-07-04, FAZ 0 ölçüm oturumları):**
+> İki kritik sim davranışı tekrarlanabilir şekilde doğrulandı:
+> **(1) TCP dinleyici tıkanması:** art arda bağlan/kop döngülerinden sonra oyun yeni
+> bağlantı kabul etmeyebiliyor. Önleme: araçlar TEK TCP oturumunu paylaşır
+> (`k_sanity_olcum.olc(drone_baglanti=...)`), koşu sonunda tek düzgün kapanış.
+> Çözüm: oyunu KOMPLE yeniden başlat (test edildi); "Play'den çık/gir" alternatifi bir
+> sonraki takılmada denenecek. **(2) ARM/UÇUŞ SONRASI ZOMBİLEŞME (3 kez doğrulandı):**
+> SDK'dan arm edilip uçulan oturumlarda telemetri bir süre sonra bozuluyor — x,y mutlak
+> sabit, attitude tam 0/0/sabit-yaw'da donuk (sıfır titreşim), z komutlardan bağımsız
+> ~1-3.5 m/s "sayarak" artıyor (thr=−0.4'e rağmen 110→423 m gözlendi). Yerden/pasif
+> koşular gün boyu sağlıklı. Ayrıca thr=0 "hover" irtifayı TUTMUYOR (~+1 m/s süzülme) —
+> irtifa ancak kapalı-döngü tutulabiliyor (`k_sanity_olcum` P-tutucusu). **Etkisi:**
+> FAZ 1+ uçuş gerektiren testler (CMC işaret testi, PnP-vs-GPS, OIPN kıyası) kısa
+> koşular halinde planlanmalı ve **her uçuşlu turdan sonra oyun otomatik yeniden
+> başlatılmalı** — `arac/kosu_yonetici.py` (kurulacak otomasyon) bu adımı içerecek.
+> FAZ 0 K sanity bu yüzden tamamen pasif/yerden, siluet yöntemiyle ölçülüyor.
+
 > **🔔 Güncelleme — SERT AYRIM / truth politikası (2026-07-03, yarisma-pipeline branch):**
 > Truth kanalı (`get_debug_truth`) yalnızca **geliştirme/doğrulama** içindir ve iki yerde
 > yaşar: `arac/` scriptleri + çalışma anındaki tek dev kod noktası **`web/dev_truth.py`**
