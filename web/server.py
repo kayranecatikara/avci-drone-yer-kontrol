@@ -310,10 +310,43 @@ try:
 except Exception:
     _kiyas_log_f = None
 
+# --- GPS SAPMA LOGU (bozuk + gercek konum; sapma analizi icin) ----------------
+# (Fatih'in gps-log-server branch'inden main yapisina PORT edildi. Fark: cikti
+# HERE/gps_analiz yerine VERI_DIR altina yazilir — proje kulturu: tum calisma
+# ciktilari veri/ altinda ve zaten gitignore'lu; arac/ analizcileri de oradan okur.)
+# Her YENI ham pakette bozuk (get_target_location) + gercek (debug truth) konum,
+# zaman damgasi + aktif corruption ile biriktirilir; ~5 sn'de bir ATOMIK yazilir
+# (kopmada veri durur). gps_bozuk_gercek.json ile ayni sema. Gudume DOKUNMAZ.
+_GPS_LOG = os.path.join(VERI_DIR, "gps_log_canli.json")
+_gps_log_kayitlar = []
+_gps_log_t0 = None
+_gps_log_son_yaz = 0.0
+
+
+def _gps_log_yaz():
+    """Biriken bozuk/gercek konum logunu diske atomik yaz."""
+    if not _gps_log_kayitlar:
+        return
+    try:
+        veri = {
+            "birim": "cm (SDK ham)",
+            "eksenler": ["x", "y", "z"],
+            "aciklama": "web/server.py canli log: bozuk=get_target_location, "
+                        "gercek=get_debug_truth target",
+            "ornek_sayisi": len(_gps_log_kayitlar),
+            "kayitlar": _gps_log_kayitlar,
+        }
+        tmp = _GPS_LOG + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(veri, f, indent=2)
+        os.replace(tmp, _GPS_LOG)
+    except Exception:
+        pass
+
 
 def _kiyas_guncelle():
     """Her YENI ham pakette Inovasyonlu J'yi besle, gercege hatasini olc."""
-    global _kiyas_idx, _kiyas_son_ham
+    global _kiyas_idx, _kiyas_son_ham, _gps_log_t0, _gps_log_son_yaz
     ham = drone.get_target_location()
     if ham == _kiyas_son_ham:
         return
@@ -322,6 +355,21 @@ def _kiyas_guncelle():
     if not truth.get("available"):
         return
     gercek = np.array(truth["target"]["position"], float)
+
+    # --- GPS sapma logu: bozuk + gercek konum + aktif corruption ---
+    _now = time.time()
+    if _gps_log_t0 is None:
+        _gps_log_t0 = _now
+    _gps_log_kayitlar.append({
+        "t": round(_now - _gps_log_t0, 3),
+        "bozuk": [round(float(c), 3) for c in ham],
+        "gercek": [round(float(c), 3) for c in gercek],
+        "corruption": drone.get_active_corruption(),
+    })
+    if _now - _gps_log_son_yaz > 5.0:   # her ~5 sn diske flush
+        _gps_log_yaz()
+        _gps_log_son_yaz = _now
+
     idx = _kiyas_idx
     _kiyas_idx += 1
     hx, hy, hz = ham
