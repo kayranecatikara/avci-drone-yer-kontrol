@@ -24,3 +24,4 @@ omer_filtre.py.py
 
 # GPS canli log (uretilen cikti)
 gps_analiz/gps_log_canli.json
+gps_analiz/*.png
