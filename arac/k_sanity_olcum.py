@@ -58,6 +58,13 @@ YAKALAMA: oncelik PrintWindow pencere-ICERIGI — oyun BASKA PENCERELERIN
 ARKASINDAYKEN de dogru kare gelir (olcum sirasinda terminal/VS Code'a
 bakilabilir). PrintWindow calismazsa mss ekran-bolgesine dusulur; YALNIZCA o
 durumda oyun onde/gorunur ve sabit boyutta kalmali (arac kaynagi konsola yazar).
+
+OYUN TCP TIKANMASI (protokol): oyun art arda baglan/kop dongulerinden sonra
+yeni TCP kabul etmeyebiliyor ve/veya telemetri bozulabiliyor (x,y sabit +
+attitude donuk + z sayarak artiyor). Test edilmis cozum: OYUNU KOMPLE KAPATIP
+YENIDEN ACMAK. (Play'den cik/gir alternatifi bir sonraki takilmada denenecek.)
+Onleme: araclar TEK TCP oturumunu paylassin (olc'a drone_baglanti verilebilir),
+kosu sonunda tek duzgun kapanis (disconnect + kisa bekleme).
 ================================================================================
 """
 import argparse
@@ -293,22 +300,30 @@ def _siluet_tespit(fr, uv, cv2):
 
 
 def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0, yontem="siluet",
-        irtifa_hedefe=False):
+        irtifa_hedefe=False, drone_baglanti=None):
     import cv2
     import mss
-    from sdk import drone_sdk as drone
 
-    if not drone.connect():
-        print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
-        print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP baglantisi kabul eder).")
-        return None
-    time.sleep(1.5)                                    # ilk telemetri gelsin
+    # TEK TCP OTURUMU: cagiran bagli bir drone modulu verirse onu kullan
+    # (baglan/kop dongusu yok -> oyun dinleyici tikanmasi onlenir); kapanis
+    # cagiranin sorumlulugunda. Verilmezse kendi baglantimizi acar/kapatiriz.
+    kendi_baglanti = drone_baglanti is None
+    if kendi_baglanti:
+        from sdk import drone_sdk as drone
+        if not drone.connect():
+            print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
+            print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP baglantisi kabul eder).")
+            return None
+        time.sleep(1.5)                                # ilk telemetri gelsin
+    else:
+        drone = drone_baglanti
     if not drone.get_debug_truth().get("available"):
         print("[HATA] DEBUG TRUTH AKMIYOR (get_debug_truth available=False).")
         print("       Bu arac truth-tabanlidir; sim'de debug/truth kanalini ac.")
-        drone.disconnect()
+        if kendi_baglanti:
+            drone.disconnect()
         return None
-    print("[OK] Oyuna baglanildi; debug truth AKIYOR. Olcum yontemi: %s" % yontem)
+    print("[OK] Telemetri hazir; debug truth AKIYOR. Olcum yontemi: %s" % yontem)
 
     ded = None
     if yontem == "yolo":
@@ -317,7 +332,8 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0, yontem="siluet",
                             conf=0.15, imgsz=imgsz)   # dusuk taban: analiz kapisi ayri
         if not ded.hazir:
             print("[HATA] best.pt yuklenemedi: %s" % ded.hata)
-            drone.disconnect()
+            if kendi_baglanti:
+                drone.disconnect()
             return None
         print("[OK] best.pt yuklendi (device=%s, imgsz=%d)." % (ded.device, imgsz))
 
@@ -360,7 +376,8 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0, yontem="siluet",
             print("       Belirti onceki oturumlarla ayni ise (x,y sabit + attitude")
             print("       donmus + z surekli sayiyor) OYUN OTURUMU BOZULMUS demektir:")
             print("       oyunu YENIDEN BASLAT ve olcumu taze oturumda kos.")
-            drone.disconnect()
+            if kendi_baglanti:
+                drone.disconnect()
             return None
 
     # Baslangic geometri kontrolu: sacma degerler 120 sn'lik kosu YAKILMADAN gorunsun
@@ -480,7 +497,8 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0, yontem="siluet",
     if z_ref is not None:
         _irtifa_tut()
         print("[UCUS] Olcum bitti (arm acik; thr=0 suzulme yapabilir - sim davranisi).")
-    drone.disconnect()
+    if kendi_baglanti:
+        drone.disconnect()
     if sil_neden:
         print("[SILUET] neden sayaclari: %s"
               % ", ".join("%s=%d" % kv for kv in sorted(sil_neden.items())))
