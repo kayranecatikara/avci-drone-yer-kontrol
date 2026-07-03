@@ -18,10 +18,17 @@
 > aynı yüksek-kontrast gövde çekirdeğini yakalıyor. Sebep: Talon render'da soluk/küçük
 > (40-115 m'de 7-24 px), kanat uçları düşük kontrast (eşik kesiyor) + FPV kromatik
 > aberasyon + hedef ara ara güneşe yakın geçiyor + truth GPS gecikmeli (reproj ~100-130 px
-> kayıyor). **Karar bekliyor:** K açısal-doğrulama ile kabul edilip FAZ 1'e geçilecek
-> (öneri) veya tek pasif koşuyla K pozitif-doğrulaması (offset-vs-merkez-dışılık regresyonu,
-> `veri/_tani_hareket.py`) kesinleştirilecek. `models/best.pt`'nin küçük hedefi görememesi
-> ayrı bir model işi (FAZ 1+), K sanity YOLO'suz siluetle yapıldı.
+> kayıyor). **Pozitif K-doğrulama (offset-vs-merkez-dışılık regresyonu):** f_x ölçek
+> kestirimi **k=0.867** (ex −0.55..0.95). **Kaba sanity GEÇTİ:** %54 hata k≈0.46, 2× hata
+> k≈2.0 verirdi; k=0.867 → HFOV=125 doğru **mertebede** (2-3× hata YOK). Ama tek koşu
+> gürültülü (MAD 9°, yatay medyan koşular arası 0°↔−8°; du~ex eğimi GPS gecikmesiyle
+> kirleniyor). **Sonuç: mevcut araçlarla (siluet + hareket hakemi) K %5 hassasiyetle NE
+> doğrulanabiliyor NE çürütülüyor** — gürültü tabanı çok yüksek. **KARAR:** kaba sanity
+> geçti (mertebe-doğru); HASSAS K teyidi **FAZ 2 PnP reprojection-error'a devredildi**
+> (master prompt zaten "ölçek teyidi reproj error ile" diyor — 6 keypoint'in kalibre 3D
+> modele uydurulması tek-genişlik ölçümünden çok daha sağlam). FAZ 1 (takip) K'ya duyarsız:
+> ByteTrack görüntü düzleminde çalışır; gyro-CMC H=K·R·K⁻¹ olduğundan f_x ölçek hatası
+> sadeleşir. `models/best.pt` küçük hedefi göremiyor → ayrı model işi (FAZ 1+).
 
 > **🔔 Güncelleme — Sim v0.0.5 saha davranışları (2026-07-04, FAZ 0 ölçüm oturumları):**
 > İki kritik sim davranışı tekrarlanabilir şekilde doğrulandı:
