@@ -44,26 +44,37 @@ anahtar guduum modu secicidir, telemetri bozulmalari KAPATILAMAZ — SDK_README)
     Grup basina en az 15 gecerli kare gerekir; yetersizse sureyi uzat veya
     --tirman ile hedef rotasina yaklas.
 
-KULLANIM (once oyunu ac, Play moduna al; WEB ARAYUZUNU KAPAT — oyun TEK TCP
-baglantisi kabul eder, bu arac dogrudan baglanir):
-
+KULLANIM A (onerilen — arayuzle birlikte, MANUEL yaklastirma):
+    1. Oyun acik + Play; arayuz acik (2_Arayuzu_Baslat.bat).
+    2. MANUEL modla hedef rotasinin ~20-40 m yakinina, hedefle ayni irtifa
+       bandina uc; tuslari birak (failsafe HOVER pozisyonu tutar).
+    3. python arac/k_sanity_olcum.py --api --sure 75
+       (telemetri server'dan okunur; oyunun tek TCP'sine dokunulmaz)
+KULLANIM B (arayuzsuz, dogrudan SDK; WEB ARAYUZU KAPALI olmali):
     python arac/k_sanity_olcum.py                 # 45 sn olc + analiz + rapor
-    python arac/k_sanity_olcum.py --sure 60       # 60 sn olc
     python arac/k_sanity_olcum.py --tirman 6      # once 6 sn tirman, hover'da olc
-    python arac/k_sanity_olcum.py --analiz veri/k_sanity_XXXX.csv   # offline analiz
+OFFLINE: python arac/k_sanity_olcum.py --analiz veri/k_sanity_XXXX.csv
+
+NOT: --imgsz varsayilani 960 (uretimdeki 640 DEGIL): olcumde FPS onemsiz;
+kucuk/uzak hedefin 640'a kucultulurken kaybolmasini onler. ~8 px'lik hedef
+(55-70 m) 640'ta ~5 px'e dusup kacar; 960'ta oldugu gibi kalir.
 
 Hedef DUZ UCUSTA olmali ve rotasi hem YAKLASAN hem UZAKLASAN bacak icermeli
-(gidis-donus / yanindan gecis). Kullanilabilir pencere ~70 m alti (960 px'te
-bbox >= 6 px). Oyun penceresi olcum boyunca GORUNUR ve SABIT boyutta kalmali
-(kenarliksiz pencere onerilir; tasima/boyutlandirma yapma).
+(gidis-donus / yanindan gecis). Kullanilabilir pencere kabaca <70-80 m
+(bbox >= 6 px @960). Oyun penceresi olcum boyunca ONDE/GORUNUR ve SABIT
+boyutta kalmali — mss EKRAN BOLGESI yakalar: oyunun onune baska pencere
+(tarayici/VS Code) gecerse olcum o pencereyi gorur (arac basta oyunu one
+getirir; olcum bitene kadar baska pencereye TIKLAMA).
 ================================================================================
 """
 import argparse
 import csv
+import json
 import math
 import os
 import sys
 import time
+import urllib.request
 
 import numpy as np
 
@@ -119,6 +130,32 @@ def _oyun_bolgesi():
     return None
 
 
+def _oyun_one_getir():
+    """Oyun penceresini ONE getir (mss ekran-bolgesi yakalar; oyun baska pencerenin
+    ARKASINDAYSA yanlis goruntu gelir — orn. tam ekran VS Code/tarayici). Basarisizsa
+    False doner; kullanicinin elle tiklamasi gerekir."""
+    try:
+        import ctypes
+        import pygetwindow as gw
+        from detection.pencere_yakala import pencere_bul
+        baslik, hwnd = pencere_bul(GAME_TITLE_HINTS)
+        if hwnd is None and baslik:
+            for w in gw.getAllWindows():
+                if (w.title or "").strip() == baslik:
+                    hwnd = getattr(w, "_hWnd", None)
+                    break
+        if not hwnd:
+            return False
+        u32 = ctypes.windll.user32
+        if u32.IsIconic(hwnd):
+            u32.ShowWindow(hwnd, 9)          # SW_RESTORE: kucultulmusse geri getir
+        u32.SetForegroundWindow(hwnd)
+        return True
+    except Exception as e:
+        print("[UYARI] Oyun penceresi one getirilemedi (%s)." % e)
+        return False
+
+
 def kare_al(sct, cv2):
     """(BGR kare, kaynak_adi) — oyun penceresi bolgesi; bulunamazsa tum ekran."""
     bolge = _oyun_bolgesi()
@@ -142,32 +179,82 @@ CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
              "hamx", "hamy", "hamz"]
 
 
-def olc(sure_s, tirman_s, csv_yolu):
+API_URL = "http://127.0.0.1:8000/api/telemetry"
+
+
+def _api_oku():
+    """Calisan server'in /api/telemetry ciktisi -> (dpos_cm, drot_deg, ham_cm, dbg).
+    Server METRE verir -> cm'ye cevrilir (tum arac cm calisir)."""
+    with urllib.request.urlopen(API_URL, timeout=1.0) as r:
+        t = json.loads(r.read())
+    d, g = t["drone"], t["target"]
+    dpos = (d["x"] * 100.0, d["y"] * 100.0, d["z"] * 100.0)
+    drot = (d["roll"], d["pitch"], d["yaw"])
+    ham = (g["x"] * 100.0, g["y"] * 100.0, g["z"] * 100.0)
+    return dpos, drot, ham, t
+
+
+def olc(sure_s, tirman_s, csv_yolu, api=False, imgsz=960):
     import cv2
     import mss
-    from sdk import drone_sdk as drone
     from detection.gorsel_tespit import HedefDedektor
 
-    if not drone.connect():
-        print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
-        print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP baglantisi kabul eder).")
-        return None
+    drone = None
+    if api:
+        # API MODU: telemetri CALISAN server'dan okunur (ikinci TCP acilmaz).
+        # Kullanim amaci: drone'u MANUEL modla hedef rotasinin yakinina ucurup
+        # hover'da birakmak; olcum normal sistem calisirken paralel yapilir.
+        try:
+            _, _, _, t0 = _api_oku()
+        except Exception as e:
+            print("[HATA] Server'a ulasilamadi (%s): %s" % (API_URL, e))
+            print("       once arayuzu baslat (2_Arayuzu_Baslat.bat).")
+            return None
+        if not t0.get("connected"):
+            print("[HATA] Server calisiyor ama OYUNA bagli degil (oyun acik/Play mi?).")
+            return None
+        print("[OK] API modu: telemetri server'dan (oyun baglantisina dokunulmaz).")
+        print("     debug truth available = %s" % t0.get("debug", {}).get("available"))
+        if tirman_s > 0:
+            print("[UYARI] --tirman API modunda YOK (kontrol server'da); yoksayildi.")
+            tirman_s = 0
+    else:
+        from sdk import drone_sdk as drone_mod
+        drone = drone_mod
+        if not drone.connect():
+            print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
+            print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP kabul eder) ya da")
+            print("       arayuz aciksa --api ile server uzerinden olc.")
+            return None
+        time.sleep(1.0)                      # ilk telemetri gelsin
+        print("[OK] Oyuna baglanildi. debug truth available = %s"
+              % drone.get_debug_truth().get("available"))
 
-    ded = HedefDedektor(os.path.join(_PROJ_ROOT, "models", "best.pt"), conf=0.25)
+    ded = HedefDedektor(os.path.join(_PROJ_ROOT, "models", "best.pt"),
+                        conf=0.25, imgsz=imgsz)
     if not ded.hazir:
         print("[HATA] best.pt yuklenemedi: %s" % ded.hata)
-        drone.disconnect()
+        if drone is not None:
+            drone.disconnect()
         return None
-    print("[OK] Oyuna baglanildi; best.pt yuklendi (device=%s)." % ded.device)
+    print("[OK] best.pt yuklendi (device=%s, imgsz=%d)." % (ded.device, imgsz))
     print("[NOT] Dropout 30. sn'den sonra baslar -> ILK 30 SN EN DEGERLI VERI.")
 
-    if tirman_s > 0:
+    if tirman_s > 0 and drone is not None:
         print("[UCUS] %d sn tirmaniliyor (thr=0.5), sonra hover'da olcum..." % tirman_s)
         drone.set_control_surfaces(0.5, 0.0, 0.0, 0.0, True)
         t0 = time.perf_counter()
         while time.perf_counter() - t0 < tirman_s:
             time.sleep(0.05)
         drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)   # hover
+
+    # mss EKRAN BOLGESI yakalar -> oyun penceresi ONDE olmali. Otomatik one getir;
+    # olmazsa kullaniciya soyle (ilk karelerde yanlis pencere = tespit yok, zarar yok).
+    if _oyun_one_getir():
+        print("[OK] Oyun penceresi ONE getirildi; 3 sn icinde olcum basliyor...")
+    else:
+        print("[UYARI] OYUN PENCERESINE TIKLA (one getir) - olcum 3 sn icinde basliyor!")
+    time.sleep(3.0)
 
     os.makedirs(VERI_DIR, exist_ok=True)
     f = open(csv_yolu, "w", newline="", encoding="utf-8")
@@ -184,13 +271,21 @@ def olc(sure_s, tirman_s, csv_yolu):
         t = time.perf_counter() - t0
         if t >= sure_s:
             break
-        if tirman_s > 0 and time.perf_counter() - son_hover > 0.5:
+        if tirman_s > 0 and drone is not None and time.perf_counter() - son_hover > 0.5:
             drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)  # hover tazele
             son_hover = time.perf_counter()
         # Telemetri kareye MUMKUN OLDUGUNCA yakin okunur (attitude tam hizli/temiz)
-        dpos = drone.get_drone_location()
-        drot = drone.get_drone_rotation()
-        ham = drone.get_target_location()
+        try:
+            if drone is not None:
+                dpos = drone.get_drone_location()
+                drot = drone.get_drone_rotation()
+                ham = drone.get_target_location()
+            else:
+                dpos, drot, ham, _t = _api_oku()
+        except Exception as e:
+            print("[UYARI] telemetri okunamadi: %s" % e)
+            time.sleep(0.2)
+            continue
         try:
             fr, kaynak = kare_al(sct, cv2)
         except Exception as e:
@@ -216,10 +311,11 @@ def olc(sure_s, tirman_s, csv_yolu):
             f.flush()
             print("  ... t=%.0fs kare=%d tespit=%d" % (t, n_kare, n_tespit))
     f.close()
-    if tirman_s > 0:
-        drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)
-        print("[UCUS] Olcum bitti; drone HOVER'da birakildi (arm acik).")
-    drone.disconnect()
+    if drone is not None:
+        if tirman_s > 0:
+            drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)
+            print("[UCUS] Olcum bitti; drone HOVER'da birakildi (arm acik).")
+        drone.disconnect()
     print("[OLCUM] Bitti: %d kare, %d tespit -> %s" % (n_kare, n_tespit, csv_yolu))
     return csv_yolu
 
@@ -524,7 +620,14 @@ def main():
     ap = argparse.ArgumentParser(description="FAZ 0 K sanity olcumu (truth'suz)")
     ap.add_argument("--sure", type=float, default=45.0, help="olcum suresi (sn)")
     ap.add_argument("--tirman", type=float, default=0.0,
-                    help="olcumden once N sn tirman (arm eder; sonra hover)")
+                    help="olcumden once N sn tirman (arm eder; sonra hover; API modunda yok)")
+    ap.add_argument("--api", action="store_true",
+                    help="telemetriyi CALISAN server'dan oku (/api/telemetry); oyunun "
+                         "TCP'sine dokunmaz. Kullanim: arayuzle MANUEL modda hedef "
+                         "rotasi yakinina uc, hover'da birak, sonra bu araci calistir")
+    ap.add_argument("--imgsz", type=int, default=960,
+                    help="YOLO inference cozunurlugu (olcumde FPS onemsiz; kucuk/uzak "
+                         "hedef icin 960 onerilir, uretimdeki 640 degil)")
     ap.add_argument("--analiz", type=str, default=None,
                     help="yakalama YAPMADAN var olan CSV'yi analiz et")
     ap.add_argument("--csv", type=str, default=None, help="cikti CSV yolu")
@@ -534,7 +637,7 @@ def main():
     else:
         yol = arg.csv or os.path.join(
             VERI_DIR, time.strftime("k_sanity_%Y%m%d_%H%M%S.csv"))
-        yol = olc(arg.sure, arg.tirman, yol)
+        yol = olc(arg.sure, arg.tirman, yol, api=arg.api, imgsz=arg.imgsz)
         sonuc = analiz(yol) if yol else None
     sys.exit(0 if (sonuc and sonuc.get("gecti")) else 1)
 
