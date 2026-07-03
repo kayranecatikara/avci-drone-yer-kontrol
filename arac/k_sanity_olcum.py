@@ -32,16 +32,20 @@ TANI (ekstra): ayni zincirle hedef merkezinin reprojeksiyonu vs YOLO bbox
 merkezi (px offset; truth'la artik gecikmesiz/temiz). Buyukse (>%3 W)
 kamera_model'deki attitude KONVANSIYON varsayimi suphelidir.
 
-KULLANIM (dogrudan SDK; WEB ARAYUZU KAPALI olmali — oyun tek TCP kabul eder):
+KULLANIM (drone YERDE/PASIF calisir — yaklasma ucusu GEREKMEZ; arac arm etmez.
+Dogrudan SDK baglanir; WEB ARAYUZU KAPALI olmali — oyun tek TCP kabul eder):
     python arac/k_sanity_olcum.py                 # 60 sn olc + analiz + rapor
-    python arac/k_sanity_olcum.py --sure 90       # daha uzun olcum
-    python arac/k_sanity_olcum.py --tirman 6      # once 6 sn tirman, hover'da olc
+    python arac/k_sanity_olcum.py --sure 90       # daha uzun olcum (onerilen)
+    python arac/k_sanity_olcum.py --tirman 6      # yerden gorus yetmezse: hover'da olc
     python arac/k_sanity_olcum.py --analiz veri/k_sanity_XXXX.csv   # offline analiz
 
-KONUMLANDIRMA IPUCU: hedef gecisleri <50-60 m olmali (bbox buyusun). Gerekirse
-once arayuzle MANUEL modda hedef rotasinin yakinina uc, hover'da birak, arayuzu
-KAPAT (drone son komutta hover kalir), sonra bu araci calistir. Oyunda debug
-truth AKMIYORSA arac basta acik hatayla durur.
+SAHNE GEREKSINIMI: hedef UCUYOR olmali (kanat yonu hizdan turetilir; duran
+hedef olculemez) ve rotasi <50-60 m'den gecmeli; uzak/yan/merkez-disi kareleri
+kapilar zaten eler. COK-NESNELI SAHNE (orn. yerde PARK ikinci Talon): kutu
+SECIMI truth konumunun goruntuye reprojeksiyonuna EN YAKIN merkezle yapilir
+(esik 0.25*W; eslesen kutu yoksa kare tespitsiz sayilir) — GENISLIK olcumu
+secimden bagimsizdir, yanlilik girmez. Oyunda debug truth AKMIYORSA arac
+basta acik hatayla durur.
 
 NOT: --imgsz varsayilani 960 (uretimdeki 640 DEGIL): olcumde FPS onemsiz;
 kucuk/uzak hedefin 640'a kucultulurken kaybolmasini onler. Oyun penceresi
@@ -151,7 +155,8 @@ def kare_al(sct, cv2):
 
 CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
              "dx", "dy", "dz", "droll", "dpitch", "dyaw",
-             "ttx", "tty", "ttz", "hamx", "hamy", "hamz"]
+             "ttx", "tty", "ttz", "hamx", "hamy", "hamz",
+             "n_kutu", "sec_off_px"]     # tani: karedeki kutu sayisi + secim offseti
 
 
 def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
@@ -229,8 +234,30 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
             kaynak_uyari = True
             print("[UYARI] Oyun penceresi bulunamadi -> TUM EKRAN yakalaniyor "
                   "(oyun tam ekran degilse olcum kirlenir).")
-        det = ded.tespit_et(fr)
+        kutular = ded.tespit_hepsi(fr)
         n_kare += 1
+        # KUTU SECIMI: cok-nesneli sahnede (park Talon vb.) truth'un goruntuye
+        # reprojeksiyonuna EN YAKIN merkezli kutu alinir (esik 0.25*W; eslesen
+        # yoksa kare tespitsiz sayilir). Reprojeksiyon yoksa en yuksek conf.
+        det = None
+        sec_off = ""
+        if kutular:
+            Wf, Hf = kutular[0]["W"], kutular[0]["H"]
+            uv = None
+            if tvar:
+                pk = km.dunya_to_kamera(np.array(tpos, float), np.array(dpos, float),
+                                        drot[0], drot[1], drot[2])
+                if pk[2] > 0:
+                    uv = km.izdusur(pk, km.K_matrisi(Wf, Hf))
+            if uv is not None:
+                aday = min(kutular, key=lambda d: (d["cx"] - uv[0]) ** 2
+                           + (d["cy"] - uv[1]) ** 2)
+                off = ((aday["cx"] - uv[0]) ** 2 + (aday["cy"] - uv[1]) ** 2) ** 0.5
+                if off <= 0.25 * Wf:
+                    det = aday
+                    sec_off = "%.1f" % off
+            else:
+                det = kutular[0]
         if det is not None:
             n_tespit += 1
             satir = [t, det["W"], det["H"], det["cx"], det["cy"], det["w"], det["h"],
@@ -238,7 +265,8 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
         else:
             satir = [t, fr.shape[1], fr.shape[0], "", "", "", "", ""]
         satir += [dpos[0], dpos[1], dpos[2], drot[0], drot[1], drot[2],
-                  tpos[0], tpos[1], tpos[2], ham[0], ham[1], ham[2]]
+                  tpos[0], tpos[1], tpos[2], ham[0], ham[1], ham[2],
+                  len(kutular), sec_off]
         wcsv.writerow(["%.4f" % x if isinstance(x, float) else x for x in satir])
         if n_kare % 50 == 0:
             f.flush()
@@ -408,6 +436,8 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
         off_med = float(np.median(offs))
         print("\n TANI: merkez reproj offset medyan %.1f px (goruntu genisliginin %%%.1f'i)"
               % (off_med, 100 * off_med / W))
+        print("       (kutu secimi reprojeksiyonla yapildigindan bu istatistik 0.25W ile"
+              " sinirlidir; asil karar genislik oranindadir)")
         if off_med > 0.03 * W:
             print("       [!] >%%3 W: kamera_model attitude KONVANSIYON varsayimi supheli"
                   " (isaret/sira) — genislik gecse bile isaretle.")

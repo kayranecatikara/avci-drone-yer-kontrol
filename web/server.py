@@ -224,14 +224,27 @@ def fpv_jpeg():
 #  Oyun kapaliyken veya baglanti kopunca surekli yeniden dener.
 # ----------------------------------------------------------
 def connection_manager():
+    deneme = 0
+    onceki_bagli = None
     while True:
-        if not drone.is_connected():
+        bagli = drone.is_connected()
+        if not bagli:
             # Yeniden baglanmadan once eski baglantiyi temizle (cift baglanmayi onler)
             try:
                 drone.disconnect()
             except Exception:
                 pass
-            drone.connect()  # oyun kapaliysa sessizce False doner, sorun olmaz
+            bagli = drone.connect()  # oyun kapaliysa sessizce False doner, sorun olmaz
+        if bagli and onceki_bagli is not True:
+            print("[BAGLANTI] Oyuna baglanildi.")
+            deneme = 0
+        elif not bagli:
+            deneme += 1
+            if deneme == 1 or deneme % 15 == 0:      # ilk deneme + ~30 sn'de bir hatirlat
+                print("[BAGLANTI] Oyuna baglanilamiyor (deneme %d) - oyun acik ve PLAY "
+                      "modunda mi? (Oyun TEK TCP kabul eder; onceki istemci koptuysa "
+                      "oyunu yeniden baslatmak gerekebilir.)" % deneme)
+        onceki_bagli = bagli
         # Pencere-yakalamayi ayakta tut: oyun penceresi acilinca baslar; kapaninca
         # on_closed birakir -> burada (her 2 sn) yeniden baslar.
         if (pencere_yakala_motoru is not None and pencere_yakala_motoru.hazir
@@ -668,6 +681,14 @@ def main():
     # ("Sunucu durdu" ama neden belli degil durumunu bitirir).
     import faulthandler, traceback
     faulthandler.enable()
+
+    # ACILISTA hemen baglan (kullanici tiki beklenmez); olmadiysa connection_manager
+    # arka planda 2 sn'de bir denemeye devam eder ve durumu konsola/arayuze yansitir.
+    if drone.connect():
+        print("[BAGLANTI] Oyuna baglanildi (acilista).")
+    else:
+        print("[BAGLANTI] Acilista baglanilamadi - arka planda denenmeye devam "
+              "(oyun acik ve PLAY modunda mi?).")
 
     # Arka planda baglanti yoneticisini ve gorev kontrol beynini baslat
     threading.Thread(target=connection_manager, daemon=True).start()

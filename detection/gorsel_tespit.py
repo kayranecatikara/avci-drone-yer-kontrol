@@ -54,31 +54,42 @@ class HedefDedektor:
     def tespit_et(self, frame):
         """frame: PIL Image (RGB, tercih) veya ndarray. -> en-yuksek-conf bbox dict | None.
         dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi)."""
+        hepsi = self.tespit_hepsi(frame)
+        return hepsi[0] if hepsi else None
+
+    def tespit_hepsi(self, frame):
+        """Karedeki TUM tespitler, conf'a gore AZALAN sirali liste (bos olabilir).
+        Cok-nesneli sahnede (orn. park etmis ikinci Talon) cagiranin SECIM
+        yapabilmesi icin; uretim tek-kutu API'si (tespit_et) ilk elemani alir,
+        davranisi degismez. Eleman semasi tespit_et ile ayni."""
         if not self.hazir:
-            return None
+            return []
         import time as _t
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
                                      device=self.device, verbose=False)[0]
         except Exception:
-            return None
+            return []
         boxes = getattr(res, "boxes", None)
         if boxes is None or len(boxes) == 0:
-            return None
+            return []
         try:
-            confs = boxes.conf
-            i = int(confs.argmax())                       # EN-YUKSEK-conf kutu (sinif-agnostik)
-            x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
-            cls = int(boxes.cls[i]) if boxes.cls is not None else -1
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
-            return {
-                "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
-                "w": (x2 - x1), "h": (y2 - y1),
-                "conf": float(confs[i]), "cls": cls,
-                "W": W, "H": H, "t": _t.perf_counter(),
-            }
+            t = _t.perf_counter()
+            cikti = []
+            for i in range(len(boxes)):
+                x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
+                cikti.append({
+                    "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
+                    "w": (x2 - x1), "h": (y2 - y1),
+                    "conf": float(boxes.conf[i]),
+                    "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
+                    "W": W, "H": H, "t": t,
+                })
+            cikti.sort(key=lambda d: -d["conf"])
+            return cikti
         except Exception:
-            return None
+            return []
 
 
 def siniflar(model_path):

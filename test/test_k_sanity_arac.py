@@ -60,7 +60,7 @@ def sentetik_csv(hfov_gercek_deg, yol, sure_s=22.0, fps=20.0):
                 + rng.normal(0.0, 80.0, 3)                # referans (analizde kullanilmaz)
             att = (3.0 * math.sin(0.7 * t), 2.0 * math.sin(t), 1.0 * math.sin(0.5 * t))
             kuyruk = [DRONE[0], DRONE[1], DRONE[2], att[0], att[1], att[2],
-                      tt[0], tt[1], tt[2], ham[0], ham[1], ham[2]]
+                      tt[0], tt[1], tt[2], ham[0], ham[1], ham[2], 1, 0.0]
             if i % 7 == 3:                                # arada tespitsiz kare
                 w.writerow([t, W, H, "", "", "", "", ""] + kuyruk)
                 continue

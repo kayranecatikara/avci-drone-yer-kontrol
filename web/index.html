@@ -487,7 +487,7 @@
     const dot = $("dot"), txt = $("connText");
     dot.className = "dot " + (state==="ok"?"ok":state==="wait"?"wait":"bad");
     txt.textContent = state==="ok" ? "Oyuna bağlı"
-                    : state==="wait" ? "Oyuna bağlanılıyor…"
+                    : state==="wait" ? "Oyuna bağlanılıyor… (oyun açık ve Play'de mi?)"
                     : "Sunucu kapalı";
   }
 

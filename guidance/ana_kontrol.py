@@ -172,6 +172,13 @@ class Cfg:
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
 
+    # --- KESTIRIM EMNIYETI ---
+    LEAD_MAX_CM = 8000.0       # lead'li hedef kestirimi ANLIK kestirimden en fazla bu
+                               # kadar uzaklasabilir (2 sn lead x ~33 m/s hiz tavani
+                               # ~66 m + pay). Asilirsa kureye KELEPCELENIR ve loglanir:
+                               # hiz kestirimi patlarsa (kotu paket/kaynak) lead noktasi
+                               # kilometrelerce oteye kacip drone'u kaciramaz.
+
     # --- FILTRELEME / DEADBAND ---
     DERIV_EMA = 0.20
     POS_DEADBAND = 150.0       # cm; yakinda jitter onle
@@ -264,6 +271,18 @@ def speed_cap(d_horiz):
         return Cfg.V_CAP_FAR
     t = d_horiz / Cfg.BRAKE_DIST                      # 0..1
     return Cfg.V_CAP_NEAR + (Cfg.V_CAP_FAR - Cfg.V_CAP_NEAR) * t
+
+
+def lead_kelepce(anlik, lead, maks_cm):
+    """Lead'li kestirimi ANLIK kestirim merkezli 'maks_cm' yaricapli kureye kelepcele.
+    (kelepceli_lead, asildi_mi) doner. Saf fonksiyon (unit-test edilir)."""
+    anlik = np.asarray(anlik, float)
+    lead = np.asarray(lead, float)
+    d = lead - anlik
+    m = float(np.linalg.norm(d))
+    if m <= maks_cm or m <= 1e-9:
+        return lead, False
+    return anlik + d * (maks_cm / m), True
 
 
 # --- kamera devir esikleri (gorus fazi hook'u icin) ---
@@ -436,6 +455,17 @@ class AvciKontrol:
                     # lead'siz ANLIK yatay konum -> terminal vurus (carpisma-rotasi) LOS'u
                     # bunu kullanir; lead son_temiz'de degil, hedef hizini eslemede otomatik.
                     self.son_xy_anlik = np.array([durum["pos"][0], durum["pos"][1]], float)
+                    # KESTIRIM EMNIYETI: lead noktasi anlik kestirimden kopamaz
+                    # (hiz kestirimi patlarsa lead km'lerce oteye kacmasin).
+                    self.son_temiz, asildi = lead_kelepce(
+                        np.array(durum["pos"], float), self.son_temiz, Cfg.LEAD_MAX_CM)
+                    if asildi:
+                        simdi = time.perf_counter()
+                        if simdi - getattr(self, "_kelepce_log_t", 0.0) > 1.0:
+                            self._kelepce_log_t = simdi
+                            print("[KELEPCE] lead kestirimi %.0f m sinirina kirpildi "
+                                  "(hiz kestirimi supheli olabilir)."
+                                  % (Cfg.LEAD_MAX_CM / 100.0))
             else:
                 self._fresh = False           # isinma/donma -> kestirim yok
         else:

@@ -12,7 +12,7 @@ import numpy as np
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, _ROOT)
 
-from guidance.ana_kontrol import AvciKontrol           # noqa: E402
+from guidance.ana_kontrol import AvciKontrol, Cfg, lead_kelepce   # noqa: E402
 from web.dev_truth import DevTruthKaynagi              # noqa: E402
 
 
@@ -74,8 +74,9 @@ def test_dev_truth_kaynagi():
     assert dev._fn() is None
     assert b.hedef_kaynak_ad == "filtre"
 
-    # truth AKIYOR: gecis olur; pos truth'tan, hiz sonlu-fark EMA
+    # truth AKIYOR ve ham'la TUTARLI (bozuk GPS ~30 m sapmis): gecis olur
     d.dbg = {"available": True, "target": {"position": (10000.0, 0.0, 7000.0)}}
+    d.ham = (10020.0, 2800.0, 7150.0)               # truth'a yakin (fark ~28 m)
     ok, msg = dev.uygula(b, "gercek")
     assert ok is True
     assert b.hedef_kaynak_ad == "gercek" and b._hedef_kaynak_fn is not None
@@ -103,9 +104,53 @@ def test_dev_truth_kaynagi():
     assert b._fresh is False
 
 
+def test_gecis_tutarlilik_kapisi():
+    """Birim/indeks/eksen hatasi: truth ham'la bagdasmiyorsa gecis REDDEDILIR."""
+    d = SahteDrone()
+    dev = DevTruthKaynagi(d, saat=lambda: 0.0)
+    b = AvciKontrol(d)
+    # 'metre truth' senaryosu: truth = ham/100 -> oran ~0.01, fark ~%99|ham|
+    d.ham = (10000.0, 5000.0, 7000.0)
+    d.dbg = {"available": True, "target": {"position": (100.0, 50.0, 70.0)}}
+    ok, msg = dev.uygula(b, "gercek")
+    assert ok is False and "REDDEDILDI" in msg, msg
+    assert b.hedef_kaynak_ad == "filtre" and b._hedef_kaynak_fn is None
+    # indeks kaymasi / baska nesne: dogru olcek ama 5 km otede -> fark kapisi
+    d.dbg = {"available": True, "target": {"position": (510000.0, 5000.0, 7000.0)}}
+    ok, msg = dev.uygula(b, "gercek")
+    assert ok is False and "REDDEDILDI" in msg, msg
+    # hiz kelepcesi: tek karelik 100 m sicrama EMA'da 40 m/s'yi ASAMAZ
+    saat = [0.0]
+    dev2 = DevTruthKaynagi(d, saat=lambda: saat[0])
+    d.dbg = {"available": True, "target": {"position": (10000.0, 5000.0, 7000.0)}}
+    dev2._fn()
+    saat[0] = 0.02
+    d.dbg = {"available": True, "target": {"position": (20000.0, 5000.0, 7000.0)}}
+    hd = dev2._fn()
+    assert abs(hd["vel"][0]) <= dev2.V_KELEPCE + 1e-9, hd["vel"]
+
+
+def test_lead_kelepce():
+    """Saf kelepce: sinir icinde dokunmaz, disinda kureye kirpar."""
+    anlik = np.array([0.0, 0.0, 5000.0])
+    yakin = np.array([3000.0, 0.0, 5000.0])
+    kirp, asildi = lead_kelepce(anlik, yakin, Cfg.LEAD_MAX_CM)
+    assert not asildi and np.allclose(kirp, yakin)
+    uzak = np.array([100000.0, 0.0, 5000.0])          # 1 km otede lead
+    kirp, asildi = lead_kelepce(anlik, uzak, Cfg.LEAD_MAX_CM)
+    assert asildi
+    assert abs(np.linalg.norm(kirp - anlik) - Cfg.LEAD_MAX_CM) < 1e-6
+    assert np.allclose((kirp - anlik) / np.linalg.norm(kirp - anlik),
+                       (uzak - anlik) / np.linalg.norm(uzak - anlik))  # yon korunur
+
+
 if __name__ == "__main__":
     test_dikis_takilir_ve_cikarilir()
     print("OK  test_dikis_takilir_ve_cikarilir")
     test_dev_truth_kaynagi()
     print("OK  test_dev_truth_kaynagi")
-    print("TUM TESTLER GECTI (2)")
+    test_gecis_tutarlilik_kapisi()
+    print("OK  test_gecis_tutarlilik_kapisi")
+    test_lead_kelepce()
+    print("OK  test_lead_kelepce")
+    print("TUM TESTLER GECTI (4)")
