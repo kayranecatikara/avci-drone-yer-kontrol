@@ -26,9 +26,12 @@
 > doğrulanabiliyor NE çürütülüyor** — gürültü tabanı çok yüksek. **KARAR:** kaba sanity
 > geçti (mertebe-doğru); HASSAS K teyidi **FAZ 2 PnP reprojection-error'a devredildi**
 > (master prompt zaten "ölçek teyidi reproj error ile" diyor — 6 keypoint'in kalibre 3D
-> modele uydurulması tek-genişlik ölçümünden çok daha sağlam). FAZ 1 (takip) K'ya duyarsız:
-> ByteTrack görüntü düzleminde çalışır; gyro-CMC H=K·R·K⁻¹ olduğundan f_x ölçek hatası
-> sadeleşir. `models/best.pt` küçük hedefi göremiyor → ayrı model işi (FAZ 1+).
+> modele uydurulması tek-genişlik ölçümünden çok daha sağlam). FAZ 1 (takip) K'ya
+> düşük duyarlı: ByteTrack görüntü düzleminde çalışır; gyro-CMC'de yaw/pitch kaynaklı
+> kayma f_x ile ORANTILIDIR (≈f_x·Δθ; yalnız roll bileşeni f'den bağımsızdır — "H=K·R·K⁻¹
+> sadeleşir" YANLIŞ gerekçedir). Doğru gerekçe: olası %13 f_x hatası CMC düzeltmesinde ~%13
+> artık bırakır, bu IoU eşleşmesini bozmayacak kadar küçüktür. `models/best.pt` küçük
+> hedefi göremiyor → ayrı model işi (FAZ 1+).
 
 > **🔔 Güncelleme — Sim v0.0.5 saha davranışları (2026-07-04, FAZ 0 ölçüm oturumları):**
 > İki kritik sim davranışı tekrarlanabilir şekilde doğrulandı:

@@ -49,20 +49,27 @@ TAU_MAX = 2.0        # gecikme taramasi ust siniri (s)
 TAU_ADIM = 0.05      # tarama adimi (s)
 
 
-def olc(sure_s, csv_yolu):
-    from sdk import drone_sdk as drone
+def olc(sure_s, csv_yolu, drone_baglanti=None):
     from fusion.inovasyonlu_j_v2 import GNSSDuzeltici
 
-    if not drone.connect():
-        print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
-        print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP baglantisi kabul eder).")
-        return None
-    time.sleep(1.5)
+    # TEK TCP OTURUMU: cagiran bagli bir drone modulu verirse onu kullan
+    # (kosu_yonetici turlarinda baglan/kop dongusu yok). Verilmezse kendi acar/kapatir.
+    kendi_baglanti = drone_baglanti is None
+    if kendi_baglanti:
+        from sdk import drone_sdk as drone
+        if not drone.connect():
+            print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
+            print("       WEB ARAYUZU KAPALI olmali (oyun tek TCP baglantisi kabul eder).")
+            return None
+        time.sleep(1.5)
+    else:
+        drone = drone_baglanti
     if not drone.get_debug_truth().get("available"):
         print("[HATA] DEBUG TRUTH AKMIYOR (available=False). Bu arac truth-tabanlidir.")
-        drone.disconnect()
+        if kendi_baglanti:
+            drone.disconnect()
         return None
-    print("[OK] Oyuna baglanildi; debug truth AKIYOR. Filtre pipeline varsayilanlariyla.")
+    print("[OK] Telemetri hazir; debug truth AKIYOR. Filtre pipeline varsayilanlariyla.")
 
     filtre = GNSSDuzeltici()                 # pipeline ile AYNI varsayilanlar
     os.makedirs(VERI_DIR, exist_ok=True)
@@ -101,7 +108,8 @@ def olc(sure_s, csv_yolu):
             print("  ... t=%.0fs ornek=%d" % (t, n))
         time.sleep(0.02)                     # ~50 Hz
     f.close()
-    drone.disconnect()
+    if kendi_baglanti:
+        drone.disconnect()
     print("[OLCUM] Bitti: %d ornek -> %s" % (n, csv_yolu))
     return csv_yolu
 
