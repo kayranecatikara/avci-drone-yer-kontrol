@@ -47,11 +47,15 @@ SECIMI truth konumunun goruntuye reprojeksiyonuna EN YAKIN merkezle yapilir
 secimden bagimsizdir, yanlilik girmez. Oyunda debug truth AKMIYORSA arac
 basta acik hatayla durur.
 
-NOT: --imgsz varsayilani 960 (uretimdeki 640 DEGIL): olcumde FPS onemsiz;
-kucuk/uzak hedefin 640'a kucultulurken kaybolmasini onler. Oyun penceresi
-olcum boyunca ONDE/GORUNUR ve SABIT boyutta kalmali — mss EKRAN BOLGESI
-yakalar; arac basta oyunu one getirir, olcum bitene kadar baska pencereye
-TIKLAMA.
+NOT: yakalama DOGAL cozunurlukte (--genislik 0; 1920'de 36 m'deki Talon ~24 px,
+960'a kucultulmus karede ~12 px'ti) ve --imgsz varsayilani 1280 (uretimdeki
+640 DEGIL; olcumde FPS onemsiz, kucuk hedef kaybolmasin). CUDA bellek yetmezse
+--imgsz 960'a in; K cozunurluk-parametreli oldugundan analiz etkilenmez.
+
+YAKALAMA: oncelik PrintWindow pencere-ICERIGI — oyun BASKA PENCERELERIN
+ARKASINDAYKEN de dogru kare gelir (olcum sirasinda terminal/VS Code'a
+bakilabilir). PrintWindow calismazsa mss ekran-bolgesine dusulur; YALNIZCA o
+durumda oyun onde/gorunur ve sabit boyutta kalmali (arac kaynagi konsola yazar).
 ================================================================================
 """
 import argparse
@@ -93,21 +97,77 @@ SAPMA_ESIK = 0.05             # KARAR esigi: medyan oran sapmasi <= %5
 #  Yakalama (server.py'nin mss yolunun sadelestirilmis kopyasi; server import
 #  EDILMEZ — modul yan etkileri var)
 # ----------------------------------------------------------------------------
-def _oyun_bolgesi():
+def _oyun_bul():
+    """Oyun penceresini bul -> ((left,top,w,h)|None, hwnd|None)."""
     try:
         import pygetwindow as gw
         from detection.pencere_yakala import pencere_bul
         baslik, hwnd = pencere_bul(GAME_TITLE_HINTS)
         if baslik is None:
-            return None
+            return None, None
         for w in gw.getAllWindows():
             if (hwnd is not None and getattr(w, "_hWnd", None) == hwnd) or \
                (hwnd is None and (w.title or "").strip() == baslik):
                 if w.width > 0 and w.height > 0 and w.visible:
-                    return (w.left, w.top, w.width, w.height)
+                    return (w.left, w.top, w.width, w.height), getattr(w, "_hWnd", hwnd)
     except Exception:
         pass
-    return None
+    return None, None
+
+
+class _BMIH(  # BITMAPINFOHEADER (GetDIBits icin)
+        __import__("ctypes").Structure):
+    import ctypes as _ct
+    _fields_ = [("biSize", _ct.c_uint32), ("biWidth", _ct.c_long),
+                ("biHeight", _ct.c_long), ("biPlanes", _ct.c_uint16),
+                ("biBitCount", _ct.c_uint16), ("biCompression", _ct.c_uint32),
+                ("biSizeImage", _ct.c_uint32), ("biXPelsPerMeter", _ct.c_long),
+                ("biYPelsPerMeter", _ct.c_long), ("biClrUsed", _ct.c_uint32),
+                ("biClrImportant", _ct.c_uint32)]
+
+
+def _pencere_icerik_bgr(hwnd):
+    """PrintWindow (PW_CLIENTONLY|PW_RENDERFULLCONTENT) ile pencere ICERIGINI yakala:
+    oyun BASKA PENCERELERIN ARKASINDAYKEN de dogru goruntu verir (mss ekran-bolgesi
+    yakalamanin 'oyun onde kalmali' sartini kaldirir). Basarisiz/bos icerik -> None
+    (cagiran mss'e duser). Yalnizca bu OLCUM ARACINDA kullanilir; uretim serverin
+    yakalama yolu degismez."""
+    import ctypes
+    u32, g32 = ctypes.windll.user32, ctypes.windll.gdi32
+    r = (ctypes.c_long * 4)()
+    if not u32.GetClientRect(hwnd, ctypes.byref(r)):
+        return None
+    w, h = int(r[2] - r[0]), int(r[3] - r[1])
+    if w < 64 or h < 64:
+        return None
+    wdc = u32.GetDC(hwnd)
+    if not wdc:
+        return None
+    mdc = g32.CreateCompatibleDC(wdc)
+    bmp = g32.CreateCompatibleBitmap(wdc, w, h)
+    eski = g32.SelectObject(mdc, bmp)
+    try:
+        if not u32.PrintWindow(hwnd, mdc, 3):        # 1|2: CLIENTONLY|RENDERFULLCONTENT
+            return None
+        bi = _BMIH()
+        bi.biSize = ctypes.sizeof(_BMIH)
+        bi.biWidth = w
+        bi.biHeight = -h                             # negatif: satirlar yukaridan asagi
+        bi.biPlanes = 1
+        bi.biBitCount = 32
+        bi.biCompression = 0                         # BI_RGB
+        buf = ctypes.create_string_buffer(w * h * 4)
+        if g32.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bi), 0) != h:
+            return None
+        fr = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
+        if float(fr.std()) < 1.0:                    # tumu siyah/tek renk -> icerik yok
+            return None
+        return fr.copy()
+    finally:
+        g32.SelectObject(mdc, eski)
+        g32.DeleteObject(bmp)
+        g32.DeleteDC(mdc)
+        u32.ReleaseDC(hwnd, wdc)
 
 
 def _oyun_one_getir():
@@ -135,21 +195,33 @@ def _oyun_one_getir():
         return False
 
 
-def kare_al(sct, cv2):
-    """(BGR kare, kaynak_adi) — oyun penceresi bolgesi; bulunamazsa tum ekran."""
-    bolge = _oyun_bolgesi()
-    if bolge:
-        left, top, wd, hg = bolge
-        bbox = {"left": left, "top": top, "width": wd, "height": hg}
-        kaynak = "pencere"
-    else:
-        bbox = sct.monitors[1]
-        kaynak = "TUM-EKRAN"
-    raw = sct.grab(bbox)
-    fr = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(raw.height, raw.width, 4)[:, :, :3]
-    if fr.shape[1] > CAM_MAX_WIDTH:
-        oran = CAM_MAX_WIDTH / fr.shape[1]
-        fr = cv2.resize(fr, (CAM_MAX_WIDTH, int(fr.shape[0] * oran)))
+def kare_al(sct, cv2, genislik=0):
+    """(BGR kare, kaynak_adi). Oncelik: PrintWindow pencere-ICERIGI (oyun arkada
+    olsa bile dogru kare; olcum sirasinda baska pencereyle calisilabilir).
+    Olmazsa mss bolge (oyun ONDE olmali), o da olmazsa tum ekran.
+    genislik=0 -> DOGAL cozunurluk (kucuk/uzak hedef icin en iyi tespit sansi;
+    K zaten cozunurluk-parametreli). >0 -> o genislige olcekle."""
+    bolge, hwnd = _oyun_bul()
+    fr = None
+    kaynak = ""
+    if hwnd:
+        fr = _pencere_icerik_bgr(hwnd)
+        if fr is not None:
+            kaynak = "pencere-icerik"
+    if fr is None:
+        if bolge:
+            left, top, wd, hg = bolge
+            bbox = {"left": left, "top": top, "width": wd, "height": hg}
+            kaynak = "mss-bolge(oyun ONDE olmali)"
+        else:
+            bbox = sct.monitors[1]
+            kaynak = "TUM-EKRAN"
+        raw = sct.grab(bbox)
+        fr = np.frombuffer(raw.bgra, dtype=np.uint8).reshape(
+            raw.height, raw.width, 4)[:, :, :3]
+    if genislik and fr.shape[1] > genislik:
+        oran = genislik / fr.shape[1]
+        fr = cv2.resize(fr, (genislik, int(fr.shape[0] * oran)))
     return np.ascontiguousarray(fr), kaynak
 
 
@@ -159,7 +231,7 @@ CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
              "n_kutu", "sec_off_px"]     # tani: karedeki kutu sayisi + secim offseti
 
 
-def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
+def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
     import cv2
     import mss
     from sdk import drone_sdk as drone
@@ -178,7 +250,7 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
     print("[OK] Oyuna baglanildi; debug truth AKIYOR.")
 
     ded = HedefDedektor(os.path.join(_PROJ_ROOT, "models", "best.pt"),
-                        conf=0.25, imgsz=imgsz)
+                        conf=0.15, imgsz=imgsz)     # dusuk taban: analiz kapisi ayri (--conf)
     if not ded.hazir:
         print("[HATA] best.pt yuklenemedi: %s" % ded.hata)
         drone.disconnect()
@@ -225,15 +297,17 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=960):
         tvar = bool(truth.get("available"))
         tpos = truth["target"]["position"] if tvar else ("", "", "")
         try:
-            fr, kaynak = kare_al(sct, cv2)
+            fr, kaynak = kare_al(sct, cv2, genislik=genislik)
         except Exception as e:
             print("[UYARI] kare alinamadi: %s" % e)
             time.sleep(0.2)
             continue
-        if kaynak != "pencere" and not kaynak_uyari:
+        if n_kare == 0:
+            print("[YAKALAMA] kaynak: %s" % kaynak)
+        if kaynak != "pencere-icerik" and not kaynak_uyari:
             kaynak_uyari = True
-            print("[UYARI] Oyun penceresi bulunamadi -> TUM EKRAN yakalaniyor "
-                  "(oyun tam ekran degilse olcum kirlenir).")
+            print("[UYARI] Pencere-ICERIGI yakalanamiyor -> %s. Bu yolda OYUN ONDE/"
+                  "gorunur kalmali; olcum boyunca baska pencereye TIKLAMA." % kaynak)
         kutular = ded.tespit_hepsi(fr)
         n_kare += 1
         # KUTU SECIMI: cok-nesneli sahnede (park Talon vb.) truth'un goruntuye
@@ -463,9 +537,12 @@ def main():
     ap.add_argument("--sure", type=float, default=60.0, help="olcum suresi (sn)")
     ap.add_argument("--tirman", type=float, default=0.0,
                     help="olcumden once N sn tirman (arm eder; sonra hover)")
-    ap.add_argument("--imgsz", type=int, default=960,
-                    help="YOLO inference cozunurlugu (olcumde FPS onemsiz; kucuk/uzak "
-                         "hedef icin 960 onerilir, uretimdeki 640 degil)")
+    ap.add_argument("--imgsz", type=int, default=1280,
+                    help="YOLO inference cozunurlugu (olcumde FPS onemsiz; CUDA bellek "
+                         "yetmezse 960'a in)")
+    ap.add_argument("--genislik", type=int, default=0,
+                    help="kare genisligi (0 = DOGAL cozunurluk, onerilen; 960 = eski "
+                         "davranis)")
     ap.add_argument("--analiz", type=str, default=None,
                     help="yakalama YAPMADAN var olan CSV'yi analiz et")
     ap.add_argument("--csv", type=str, default=None, help="cikti CSV yolu")
@@ -478,7 +555,7 @@ def main():
     else:
         yol = arg.csv or os.path.join(
             VERI_DIR, time.strftime("k_sanity_%Y%m%d_%H%M%S.csv"))
-        yol = olc(arg.sure, arg.tirman, yol, imgsz=arg.imgsz)
+        yol = olc(arg.sure, arg.tirman, yol, imgsz=arg.imgsz, genislik=arg.genislik)
         sonuc = analiz(yol, conf_min=arg.conf) if yol else None
     sys.exit(0 if (sonuc and sonuc.get("gecti")) else 1)
 
