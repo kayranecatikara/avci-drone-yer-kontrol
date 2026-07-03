@@ -65,6 +65,7 @@ class HedefDedektor:
         if not self.hazir:
             return []
         import time as _t
+        import numpy as np
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
                                      device=self.device, verbose=False)[0]
@@ -76,16 +77,36 @@ class HedefDedektor:
         try:
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
             t = _t.perf_counter()
+            # POSE modeli ise keypoints da gelir (pose'suz detect modelinde None ->
+            # FAZ 2 PnP otomatik pasif). Her kutuya kendi keypoint setini esle.
+            kpts = getattr(res, "keypoints", None)
+            kp_xy = kp_conf = None
+            if kpts is not None:
+                try:
+                    kp_xy = kpts.xy.cpu().numpy() if hasattr(kpts.xy, "cpu") else np.asarray(kpts.xy)
+                    kc = getattr(kpts, "conf", None)
+                    if kc is not None:
+                        kp_conf = kc.cpu().numpy() if hasattr(kc, "cpu") else np.asarray(kc)
+                except Exception:
+                    kp_xy = kp_conf = None
             cikti = []
             for i in range(len(boxes)):
                 x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
-                cikti.append({
+                d = {
                     "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
                     "w": (x2 - x1), "h": (y2 - y1),
                     "conf": float(boxes.conf[i]),
                     "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
                     "W": W, "H": H, "t": t,
-                })
+                }
+                if kp_xy is not None and i < len(kp_xy):
+                    # [[x,y,conf], ...] biciminde (PnP tuketicisi bekler)
+                    if kp_conf is not None and i < len(kp_conf):
+                        d["keypoints"] = [[float(x), float(y), float(c)]
+                                          for (x, y), c in zip(kp_xy[i], kp_conf[i])]
+                    else:
+                        d["keypoints"] = [[float(x), float(y), 1.0] for x, y in kp_xy[i]]
+                cikti.append(d)
             cikti.sort(key=lambda d: -d["conf"])
             return cikti
         except Exception:

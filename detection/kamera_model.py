@@ -154,6 +154,33 @@ def kamera_to_dunya_yon(v_kam, roll_deg, pitch_deg, yaw_deg):
 
 
 # ----------------------------------------------------------------------------
+#  GYRO-CMC (kamera hareket telafisi) — saf rotasyon homografisi
+#  Avci frame1->frame2 dondugunde, UZAK (dunya-sabit) bir noktanin goruntu
+#  konumu nasil kayar? Saf rotasyonda derinlikten BAGIMSIZ exact:
+#     x2 = H · x1,   H = K · R_Δ,kam · K⁻¹
+#  R_Δ,kam: frame1 kamera-yonunu frame2 kamera-yonune tasiyan donus. Tilt≠0
+#  oldugundan govde attitude farki kamera cercevesine MONTAJ donusumuyle tasinir:
+#     R_Δ,kam = R_mount^T · R_Δ,govde · R_mount   (eslenik/benzerlik donusumu)
+#  Bu, R_dunya_to_kamera(t2) · R_dunya_to_kamera(t1)^T ile MATEMATIKSEL OLARAK
+#  OZDESTIR (R_d2k = R_mount^T · R_govde_to_dunya^T oldugundan R_mount otomatik
+#  girer); asagida ikinci bicimle hesaplanir (tek kaynak: R_dunya_to_kamera).
+# ----------------------------------------------------------------------------
+def R_delta_kamera(att1, att2):
+    """att = (roll, pitch, yaw) DERECE. Frame1->frame2 kamera cercevesi donusu."""
+    R1 = R_dunya_to_kamera(*att1)
+    R2 = R_dunya_to_kamera(*att2)
+    return R2 @ R1.T
+
+
+def cmc_homografi(W, H, att1, att2):
+    """gyro-CMC homografisi (3x3): frame1 goruntu noktasi -> frame2 (uzak hedef).
+    att1/att2 = (roll,pitch,yaw) derece. K ayni cozunurlukten (W,H)."""
+    K = K_matrisi(W, H)
+    Rd = R_delta_kamera(att1, att2)
+    return K @ Rd @ np.linalg.inv(K)
+
+
+# ----------------------------------------------------------------------------
 #  Izdusum yardimcilari
 # ----------------------------------------------------------------------------
 def izdusur(p_kam, K):
