@@ -267,11 +267,29 @@ def _tur_filtre(drone, arg):
                                     r["kazanc_pct"], r["ham"]["tau_s"], r["filtre"]["tau_s"]))
 
 
+def _tur_cmc_test(drone, arg):
+    """FAZ 1 CMC isaret testi — UCUSLU (arm + yaw/roll osilasyonu)."""
+    import cmc_isaret_testi as cmc
+    if not truth_bekle(drone):
+        return False, "Truth AKMIYOR (sim debug kanali kapali?)."
+    r = cmc.kosu(drone, arg.sure if arg.sure else 40.0)
+    if r is None:
+        return False, "CMC isaret testi olcum uretemedi (irtifa/FOV?)."
+    ek = ""
+    if "roll_oran" in r:
+        ek = " | roll oran %.2f" % r["roll_oran"]
+    return r["gecti"], ("CMC isaret: YAW hata_HAM %.1f px -> hata_CMC %.1f px (oran %.2f%s)"
+                        " -> %s" % (r["yaw_ham_med"], r["yaw_cmc_med"], r["oran"], ek,
+                                    "GECTI (dogru isarette)" if r["gecti"]
+                                    else "KALDI (isaret/eksen suphesi)"))
+
+
 # TUR_KAYDI: ad -> (fonksiyon, ucuslu_mu, aciklama). FAZ 1+ turleri buraya eklenir.
 TUR_KAYDI = {
-    "hakem":    (_tur_hakem,   False, "hareket-farki hakemi (zincir/K acisal kontrolu)"),
+    "hakem":    (_tur_hakem,    False, "hareket-farki hakemi (zincir/K acisal kontrolu)"),
     "k-sanity": (_tur_k_sanity, False, "hakem + K sanity siluet olcumu (birlesik)"),
-    "filtre":   (_tur_filtre,  False, "fusion filtre dogrulama (RMSE/gecikme)"),
+    "filtre":   (_tur_filtre,   False, "fusion filtre dogrulama (RMSE/gecikme)"),
+    "cmc-test": (_tur_cmc_test, True,  "FAZ 1 CMC isaret testi (UCUSLU: yaw/roll osilasyon)"),
 }
 
 

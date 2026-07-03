@@ -20,9 +20,10 @@ def test_tur_kaydi_butunluk():
         assert callable(fn), ad
         assert isinstance(ucuslu, bool), ad
         assert isinstance(acik, str) and acik, ad
-    # bugunku turlerin hepsi arm'siz (ucuslu FAZ 1'de eklenecek)
-    assert all(not v[1] for v in ky.TUR_KAYDI.values())
-    assert set(ky.TUR_KAYDI) >= {"hakem", "k-sanity", "filtre"}
+    assert set(ky.TUR_KAYDI) >= {"hakem", "k-sanity", "filtre", "cmc-test"}
+    # olcum turleri arm'siz; cmc-test UCUSLU (arm -> tur sonrasi restart protokolu)
+    assert ky.TUR_KAYDI["k-sanity"][1] is False
+    assert ky.TUR_KAYDI["cmc-test"][1] is True
 
 
 def test_surec_bulma(monkeypatch_yok=True):
