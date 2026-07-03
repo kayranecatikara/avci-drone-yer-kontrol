@@ -41,11 +41,13 @@ Dogrudan SDK baglanir; WEB ARAYUZU KAPALI olmali — oyun tek TCP kabul eder):
 
 SAHNE GEREKSINIMI: hedef UCUYOR olmali (kanat yonu hizdan turetilir; duran
 hedef olculemez) ve rotasi <50-60 m'den gecmeli; uzak/yan/merkez-disi kareleri
-kapilar zaten eler. COK-NESNELI SAHNE (orn. yerde PARK ikinci Talon): kutu
-SECIMI truth konumunun goruntuye reprojeksiyonuna EN YAKIN merkezle yapilir
-(esik 0.25*W; eslesen kutu yoksa kare tespitsiz sayilir) — GENISLIK olcumu
-secimden bagimsizdir, yanlilik girmez. Oyunda debug truth AKMIYORSA arac
-basta acik hatayla durur.
+kapilar zaten eler. Yorunge TEPEDEN geciyorsa --tirman N ile +N metre hover'a
+cik (gecis mesafesi kisalir). COK-NESNELI SAHNE (orn. yerde PARK ikinci Talon):
+kutu SECIMI truth reprojeksiyonuna EN YAKIN merkez (esik 0.20*W) + kutunun ima
+ettigi mesafenin truth mesafesiyle kaba tutarliligi ([x1/3, x3] bandi; bariz
+yanlis nesne dislanir, +-%60 K hatasi bile bandin icinde kalir -> karara
+yanlilik girmez) ile yapilir; eslesen yoksa kare tespitsiz sayilir. GENISLIK
+olcumu secimden bagimsizdir. Oyunda debug truth AKMIYORSA arac basta durur.
 
 NOT: yakalama DOGAL cozunurlukte (--genislik 0; 1920'de 36 m'deki Talon ~24 px,
 960'a kucultulmus karede ~12 px'ti) ve --imgsz varsayilani 1280 (uretimdeki
@@ -231,11 +233,70 @@ CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
              "n_kutu", "sec_off_px"]     # tani: karedeki kutu sayisi + secim offseti
 
 
-def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
+# ----------------------------------------------------------------------------
+#  SILUET OLCUMU (varsayilan yontem): gokyuzu PARLAK/duz, Talon KOYU siluet.
+#  Truth reprojeksiyonu cevresindeki ROI'de koyu bagli-bileseni bul, bbox
+#  genisligini olc. YOLO'ya BAGIMSIZ: mevcut best.pt kucuk/uzak hedefi
+#  goremiyor (sahada olculdu); K sanity GEOMETRI olcumudur, dedektor
+#  performansi degil. Yalnizca bu aracta kullanilir (uretim hatti YOLO).
+# ----------------------------------------------------------------------------
+SIL_ROI = 130          # ROI yari-boyu (px; 1920'de 260x260 pencere)
+SIL_MERKEZ_PAY = 85    # bilesen merkezi ROI merkezine bundan yakin olmali
+SIL_KONTRAST = 22      # gok medyani - hedef cekirdegi asgari fark (gri seviyesi)
+SIL_ALAN = (3.0, 2500.0)   # kabul edilen bilesen alani (px^2)
+
+
+def _siluet_tespit(fr, uv, cv2):
+    """ROI'de siluet olcumu -> (det dict | None, neden). Hedef gokten KOYU ya da
+    PARLAK ayrisabilir (boyaya/isiga gore) -> kutupsuz |sapma| maskesi. Kapilar:
+    ROI kadraj ici + gokyuzu gibi (parlak) + gunes parlamasiz + yeterli kontrast
+    + bilesen merkeze yakin. 'neden' saha teshisi icin sayaclanir."""
+    H, W = fr.shape[:2]
+    x0 = int(round(uv[0])) - SIL_ROI
+    y0 = int(round(uv[1])) - SIL_ROI
+    if x0 < 0 or y0 < 0 or x0 + 2 * SIL_ROI >= W or y0 + 2 * SIL_ROI >= H:
+        return None, "kadraj"
+    roi = cv2.cvtColor(fr[y0:y0 + 2 * SIL_ROI, x0:x0 + 2 * SIL_ROI],
+                       cv2.COLOR_BGR2GRAY)
+    roi = cv2.medianBlur(roi, 3)
+    med = float(np.median(roi))
+    if med < 110.0:
+        return None, "gok-degil"
+    if float((roi >= 250).mean()) > 0.05:
+        return None, "gunes"
+    sapma = np.abs(roi.astype(np.int16) - med)
+    p999 = float(np.percentile(sapma, 99.9))
+    if p999 < SIL_KONTRAST:
+        return None, "kontrast"
+    esik_dev = max(SIL_KONTRAST * 0.8, 0.5 * p999)
+    maske = (sapma > esik_dev).astype(np.uint8)
+    maske = cv2.morphologyEx(maske, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
+    n, etiket, istat, merkez = cv2.connectedComponentsWithStats(maske, 8)
+    aday = None
+    for i in range(1, n):
+        alan = float(istat[i, cv2.CC_STAT_AREA])
+        if not (SIL_ALAN[0] <= alan <= SIL_ALAN[1]):
+            continue
+        mx, my = float(merkez[i][0]), float(merkez[i][1])
+        uzak = ((mx - SIL_ROI) ** 2 + (my - SIL_ROI) ** 2) ** 0.5
+        if uzak > SIL_MERKEZ_PAY:
+            continue
+        if aday is None or uzak < aday[0]:
+            aday = (uzak, i, mx, my)
+    if aday is None:
+        return None, "bilesen-yok"
+    _, i, mx, my = aday
+    bw = float(istat[i, cv2.CC_STAT_WIDTH])
+    bh = float(istat[i, cv2.CC_STAT_HEIGHT])
+    return ({"cx": x0 + mx, "cy": y0 + my, "w": bw, "h": bh,
+             "conf": 1.0, "W": W, "H": H}, "ok")
+
+
+def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0, yontem="siluet",
+        irtifa_hedefe=False):
     import cv2
     import mss
     from sdk import drone_sdk as drone
-    from detection.gorsel_tespit import HedefDedektor
 
     if not drone.connect():
         print("[HATA] Oyuna baglanilamadi. Oyun acik ve PLAY modunda mi?")
@@ -247,23 +308,66 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
         print("       Bu arac truth-tabanlidir; sim'de debug/truth kanalini ac.")
         drone.disconnect()
         return None
-    print("[OK] Oyuna baglanildi; debug truth AKIYOR.")
+    print("[OK] Oyuna baglanildi; debug truth AKIYOR. Olcum yontemi: %s" % yontem)
 
-    ded = HedefDedektor(os.path.join(_PROJ_ROOT, "models", "best.pt"),
-                        conf=0.15, imgsz=imgsz)     # dusuk taban: analiz kapisi ayri (--conf)
-    if not ded.hazir:
-        print("[HATA] best.pt yuklenemedi: %s" % ded.hata)
-        drone.disconnect()
-        return None
-    print("[OK] best.pt yuklendi (device=%s, imgsz=%d)." % (ded.device, imgsz))
+    ded = None
+    if yontem == "yolo":
+        from detection.gorsel_tespit import HedefDedektor
+        ded = HedefDedektor(os.path.join(_PROJ_ROOT, "models", "best.pt"),
+                            conf=0.15, imgsz=imgsz)   # dusuk taban: analiz kapisi ayri
+        if not ded.hazir:
+            print("[HATA] best.pt yuklenemedi: %s" % ded.hata)
+            drone.disconnect()
+            return None
+        print("[OK] best.pt yuklendi (device=%s, imgsz=%d)." % (ded.device, imgsz))
 
-    if tirman_s > 0:
-        print("[UCUS] %d sn tirmaniliyor (thr=0.5), sonra hover'da olcum..." % tirman_s)
-        drone.set_control_surfaces(0.5, 0.0, 0.0, 0.0, True)
+    # IRTIFA TUTUCU (P-dongusu). Sahada olculdu: thr=0 'hover' bu sim'de irtifayi
+    # TUTMUYOR (~+1 m/s surekli suzulme; uc kosuda 80->1039 m). Acik-cevrim hover
+    # yerine olcum boyunca P-kontrolla irtifa kilitlenir.
+    z_ref = None
+    if irtifa_hedefe:
+        # Referans = hedef yorungesinin irtifasi (truth z medyani): ring duzlemine
+        # oturunca gecisler yakin ve yaklasan/uzaklasan bacaklar bol olur.
+        ornekler = []
         t0 = time.perf_counter()
-        while time.perf_counter() - t0 < tirman_s:
+        while time.perf_counter() - t0 < 1.5:
+            ornekler.append(float(drone.get_debug_truth()["target"]["position"][2]))
             time.sleep(0.05)
-        drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)   # hover
+        z_ref = float(np.median(ornekler))
+        print("[UCUS] irtifa referansi = hedef yorunge irtifasi: %.1f m" % (z_ref / 100.0))
+    elif tirman_s > 0:
+        z_ref = float(drone.get_drone_location()[2]) + float(tirman_s) * 100.0
+        print("[UCUS] irtifa referansi = simdiki + %.0f m" % float(tirman_s))
+
+    def _irtifa_tut():
+        dz_m = (float(drone.get_drone_location()[2]) - z_ref) / 100.0
+        thr = max(-0.40, min(0.40, -0.10 * dz_m))
+        drone.set_control_surfaces(thr, 0.0, 0.0, 0.0, True)
+        return dz_m
+
+    if z_ref is not None:
+        print("[UCUS] referansa gidiliyor (P-tutucu; en cok 120 sn)...")
+        t0 = time.perf_counter()
+        while time.perf_counter() - t0 < 120.0:
+            dz_m = _irtifa_tut()
+            if abs(dz_m) < 3.0:
+                break
+            time.sleep(0.1)
+        print("[UCUS] irtifa: %.1f m (ref sapmasi %+.1f m)"
+              % (float(drone.get_drone_location()[2]) / 100.0, dz_m))
+        if abs(dz_m) > 20.0:
+            print("[HATA] Irtifa referansina OTURULAMADI (sapma %+.1f m)." % dz_m)
+            print("       Belirti onceki oturumlarla ayni ise (x,y sabit + attitude")
+            print("       donmus + z surekli sayiyor) OYUN OTURUMU BOZULMUS demektir:")
+            print("       oyunu YENIDEN BASLAT ve olcumu taze oturumda kos.")
+            drone.disconnect()
+            return None
+
+    # Baslangic geometri kontrolu: sacma degerler 120 sn'lik kosu YAKILMADAN gorunsun
+    _d0 = np.array(drone.get_drone_location(), float)
+    _t0 = np.array(drone.get_debug_truth()["target"]["position"], float)
+    print("[KONTROL] drone z=%.1f m | hedef z=%.1f m | mesafe=%.1f m"
+          % (_d0[2] / 100.0, _t0[2] / 100.0, float(np.linalg.norm(_t0 - _d0)) / 100.0))
 
     if _oyun_one_getir():
         print("[OK] Oyun penceresi ONE getirildi; 3 sn icinde olcum basliyor...")
@@ -281,13 +385,14 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
     n_kare = n_tespit = 0
     son_hover = t0
     kaynak_uyari = False
+    sil_neden = {}                       # siluet ret-neden sayaclari (saha teshisi)
     print("[OLCUM] %d sn kare toplaniyor (hedef gecislerini bekle)..." % sure_s)
     while True:
         t = time.perf_counter() - t0
         if t >= sure_s:
             break
-        if tirman_s > 0 and time.perf_counter() - son_hover > 0.5:
-            drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)  # hover tazele
+        if z_ref is not None and time.perf_counter() - son_hover > 0.3:
+            _irtifa_tut()                                  # irtifa kilidini surdur
             son_hover = time.perf_counter()
         # Telemetri kareye MUMKUN OLDUGUNCA yakin okunur (attitude tam hizli/temiz)
         dpos = drone.get_drone_location()
@@ -308,30 +413,56 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
             kaynak_uyari = True
             print("[UYARI] Pencere-ICERIGI yakalanamiyor -> %s. Bu yolda OYUN ONDE/"
                   "gorunur kalmali; olcum boyunca baska pencereye TIKLAMA." % kaynak)
-        kutular = ded.tespit_hepsi(fr)
         n_kare += 1
-        # KUTU SECIMI: cok-nesneli sahnede (park Talon vb.) truth'un goruntuye
-        # reprojeksiyonuna EN YAKIN merkezli kutu alinir (esik 0.25*W; eslesen
-        # yoksa kare tespitsiz sayilir). Reprojeksiyon yoksa en yuksek conf.
+        # Truth reprojeksiyonu (siluet ROI'si ve YOLO kutu secimi icin ortak).
+        Wf, Hf = fr.shape[1], fr.shape[0]
+        uv = None
+        R_truth = None
+        if tvar:
+            pk = km.dunya_to_kamera(np.array(tpos, float), np.array(dpos, float),
+                                    drot[0], drot[1], drot[2])
+            R_truth = float(np.linalg.norm(np.array(tpos, float)
+                                           - np.array(dpos, float)))
+            if pk[2] > 0:
+                uv = km.izdusur(pk, km.K_matrisi(Wf, Hf))
         det = None
         sec_off = ""
-        if kutular:
-            Wf, Hf = kutular[0]["W"], kutular[0]["H"]
-            uv = None
-            if tvar:
-                pk = km.dunya_to_kamera(np.array(tpos, float), np.array(dpos, float),
-                                        drot[0], drot[1], drot[2])
-                if pk[2] > 0:
-                    uv = km.izdusur(pk, km.K_matrisi(Wf, Hf))
-            if uv is not None:
-                aday = min(kutular, key=lambda d: (d["cx"] - uv[0]) ** 2
-                           + (d["cy"] - uv[1]) ** 2)
-                off = ((aday["cx"] - uv[0]) ** 2 + (aday["cy"] - uv[1]) ** 2) ** 0.5
-                if off <= 0.25 * Wf:
-                    det = aday
-                    sec_off = "%.1f" % off
+        n_kutu = 0
+        if yontem == "siluet":
+            # SILUET: ROI truth-reprojeksiyon merkezli; gokten ayrisan bilesen.
+            if uv is None:
+                sil_neden["uv-yok"] = sil_neden.get("uv-yok", 0) + 1
             else:
-                det = kutular[0]
+                det, neden = _siluet_tespit(fr, uv, cv2)
+                sil_neden[neden] = sil_neden.get(neden, 0) + 1
+                if det is not None:
+                    n_kutu = 1
+                    sec_off = "%.1f" % (((det["cx"] - uv[0]) ** 2
+                                         + (det["cy"] - uv[1]) ** 2) ** 0.5)
+        else:
+            # YOLO KUTU SECIMI: reprojeksiyona EN YAKIN merkez (esik 0.20*W) VE
+            # kutunun ima ettigi mesafe truth'un [x1/3, x3] bandinda (park Talon
+            # gibi bariz yanlis nesneler dislanir; +-%60 K hatasi bile bandin
+            # icinde kalir -> karara yanlilik girmez).
+            kutular = ded.tespit_hepsi(fr)
+            n_kutu = len(kutular)
+            if kutular and uv is not None:
+                w_bek_kaba = km.fx_px(Wf) * TALON_KANAT_CM / max(R_truth, 1e-6)
+                adaylar = [d for d in kutular
+                           if w_bek_kaba / 3.0 <= d["w"] <= w_bek_kaba * 3.0]
+                if adaylar:
+                    aday = min(adaylar, key=lambda d: (d["cx"] - uv[0]) ** 2
+                               + (d["cy"] - uv[1]) ** 2)
+                    off = ((aday["cx"] - uv[0]) ** 2
+                           + (aday["cy"] - uv[1]) ** 2) ** 0.5
+                    if off <= 0.20 * Wf:
+                        det = aday
+                        sec_off = "%.1f" % off
+            elif kutular and not tvar:
+                det = kutular[0]     # truth yoksa (pratikte olmaz) eski davranis
+            # truth VARKEN reprojeksiyon kamera ARKASINDAYSA (hedef goruntude
+            # olamaz) kutu SECILMEZ: sahnedeki baska nesne (park Talon) hedef
+            # sanilmasin - onceki kosuda fallback tam bu sizintiyi yaratti.
         if det is not None:
             n_tespit += 1
             satir = [t, det["W"], det["H"], det["cx"], det["cy"], det["w"], det["h"],
@@ -340,16 +471,19 @@ def olc(sure_s, tirman_s, csv_yolu, imgsz=1280, genislik=0):
             satir = [t, fr.shape[1], fr.shape[0], "", "", "", "", ""]
         satir += [dpos[0], dpos[1], dpos[2], drot[0], drot[1], drot[2],
                   tpos[0], tpos[1], tpos[2], ham[0], ham[1], ham[2],
-                  len(kutular), sec_off]
+                  n_kutu, sec_off]
         wcsv.writerow(["%.4f" % x if isinstance(x, float) else x for x in satir])
         if n_kare % 50 == 0:
             f.flush()
             print("  ... t=%.0fs kare=%d tespit=%d" % (t, n_kare, n_tespit))
     f.close()
-    if tirman_s > 0:
-        drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)
-        print("[UCUS] Olcum bitti; drone HOVER'da birakildi (arm acik).")
+    if z_ref is not None:
+        _irtifa_tut()
+        print("[UCUS] Olcum bitti (arm acik; thr=0 suzulme yapabilir - sim davranisi).")
     drone.disconnect()
+    if sil_neden:
+        print("[SILUET] neden sayaclari: %s"
+              % ", ".join("%s=%d" % kv for kv in sorted(sil_neden.items())))
     print("[OLCUM] Bitti: %d kare, %d tespit -> %s" % (n_kare, n_tespit, csv_yolu))
     return csv_yolu
 
@@ -536,13 +670,21 @@ def main():
     ap = argparse.ArgumentParser(description="FAZ 0 K sanity olcumu (truth-tabanli)")
     ap.add_argument("--sure", type=float, default=60.0, help="olcum suresi (sn)")
     ap.add_argument("--tirman", type=float, default=0.0,
-                    help="olcumden once N sn tirman (arm eder; sonra hover)")
+                    help="irtifa referansi = simdiki + N metre (arm eder; P-tutucuyla "
+                         "olcum boyunca kilitlenir)")
+    ap.add_argument("--irtifa-hedefe", action="store_true",
+                    help="irtifa referansi = hedef yorunge irtifasi (truth z medyani); "
+                         "ring duzlemine oturur, gecisler yakinlasir (onerilen)")
     ap.add_argument("--imgsz", type=int, default=1280,
                     help="YOLO inference cozunurlugu (olcumde FPS onemsiz; CUDA bellek "
                          "yetmezse 960'a in)")
     ap.add_argument("--genislik", type=int, default=0,
                     help="kare genisligi (0 = DOGAL cozunurluk, onerilen; 960 = eski "
                          "davranis)")
+    ap.add_argument("--yontem", choices=("siluet", "yolo"), default="siluet",
+                    help="genislik olcum yontemi: siluet = truth-ROI'de koyu bilesen "
+                         "(varsayilan; dedektorden bagimsiz geometri olcumu), yolo = "
+                         "best.pt kutulari (model kucuk hedefi gorebiliyorsa)")
     ap.add_argument("--analiz", type=str, default=None,
                     help="yakalama YAPMADAN var olan CSV'yi analiz et")
     ap.add_argument("--csv", type=str, default=None, help="cikti CSV yolu")
@@ -555,7 +697,8 @@ def main():
     else:
         yol = arg.csv or os.path.join(
             VERI_DIR, time.strftime("k_sanity_%Y%m%d_%H%M%S.csv"))
-        yol = olc(arg.sure, arg.tirman, yol, imgsz=arg.imgsz, genislik=arg.genislik)
+        yol = olc(arg.sure, arg.tirman, yol, imgsz=arg.imgsz, genislik=arg.genislik,
+                  yontem=arg.yontem, irtifa_hedefe=arg.irtifa_hedefe)
         sonuc = analiz(yol, conf_min=arg.conf) if yol else None
     sys.exit(0 if (sonuc and sonuc.get("gecti")) else 1)
 

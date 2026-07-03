@@ -80,6 +80,36 @@ def sentetik_csv(hfov_gercek_deg, yol, sure_s=22.0, fps=20.0):
     return yol
 
 
+def test_siluet_tespit():
+    """Sentetik gok + koyu siluet: genislik ~dogru; gunes/zemin ROI'leri reddedilir."""
+    import cv2
+    rng = np.random.default_rng(3)
+    fr = np.clip(170.0 + rng.normal(0, 3.0, (1080, 1920)), 0, 255).astype(np.uint8)
+    cv2.ellipse(fr, (900, 500), (30, 8), 0, 0, 360, 60, -1)      # 60 px kanat
+    fr = cv2.GaussianBlur(fr, (3, 3), 0)
+    fr3 = cv2.cvtColor(fr, cv2.COLOR_GRAY2BGR)
+    det, neden = ks._siluet_tespit(fr3, (905.0, 505.0), cv2)
+    assert det is not None and neden == "ok"
+    assert abs(det["w"] - 60.0) <= 6.0, det["w"]                 # <=%10 kenar hatasi
+    assert abs(det["cx"] - 900) < 8 and abs(det["cy"] - 500) < 8
+    # PARLAK hedef (acik boyali govde) de yakalanmali (kutupsuz sapma maskesi)
+    par = np.clip(170.0 + rng.normal(0, 3.0, (1080, 1920)), 0, 255).astype(np.uint8)
+    cv2.ellipse(par, (900, 500), (30, 8), 0, 0, 360, 235, -1)
+    par3 = cv2.cvtColor(cv2.GaussianBlur(par, (3, 3), 0), cv2.COLOR_GRAY2BGR)
+    det2, neden2 = ks._siluet_tespit(par3, (905.0, 505.0), cv2)
+    assert det2 is not None and abs(det2["w"] - 60.0) <= 6.0, (det2, neden2)
+    # gunes parlamasi: ROI'de doygun blob -> red
+    gun = fr3.copy()
+    cv2.circle(gun, (900, 500), 45, (255, 255, 255), -1)
+    assert ks._siluet_tespit(gun, (905.0, 505.0), cv2)[0] is None
+    # zemin (koyu/dokulu) ROI -> red
+    zemin = np.clip(80.0 + rng.normal(0, 20.0, (1080, 1920)), 0, 255).astype(np.uint8)
+    zemin3 = cv2.cvtColor(zemin, cv2.COLOR_GRAY2BGR)
+    assert ks._siluet_tespit(zemin3, (905.0, 505.0), cv2)[0] is None
+    # kadraj kenari -> red (ROI tasar)
+    assert ks._siluet_tespit(fr3, (30.0, 500.0), cv2)[0] is None
+
+
 def test_dogru_hfov_gecer():
     yol = os.path.join(tempfile.gettempdir(), "k_sanity_sentetik_ok.csv")
     sentetik_csv(km.HFOV_DEG, yol)
@@ -104,8 +134,10 @@ def test_yanlis_hfov_yakalanir():
 
 
 if __name__ == "__main__":
+    test_siluet_tespit()
+    print("OK  test_siluet_tespit")
     test_dogru_hfov_gecer()
     print("OK  test_dogru_hfov_gecer")
     test_yanlis_hfov_yakalanir()
     print("OK  test_yanlis_hfov_yakalanir")
-    print("TUM TESTLER GECTI (2)")
+    print("TUM TESTLER GECTI (3)")
