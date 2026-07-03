@@ -98,10 +98,20 @@ def test_siluet_tespit():
     par3 = cv2.cvtColor(cv2.GaussianBlur(par, (3, 3), 0), cv2.COLOR_GRAY2BGR)
     det2, neden2 = ks._siluet_tespit(par3, (905.0, 505.0), cv2)
     assert det2 is not None and abs(det2["w"] - 60.0) <= 6.0, (det2, neden2)
-    # gunes parlamasi: ROI'de doygun blob -> red
+    # gunes parlamasi: ROI'de buyuk doygun blob -> red (global kapi)
     gun = fr3.copy()
     cv2.circle(gun, (900, 500), 45, (255, 255, 255), -1)
     assert ks._siluet_tespit(gun, (905.0, 505.0), cv2)[0] is None
+    # KUCUK gunes global kapidan sizar; bilesen-bazli ret onu SECMEMELI,
+    # 90 px otedeki gercek (koyu) hedef secilmeli (sahada yasanan vaka)
+    kucuk_gun = np.clip(170.0 + rng.normal(0, 3.0, (1080, 1920)), 0, 255).astype(np.uint8)
+    cv2.circle(kucuk_gun, (900, 500), 22, 255, -1)             # gunes ROI merkezinde
+    cv2.ellipse(kucuk_gun, (985, 455), (14, 4), 0, 0, 360, 60, -1)   # hedef +85,-45
+    kg3 = cv2.cvtColor(cv2.GaussianBlur(kucuk_gun, (3, 3), 0), cv2.COLOR_GRAY2BGR)
+    det3, neden3 = ks._siluet_tespit(kg3, (900.0, 500.0), cv2)
+    assert det3 is not None, neden3
+    assert abs(det3["cx"] - 985) < 10 and abs(det3["cy"] - 455) < 10, det3  # hedef, gunes DEGIL
+    assert abs(det3["w"] - 28.0) <= 5.0, det3["w"]
     # zemin (koyu/dokulu) ROI -> red
     zemin = np.clip(80.0 + rng.normal(0, 20.0, (1080, 1920)), 0, 255).astype(np.uint8)
     zemin3 = cv2.cvtColor(zemin, cv2.COLOR_GRAY2BGR)

@@ -248,9 +248,13 @@ CSV_KOLON = ["t", "W", "H", "cx", "cy", "w", "h", "conf",
 #  performansi degil. Yalnizca bu aracta kullanilir (uretim hatti YOLO).
 # ----------------------------------------------------------------------------
 SIL_ROI = 130          # ROI yari-boyu (px; 1920'de 260x260 pencere)
-SIL_MERKEZ_PAY = 85    # bilesen merkezi ROI merkezine bundan yakin olmali
+SIL_MERKEZ_PAY = 120   # bilesen merkezi ROI merkezine bundan yakin olmali
+                       # (reproj gecikme offseti ~100 px olculdu; genis pay)
 SIL_KONTRAST = 22      # gok medyani - hedef cekirdegi asgari fark (gri seviyesi)
 SIL_ALAN = (3.0, 2500.0)   # kabul edilen bilesen alani (px^2)
+SIL_GUNES_ORT = 235    # bilesen ortalama grisi bunun ustundeyse GUNES say, secme
+                       # (kucuk gunes global doygunluk kapisindan sizabiliyor;
+                       # sahada siluet gunesi hedef sanip 39 px olctu)
 
 
 def _siluet_tespit(fr, uv, cv2):
@@ -263,19 +267,24 @@ def _siluet_tespit(fr, uv, cv2):
     y0 = int(round(uv[1])) - SIL_ROI
     if x0 < 0 or y0 < 0 or x0 + 2 * SIL_ROI >= W or y0 + 2 * SIL_ROI >= H:
         return None, "kadraj"
-    roi = cv2.cvtColor(fr[y0:y0 + 2 * SIL_ROI, x0:x0 + 2 * SIL_ROI],
-                       cv2.COLOR_BGR2GRAY)
-    roi = cv2.medianBlur(roi, 3)
+    roi_bgr = cv2.medianBlur(fr[y0:y0 + 2 * SIL_ROI, x0:x0 + 2 * SIL_ROI], 3)
+    roi = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
     med = float(np.median(roi))
     if med < 110.0:
         return None, "gok-degil"
     if float((roi >= 250).mean()) > 0.05:
         return None, "gunes"
-    sapma = np.abs(roi.astype(np.int16) - med)
+    # SAPMA RENK-KANALI-BASINA: FPV kromatik aberasyonu kanatlari renkli
+    # sacaklara ceviriyor; bazi renklerin GRI degeri gok grisine denk dusup
+    # gri-sapmada KAYBOLUYOR (sahada kanatsiz 8 px cekirdek olculdu, gorunur
+    # genislik ~2x idi). Kanal-basina |fark|in maksimumu her renk sacagini gorur.
+    med_bgr = np.median(roi_bgr.reshape(-1, 3), axis=0)
+    sapma = np.max(np.abs(roi_bgr.astype(np.int16) - med_bgr.astype(np.int16)),
+                   axis=2)
     p999 = float(np.percentile(sapma, 99.9))
     if p999 < SIL_KONTRAST:
         return None, "kontrast"
-    esik_dev = max(SIL_KONTRAST * 0.8, 0.5 * p999)
+    esik_dev = max(SIL_KONTRAST * 0.8, 0.35 * p999)
     maske = (sapma > esik_dev).astype(np.uint8)
     maske = cv2.morphologyEx(maske, cv2.MORPH_OPEN, np.ones((2, 2), np.uint8))
     n, etiket, istat, merkez = cv2.connectedComponentsWithStats(maske, 8)
@@ -284,6 +293,8 @@ def _siluet_tespit(fr, uv, cv2):
         alan = float(istat[i, cv2.CC_STAT_AREA])
         if not (SIL_ALAN[0] <= alan <= SIL_ALAN[1]):
             continue
+        if float(roi[etiket == i].mean()) > SIL_GUNES_ORT:
+            continue                                   # gunes/parlama bileseni
         mx, my = float(merkez[i][0]), float(merkez[i][1])
         uzak = ((mx - SIL_ROI) ** 2 + (my - SIL_ROI) ** 2) ** 0.5
         if uzak > SIL_MERKEZ_PAY:
@@ -521,6 +532,11 @@ def _f(x):
         return None
 
 
+def wrap_pi_f(a):
+    """Aciyi [-pi, pi] araligina sar (heading farki icin)."""
+    return (a + math.pi) % (2.0 * math.pi) - math.pi
+
+
 def _zaman_indeksi(t_kare, i, dt_hedef):
     """t_kare[i]+dt_hedef anina en yakin kare indeksi; tolerans disinda None."""
     j = int(np.searchsorted(t_kare, t_kare[i] + dt_hedef))
@@ -561,7 +577,23 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
     Km = km.K_matrisi(W, H)
     fx = km.fx_px(W)
 
-    kayit = []   # (oran, Zc, w_olc, w_bek, proj, off_px)
+    # Hiz ve heading serileri (truth'tan, +-TREND_S merkezi fark): hedef YATISI
+    # icin gerekli. Yorunge donusunde kanat YATIK ucar (koordineli donus:
+    # tan(phi) = v*omega/g — OIPN'deki fizik); beklenen genislik yatiksiz span
+    # varsayarsa sistematik eksik cikar (sahada -%24 olculdu, cos(40) ~ 0.77).
+    n_r = len(rows)
+    vel = np.full((n_r, 3), np.nan)
+    for i in range(n_r):
+        j1 = _zaman_indeksi(t_kare, i, -TREND_S)
+        j2 = _zaman_indeksi(t_kare, i, +TREND_S)
+        if (j1 is None or j2 is None or j1 == j2 or
+                np.any(np.isnan(tp[j1])) or np.any(np.isnan(tp[j2])) or
+                bozuk[j1] or bozuk[j2]):
+            continue
+        vel[i] = (tp[j2] - tp[j1]) / (t_kare[j2] - t_kare[j1])
+    heading = np.arctan2(vel[:, 1], vel[:, 0])          # NaN vel -> NaN heading
+
+    kayit = []   # (oran, Zc, w_olc, w_bek, proj, off_px, phi_deg)
     ele = {"tespit_yok": 0, "conf": 0, "cozunurluk": 0, "truth_yok": 0, "spike": 0,
            "hiz_yok": 0, "yavas": 0, "proj": 0, "kenar": 0, "kucuk": 0, "arkada": 0}
     for i, r in enumerate(rows):
@@ -584,12 +616,11 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
         # Hedef hizi: truth konumlarindan KISA pencere merkezi farki (+-TREND_S)
         j1 = _zaman_indeksi(t_kare, i, -TREND_S)
         j2 = _zaman_indeksi(t_kare, i, +TREND_S)
-        if (j1 is None or j2 is None or j1 == j2 or
-                np.any(np.isnan(tp[j1])) or np.any(np.isnan(tp[j2])) or
-                bozuk[j1] or bozuk[j2]):
+        if (j1 is None or j2 is None or j1 == j2 or np.any(np.isnan(vel[i])) or
+                np.isnan(heading[j1]) or np.isnan(heading[j2])):
             ele["hiz_yok"] += 1
             continue
-        v_t = (tp[j2] - tp[j1]) / (t_kare[j2] - t_kare[j1])
+        v_t = vel[i]
         vh = np.array([v_t[0], v_t[1], 0.0])
         nvh = np.linalg.norm(vh)
         if nvh < VHIZ_MIN:
@@ -615,7 +646,22 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
             ele["arkada"] += 1          # zincir hedefi arkada saniyor (KONVANSIYON tanisi!)
             continue
         Zc = float(pk[2])
-        w_bek = fx * (TALON_KANAT_CM * proj) / Zc
+        # HEDEF YATISI (koordineli donus): omega = heading orani; tan(phi)=v*omega/g.
+        # Kanat ekseni hiz cevresinde phi kadar donuk: s_yatik = cos(phi)*s +
+        # sin(phi)*(v_hat x s). Beklenen genislik = kanat UCLARININ tam zincirle
+        # izdusumundeki |du| (yatis + bakis acisi + merkez-disi otomatik dahil).
+        omega = wrap_pi_f(heading[j2] - heading[j1]) / (t_kare[j2] - t_kare[j1])
+        phi = math.atan((nvh * omega) / 981.0)              # cm/s * rad/s / (cm/s^2)
+        v_hat = v_t / max(np.linalg.norm(v_t), 1e-9)
+        s_yatik = math.cos(phi) * s + math.sin(phi) * np.cross(v_hat, s)
+        p1 = km.izdusur(km.dunya_to_kamera(tp[i] + s_yatik * (TALON_KANAT_CM / 2.0),
+                                           dpos, *att), Km)
+        p2 = km.izdusur(km.dunya_to_kamera(tp[i] - s_yatik * (TALON_KANAT_CM / 2.0),
+                                           dpos, *att), Km)
+        if p1 is None or p2 is None:
+            ele["arkada"] += 1
+            continue
+        w_bek = abs(p1[0] - p2[0])
         if wpx < W_PX_MIN or w_bek < W_BEK_MIN:
             ele["kucuk"] += 1
             continue
@@ -623,7 +669,7 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
         uv = km.izdusur(pk, Km)
         if uv is not None:
             off_px = math.hypot(uv[0] - cx, uv[1] - cy)
-        kayit.append((wpx / w_bek, Zc, wpx, w_bek, proj, off_px))
+        kayit.append((wpx / w_bek, Zc, wpx, w_bek, proj, off_px, math.degrees(phi)))
 
     # ---------------- RAPOR ----------------
     print("\n" + "=" * 68)
@@ -650,12 +696,16 @@ def analiz(csv_yolu, conf_min=CONF_MIN):
     sapma = m_oran - 1.0
     offs = np.array([k[5] for k in kayit if k[5] is not None], dtype=float)
 
+    phi_a = np.array([k[6] for k in kayit], dtype=float)
     print("\n --- PROMPT TABLOSU (Z, w_px olculen, w_px beklenen, sapma %%) ---")
     print(" Z (kamera-ileri) : medyan %.1f m   (aralik %.1f-%.1f m)"
           % (np.median(Zc_a) / 100, Zc_a.min() / 100, Zc_a.max() / 100))
+    print(" hedef yatisi     : medyan |phi| = %.1f deg (koordineli donus, truth'tan)"
+          % float(np.median(np.abs(phi_a))))
     print(" w_px olculen     : medyan %.1f px" % np.median(wolc))
-    print(" w_px beklenen    : medyan %.1f px  (f_x*171.8cm*proj/Zc; medyan proj=%.3f)"
-          % (np.median(wbek), np.median(proj_a)))
+    print(" w_px beklenen    : medyan %.1f px  (kanat uclarinin tam-zincir izdusumu;"
+          % np.median(wbek))
+    print("                    yatis dahil; medyan heading-proj=%.3f)" % np.median(proj_a))
     print(" oran (olc/bek)   : medyan %.4f  (MAD %.4f)  ->  SAPMA = %+.1f%%"
           % (m_oran, mad, 100 * sapma))
     if offs.size:
