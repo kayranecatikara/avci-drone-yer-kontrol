@@ -5,6 +5,19 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 FAZ 1 — CMC işaret testi GEÇTİ (2026-07-04, uçuşlu tur):**
+> gyro-CMC'nin sim attitude konvansiyonuyla tutarlılığı canlı doğrulandı.
+> Yöntem (YOLO'suz, truth reproj hedef pikseli; avcıya yaw osilasyonu): ardışık
+> kareler arası CMC-warp'lı hata vs warp'sız hata. **YAW fazı: n=169, hata_HAM
+> medyan 13.4 px → hata_CMC medyan 3.7 px (oran 0.27 < 0.5 eşiği) → GEÇTİ** —
+> CMC doğru işarette kaymayı ~%73 azaltıyor; ters işaret olsa hatayı artırırdı.
+> (Roll fazı yeterli eşleşme vermedi — roll drone'u yatırınca hedef FOV'dan
+> çıkıyor; yaw doğrulaması FAZ 1 için yeterli, roll bileşeni f_x'ten bağımsız.)
+> **Aynı koşu `kosu_yonetici`'nin uçuşlu-tur + zombileşme protokolünü de canlı
+> doğruladı:** oyun otomatik açıldı → arm + irtifa tutma → osilasyon → tur sonrası
+> oyun otomatik KAPAT+RESTART → [KOŞU BİTTİ] + bip. FAZ 1 (takip+CMC) KAPANDI:
+> kod 18 birim testi + CMC sim doğrulaması. FSM entegrasyonu FAZ 3'te.
+
 > **🔔 FAZ 0 — K sanity bulgusu (2026-07-04, truth-tabanlı ölçüm):**
 > **Zincir (K + 25° tilt + attitude) AÇISAL olarak doğrulandı; mutlak kanat-genişliği
 > ölçümü küçük-hedef limitinde başarısız — kök neden K DEĞİL, ölçüm prosedürü.**
