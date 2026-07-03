@@ -54,6 +54,7 @@ import time
 import numpy as np
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
 from guidance.ibvs_guidance import AvciGorselGuduum             # gorsel faz: bbox -> angle-mode (bagimsiz)
+from detection import kamera_model                              # TILT/HFOV TEK KAYNAK (FAZ 0)
 
 # --- UCUS LOGU: dosya dizini + sabit kolon sirasi (arac/analiz_ucus.py isimle okur) ---
 _HERE = os.path.dirname(os.path.abspath(__file__))          # .../guidance
@@ -211,10 +212,11 @@ class Cfg:
     # 25 derece USTUNDE demek -> drone dengelenmek icin hedefin ALTINA iner (20 m'de
     # ~9 m!). Cozum: hedefi merkezin ALTINDAKI su referans cizgide tut; dikey hata
     # (ey - VIS_EY_REF) olur -> yaklasma DUZ/ayni-irtifa geometrisinde kalir.
-    # Deger: tan(25)/tan(vFOV/2). 125 derece YATAY FOV (dogrulandi) + 16:9 ->
-    # vFOV/2 ~47.2 derece -> ref ~0.43. Ince ayar SIM'DE: hedef seninle AYNI
-    # irtifadayken slider'i bbox merkezinin oturdugu cizgiye getir (turuncu REF).
-    VIS_EY_REF       = 0.43
+    # Deger: tan(tilt)/tan(vFOV/2) — TEK KAYNAK detection/kamera_model.py'den
+    # turetilir (FAZ 0; ikinci bir 25/125 sabiti yazilmaz). 16:9'da ~0.4315.
+    # Ince ayar SIM'DE: hedef seninle AYNI irtifadayken slider'i bbox merkezinin
+    # oturdugu cizgiye getir (turuncu REF); slider yine Cfg'yi ezer (canli-tune).
+    VIS_EY_REF       = round(kamera_model.ey_ref(16.0, 9.0), 4)
     # Isaretler (SIM'de kalibre et: komut hatayi AZALTMALI; artiriyorsa isareti ters cevir)
     VIS_SIGN_YAW     = +1.0     # ex>0 (hedef SAGDA) -> burnu hedefe cevir
     VIS_SIGN_VZ      = -1.0     # (ey-VIS_EY_REF)>0 (hedef REFERANSIN altinda) -> ALCAL (thr<0). Ters cikarsa +1.0
@@ -263,7 +265,7 @@ def speed_cap(d_horiz):
 # SDK v2.2: FOV 125 derece = YATAY (dogrulandi). 16:9'da dikey FOV ~94.5 derece
 # (yarim ~47.2); kamera ekseni +25 derece yukari -> dikey gorus bandi ufka gore
 # yaklasik -22..+72 derece (hedefin USTUNDE kalmak dikey temasi kaybettirir).
-KAMERA_FOV_YARIM = math.radians(62.5)   # 125/2 (YATAY yarim aci)
+KAMERA_FOV_YARIM = math.radians(kamera_model.HFOV_DEG / 2.0)   # YATAY yarim aci (TEK KAYNAK)
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
 
