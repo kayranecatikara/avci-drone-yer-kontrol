@@ -90,9 +90,9 @@ Son komut `best.pt siniflari (model.names): {0: 'talon'}` yazmalı.
 ## 🖥️ Arayüz
 | Panel | İçerik |
 |-------|--------|
-| **Sol** | Görev Başlat (İnovasyonlu J) / Gerçek GPS (test) / Durdur / Manuel mod / **Tune (canlı ayar)** / **Güdüm Pipeline anahtarı: OTO · GPS · GÖRSEL** |
+| **Sol** | Görev Başlat (İnovasyonlu J) / Durdur / Manuel mod / **Tune (canlı ayar)** / **Güdüm Pipeline anahtarı: OTO · GPS · GÖRSEL** |
 | **Orta** | FPV (Görüntüyü Bağla → oyun penceresi) + overlay: hedef bbox'ı, görüntü merkezi `+`, **turuncu REF çizgisi** (25° kamera tilt telafisi), ex/ey/conf, durum, **"GPS GÜDÜMÜ: KAPALI/AÇIK" rozeti** |
-| **Sağ** | Telemetri (avcı + hedef), İnovasyonlu J sapma ölçümü (ham vs filtre, gerçeğe hata), mesafeler |
+| **Sağ** | Telemetri (avcı + hedef), İnovasyonlu J durumu, irtifa/Z ve mesafe göstergeleri |
 
 **Güdüm akışı:** ARAMA (GPS yaklaşma) → best.pt hedefi 5 ardışık karede görünce
 **GORSEL_GUDUM** (GPS yönelimi mimari olarak kesilir; yönelim yalnızca kamera) →

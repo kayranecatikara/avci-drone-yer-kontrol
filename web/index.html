@@ -145,8 +145,26 @@
   /* alt durum çubuğu */
   .status{font-size:12px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border)}
 </style>
+<!-- >>> DEV-ONLY >>> -->
+<style>
+  /* DEV kaynak (geliştirme) görselleri: kırmızı uyarı bandı + kaynak butonu */
+  .dev-bant{display:none;position:fixed;left:0;right:0;top:0;z-index:99;text-align:center;
+    background:#c62828;color:#fff;font-weight:800;letter-spacing:1.2px;
+    padding:9px 10px;font-size:14px;box-shadow:0 2px 14px rgba(198,40,40,.55)}
+  .dev-bant.on{display:block}
+  body.dev-aktif{padding-top:0}
+  .btn.devk{display:none;border-color:#7a2b2b}
+  .btn.devk.gorunur{display:flex}
+  .btn.devk.aktif{border-color:#c62828;background:#3a1113;color:#ff8a80;
+    box-shadow:inset 0 0 0 1px #c62828}
+</style>
+<!-- <<< DEV-ONLY <<< -->
 </head>
 <body>
+
+<!-- >>> DEV-ONLY >>> -->
+<div id="devBant" class="dev-bant">🛠️ GELİŞTİRME MODU — GERÇEK VERİ — yarışma/video koşusu DEĞİL</div>
+<!-- <<< DEV-ONLY <<< -->
 
   <header>
     <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span></h1>
@@ -162,6 +180,14 @@
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
         <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
+
+        <!-- >>> DEV-ONLY >>> -->
+        <!-- HEDEF-KAYNAK secici (GELISTIRME): midcourse beslemesi FILTRE <-> GERCEK.
+             Gudum modu (OTO/GPS/GORSEL) anahtarindan BAGIMSIZDIR. Sunucuda
+             dev_truth yuklu degilse bu buton hic gorunmez. -->
+        <button id="devKaynakBtn" class="btn devk" onclick="devKaynakToggle()"><span class="ic">🛠️</span> KAYNAK: FİLTRE</button>
+        <!-- <<< DEV-ONLY <<< -->
+
 
         <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
         <div class="gudum-switch">
@@ -570,7 +596,10 @@
         $("zDelta").innerHTML = '<span style="color:'+renk+'">'+f1(delta)+' <small>m · '+yon+'</small></span>';
       } else { $("zDelta").innerHTML = "—"; }
 
-      if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i gerçek moda eşitle
+      if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i sunucudaki moda eşitle
+      // >>> DEV-ONLY >>>
+      if(window.devGuncelle) devGuncelle(t.dev);
+      // <<< DEV-ONLY <<<
       drawOverlay(t.gorsel);   // FPV overlay: bbox/merkez/durum/GPS rozeti
     }catch(e){
       setConn("bad"); dash();
@@ -602,5 +631,35 @@
   }
   shareBtn.onclick = startShare;
 </script>
+
+<!-- >>> DEV-ONLY >>> -->
+<script>
+  // DEV HEDEF-KAYNAK secici (gelistirme): buton + kirmizi bant. Telemetrideki
+  // t.dev alaniyla beslenir; sunucuda dev_truth yoksa t.dev gelmez -> buton gizli.
+  let devSon = null;
+  function devGuncelle(dev){
+    const b = $("devKaynakBtn"), bant = $("devBant");
+    if(!b || !bant) return;
+    devSon = dev || null;
+    const gorunur = !!(dev && dev.var);
+    const aktif   = !!(dev && dev.aktif);
+    b.classList.toggle("gorunur", gorunur);
+    b.classList.toggle("aktif", aktif);
+    if(gorunur){
+      b.innerHTML = '<span class="ic">🛠️</span> ' +
+        (aktif ? "KAYNAK: GERÇEK (DEV)" : "KAYNAK: FİLTRE") +
+        ((!dev.akiyor) ? ' <small style="color:var(--warn)">· kanal akmıyor</small>' : '');
+    }
+    bant.classList.toggle("on", aktif);
+  }
+  function devKaynakToggle(){
+    const hedef = (devSon && devSon.aktif) ? "filtre" : "gercek";
+    fetch("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({cmd:"dev_kaynak", mod:hedef})})
+      .then(r=>r.json()).then(d=>{ $("leftStatus").textContent = d.msg || ("Kaynak: "+hedef); })
+      .catch(()=>{ $("leftStatus").textContent = "Kaynak değiştirilemedi (sunucu kapalı?)"; });
+  }
+</script>
+<!-- <<< DEV-ONLY <<< -->
 </body>
 </html>

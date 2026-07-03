@@ -5,6 +5,10 @@ Drones of War Teknofest/
 # pose modeli 123 MB > GitHub 100 MB siniri (push REDDEDILIR). Aktif model best.pt (50 MB).
 bestpose.pt
 models/bestpose.pt
+# Deneysel/alternatif agirliklar repoya KONMAZ (Drive'dan gelir); yalniz aktif
+# models/best.pt izlenir. Yeni .pt varsayilan olarak ignore, best.pt istisna.
+models/*.pt
+!models/best.pt
 
 # --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
 veri/

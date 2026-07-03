@@ -3,7 +3,7 @@
 # ============================================================
 # v2'den FARK: dropout_dt mekanizmasi TAMAMEN KALDIRILDI.
 #
-# NEDEN: Yarisma simulatoru (TalonGPSSpoof) gercek-zamanli ~50 Hz tiklarken
+# NEDEN: Yarisma simulatoru (TalonGPSSpoof) canli ~50 Hz tiklarken
 # GPS'i 1 Hz veriyor (bLimitUpdateRate). Yani filtre saniyede ~49 kez AYNI
 # (rate-limit ile dondurulmus) paketi goruyor. v2'nin "donmus kareyi say"
 # mantigi bu normal tekrarlari DROPOUT saniyordu -> her taze pakette
@@ -16,7 +16,7 @@
 #   [FIX-2] vz fiziksel kisit      -> SADECE imkansiz dikey hiz elenir. Tavan,
 #                                    ucagin toplam hiz zarfina bagli: vz toplam
 #                                    hizi gecemez, o yuzden 2500 cm/s (25 m/s) ~
-#                                    hiz_max'a yakin. Gercek dik tirmanis/dalisi
+#                                    hiz_max'a yakin. Fiziksel dik tirmanis/dalisi
 #                                    KIRPMAZ; Rz-fix hayalet vz'yi zaten onler,
 #                                    bu yalnizca son emniyet supabi. None=kapali.
 #   [FIX-3] opsiyonel irtifa gate  -> default kapali.

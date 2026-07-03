@@ -6,14 +6,18 @@
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
 > **🔔 Güncelleme — SERT AYRIM / truth politikası (2026-07-03, yarisma-pipeline branch):**
-> Truth kanalı (`get_debug_truth`) yalnızca **geliştirme/doğrulama** içindir ve artık
-> YALNIZCA `arac/` altında yaşar (CLAUDE.md "SERT AYRIM" + "TESLİM PAKETİ" bölümleri).
-> Uçuş pipeline'ından (detection/guidance/fusion/web/main.py) **tüm truth izleri söküldü**:
-> "Gerçek GPS (test)" kaynağı, kıyas/SAPMA paneli, Z-teşhis truth satırları, uçuş
-> logundaki true_*/gercek_mesafe/nose_off_true kolonları ve `_kamera_kontrol` stub'ı
-> KALDIRILDI. Bu belgedeki eski kıyas paneli / kaynak geçişi anlatımları TARİHSELDİR.
-> Filtre doğrulama yeni araçla yapılır: `arac/filtre_dogrulama.py` (RMSE/max/gecikme);
-> paket temizliği `arac/paket_kontrol.py` ile denetlenir.
+> Truth kanalı (`get_debug_truth`) yalnızca **geliştirme/doğrulama** içindir ve iki yerde
+> yaşar: `arac/` scriptleri + çalışma anındaki tek dev kod noktası **`web/dev_truth.py`**
+> (CLAUDE.md "SERT AYRIM" + "TESLİM PAKETİ" bölümleri). Uçuş pipeline'ından **tüm truth
+> izleri söküldü**: eski "Gerçek GPS (test)" kaynağı, kıyas/SAPMA paneli, Z-teşhis truth
+> satırları, uçuş logundaki true_*/gercek_mesafe/nose_off_true kolonları ve
+> `_kamera_kontrol` stub'ı KALDIRILDI (bu belgedeki eski anlatımları TARİHSELDİR).
+> Yerine: arayüzde **KAYNAK: FİLTRE ↔ GERÇEK (DEV)** butonu (dev_truth yüklüyse görünür;
+> aktifken kırmızı bant + uçuş CSV'sinde `hedef_kaynak` etiketi; yalnız midcourse
+> beslemesini değiştirir, OTO/GPS/GÖRSEL anahtarına dokunmaz). server.py/index.html'deki
+> bağlantı satırları `>>> DEV-ONLY >>>` çitleriyle işaretlidir; `arac/paket_kontrol.py`
+> paketlerken dev_truth'u dışlar, çitleri söker, kalan pakette truth/gercek/dev izi tarar.
+> Filtre doğrulama: `arac/filtre_dogrulama.py` (RMSE/max/gecikme).
 
 > **🔔 Güncelleme — Simülasyon v0.0.5 (2026-07-02, koordinatörlük maili):**
 > (1) **Hedef GPS artık 5 Hz** (yarışma koşulu; önceki sürümlerde 1 Hz idi). (2) Simülasyonda **performans iyileştirmeleri** yapıldı.

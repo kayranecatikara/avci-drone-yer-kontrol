@@ -249,6 +249,18 @@ beyin = AvciKontrol(drone)
 beyin_lock = threading.Lock()
 gorev_aktif = False
 
+# >>> DEV-ONLY >>>
+# Gelistirme hedef-kaynagi modulu (web/dev_truth.py). Yoksa/yuklenemezse sunucu
+# NORMAL baslar, arayuzde DEV butonu hic gorunmez. Paketlemede bu blok silinir.
+dev_yardimci = None
+try:
+    from web.dev_truth import DevTruthKaynagi
+    dev_yardimci = DevTruthKaynagi(drone)
+    print("[SERVER] dev_truth yuklendi -> KAYNAK: FILTRE/GERCEK(DEV) butonu aktif.")
+except Exception as _dev_e:
+    print("[SERVER] dev_truth yuklenmedi (%s) -> DEV kaynak butonu kapali." % _dev_e)
+# <<< DEV-ONLY <<<
+
 # ----------------------------------------------------------
 #  CANLI TUNE: arayuzdeki slider'lar Cfg'yi calisirken degistirir.
 #  Kontrol dongusu Cfg.X'i HER tik okudugundan degisiklik ANINDA etki eder
@@ -448,7 +460,7 @@ def build_telemetry():
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf} (normalize)
     }
 
-    return {
+    veri = {
         "connected": connected,
         "drone": {
             "x": dx, "y": dy, "z": dz,
@@ -470,6 +482,12 @@ def build_telemetry():
         "kaynak": j_kaynak,
         "gorsel": gorsel,
     }
+    # >>> DEV-ONLY >>>
+    if dev_yardimci is not None:
+        with beyin_lock:
+            veri["dev"] = dev_yardimci.durum(beyin)
+    # <<< DEV-ONLY <<<
+    return veri
 
 
 # ----------------------------------------------------------
@@ -578,6 +596,17 @@ class Handler(BaseHTTPRequestHandler):
                              "GPS": "ZORLA GPS (gorsel kapali)",
                              "GORSEL": "ZORLA GORSEL (GPS kapali)"}.get(m, "")
                 msg = ("GUDUM MODU: %s - %s" % (m, _aciklama)) if ok else "GECERSIZ mod: %s" % m
+            # >>> DEV-ONLY >>>
+            elif cmd == "dev_kaynak":
+                # KAYNAK secici (gelistirme): "gercek" <-> "filtre". Gudum modu
+                # anahtarina (vismode) dokunmaz; yalnizca midcourse beslemesi.
+                m = str(data.get("mod", "filtre")).lower()
+                if dev_yardimci is None:
+                    msg = "DEV kaynak modulu yuklu degil (web/dev_truth.py yok)"
+                else:
+                    with beyin_lock:
+                        _ok, msg = dev_yardimci.uygula(beyin, m)
+            # <<< DEV-ONLY <<<
             payload = json.dumps({"ok": True, "msg": msg,
                                   "gorev_aktif": gorev_aktif,
                                   "manuel_aktif": manuel_aktif})

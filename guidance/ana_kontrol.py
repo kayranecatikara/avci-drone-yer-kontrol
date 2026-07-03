@@ -31,7 +31,7 @@ AKIS:
   5. Gorus/CV fazi: YOLO tespiti son_tespit koprusunden gelir (server yazar);
      yarisma pipeline refaktoruyle takip/PnP katmanlari eklenecek
 
-KULLANIM (gercek oyun):
+KULLANIM (oyunla dogrudan):
     import drone_sdk
     from ana_kontrol import AvciKontrol
     k = AvciKontrol(drone_sdk)
@@ -66,8 +66,9 @@ _HERE = os.path.dirname(os.path.abspath(__file__))          # .../guidance
 _PROJ_ROOT = os.path.dirname(_HERE)                         # depo koku
 _VERI_DIR = os.path.join(_PROJ_ROOT, "veri")                # calisma ciktilari (gitignore'lu)
 _LOG_COLS = [
-    # meta
-    "t_perf", "t_wall", "phase", "kaynak", "durum", "handoff", "fresh", "none_count",
+    # meta (hedef_kaynak: hedef-durum beslemesinin etiketi; varsayilan "filtre" —
+    # kayit sonradan hangi kaynakla alinmis ayirt edilebilsin)
+    "t_perf", "t_wall", "phase", "kaynak", "hedef_kaynak", "durum", "handoff", "fresh", "none_count",
     # drone durumu (cm / derece / rad)
     "drone_x", "drone_y", "drone_z", "drone_roll", "drone_pitch", "drone_yaw_deg",
     "drone_yaw_rad", "drone_speed", "vown_x", "vown_y",
@@ -100,7 +101,7 @@ class Cfg:
     YAW_SIGN   = +1.0           # hedefe donus icin +yaw degilse -1
     # Dikey isaret: SDK +1=tirman / UE Z-yukari -> dogru deger +1.0 (sim ile dogrulandi:
     # +1 hedef irtifasina yakinsar, -1 irtifayi artirip kacar). Oyunun Z ekseni
-    # gercekten TERS oldugu KANITLANIRSA -1 yap; aksi halde +1 birak.
+    # sahiden TERS oldugu KANITLANIRSA -1 yap; aksi halde +1 birak.
     Z_SIGN     = +1.0
 
     # --- DONGU (server.py / calistir 50 Hz surer) ---
@@ -181,7 +182,7 @@ class Cfg:
     # KESINTI ZAMANLAMASI tanimlandi: 30. saniyeden sonra her 10 sn'de bir ~2 sn
     # veri gelmeyebilir (+ gecikme/gurultu bozulmalari surer, degerleri aciklanmaz).
     # 6 sn'lik tutma penceresi 2 sn'lik kesintileri bol marjla kapatir; filtre
-    # kestirimi lead'li oldugundan tasimak guvenli. Loiter yalnizca GERCEK uzun
+    # kestirimi lead'li oldugundan tasimak guvenli. Loiter yalnizca CIDDEN uzun
     # kesintide devreye girer.
     HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (2 sn kesintilere bol marj)
     DROPOUT_TICKS = 300        # otesi: dropout -> loiter
@@ -278,6 +279,10 @@ class AvciKontrol:
         self.drone = drone
         self.kaynak = kaynak           # tek kaynak: "v2" (Inovasyonlu J)
         self.filtre = V2Filtre()       # tek uretim filtresi
+        # HARICI HEDEF KAYNAGI DIKISI: takili degilken (None) hedef durumu filtreden
+        # gelir (uretim yolu). Gelistirme/test bir fn takabilir (set_hedef_kaynagi).
+        self._hedef_kaynak_fn = None
+        self.hedef_kaynak_ad = "filtre"     # ucus CSV'sindeki hedef_kaynak etiketi
         self.durum = "ARAMA"            # ARAMA(yaklasma) -> KILIT(handoff/gorus)
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
@@ -361,11 +366,55 @@ class AvciKontrol:
             self._log_f = self._log_w = None
 
     # ----------------------------------------------------------------
+    #  HARICI HEDEF KAYNAGI DIKISI (gelistirme/test icin takilabilir besleme).
+    #  fn() -> None | {"pos": (x,y,z) cm, "vel": (vx,vy,vz) cm/s}
+    #  fn=None -> filtre kaynagina don (filtre TAZE kurulur; bayat kestirim
+    #  tasinmasin). ad: ucus CSV'sindeki hedef_kaynak etiketi. Bu bir GUDUM
+    #  modu degil KAYNAK secicidir: yalnizca midcourse (GPS yaklasma)
+    #  beslemesini degistirir; vis_mode anahtarina ve GORSEL_GUDUM sonrasina
+    #  dokunmaz (o fazlarda hedef GNSS'i zaten kullanilmiyor).
+    # ----------------------------------------------------------------
+    def set_hedef_kaynagi(self, fn=None, ad="filtre"):
+        self._hedef_kaynak_fn = fn
+        self.hedef_kaynak_ad = str(ad)
+        if fn is None:
+            self.filtre = V2Filtre()        # taze soft-start
+        self.son_ham = None
+        self.son_temiz = None
+        self.son_z_anlik = None
+        self.son_xy_anlik = None
+        self.son_hiz = None
+        self._fresh = False
+        self.e_prev = None                  # turev sicramasini onle
+        self.t_prev = None
+        self.de = [0.0, 0.0, 0.0]
+        self.none_count = 0
+
+    # ----------------------------------------------------------------
     #  J: bozuk hedef konumu temizle (sadece YENI telemetri gelince).
     #  self._fresh: bu cagride J'den YENI gecerli kestirim geldi mi? FAZ-1
     #  None yonetimi (hold vs dropout) bunu kullanir.
     # ----------------------------------------------------------------
     def _hedef_temizle(self):
+        # HARICI kaynak takiliysa filtre atlanir: hedef durumu dogrudan fn'den.
+        if self._hedef_kaynak_fn is not None:
+            self.son_ham = self.drone.get_target_location()   # izleme/log icin akmaya devam
+            try:
+                hd = self._hedef_kaynak_fn()
+            except Exception:
+                hd = None
+            if hd and hd.get("pos") is not None:
+                p = np.array(hd["pos"], float)
+                self.son_temiz = p                            # harici kaynak lead'siz/anlik
+                self.son_z_anlik = float(p[2])
+                self.son_xy_anlik = np.array([p[0], p[1]], float)
+                v = hd.get("vel")
+                self.son_hiz = None if v is None else np.array(v, float)
+                self._fresh = True
+            else:
+                self._fresh = False                           # kaynak veremiyor -> hold/dropout
+            return self.son_temiz
+
         ham = self.drone.get_target_location()
         if ham != self.son_ham:               # yeni telemetri paketi
             self.son_ham = ham
@@ -464,6 +513,7 @@ class AvciKontrol:
         except Exception:
             pass
         d["phase"] = phase
+        d["hedef_kaynak"] = self.hedef_kaynak_ad     # tek noktadan (tum log yollari)
         d["t_wall"] = time.time()
 
         def _c(x):
@@ -756,14 +806,14 @@ class AvciKontrol:
         #      icin lead OTOMATIK. ivme = KV*(v_des - v_own). Cok yakinda (d_s<COMMIT_RANGE)
         #      YANAL (LOS'a dik) ivme kisilir -> LOS singula rite salinimi kovalanmaz, DUZ dalinir.
         if d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None and self.son_xy_anlik is not None:
-            # LOS = lead'siz ANLIK hedefe (carpisma icin gercek yon; lead son_temiz'de DEGIL).
+            # LOS = lead'siz ANLIK hedefe (carpisma icin dogru yon; lead son_temiz'de DEGIL).
             ex_s = float(self.son_xy_anlik[0] - drone_pos[0])
             ey_s = float(self.son_xy_anlik[1] - drone_pos[1])
             d_s = math.hypot(ex_s, ey_s)
             ux, uy = ex_s / max(d_s, 1e-6), ey_s / max(d_s, 1e-6)      # LOS birim (dunya)
             # BURUN/KAMERA DUZELTMESI: terminalde burun ANLIK hedefe doner (2sn-lead
             # noktasina DEGIL). Carpisma lead'i hiz-eslemede ZATEN var (v_des =
-            # v_hedef + v_close*LOS); burnu lead'e cevirmek kamerayi gercek hedeften
+            # v_hedef + v_close*LOS); burnu lead'e cevirmek kamerayi hedefin kendisinden
             # kaciriyordu (yakin mesafede manevrali hedefte ~50 dereceye varan sapma
             # -> gorsel temas kaybi). Kamera gorsel fazin sensorudur; hep hedefte kalsin.
             bearing = math.atan2(ey_s, ex_s)
@@ -843,7 +893,7 @@ class AvciKontrol:
             })
 
     # ----------------------------------------------------------------
-    #  Gercek oyun ana donguusu
+    #  Bagimsiz calistirma ana donguusu (server olmadan)
     # ----------------------------------------------------------------
     def calistir(self):
         if not self.drone.connect():

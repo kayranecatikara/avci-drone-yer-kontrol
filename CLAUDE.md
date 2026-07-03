@@ -21,12 +21,25 @@ EKSİKSİZ karşılayacak şekilde alınır.
 ## SERT AYRIM — TRUTH POLİTİKASI (kalıcı, ihlal edilmez)
 Sim'in bozulmamış "truth" kanalı (`get_debug_truth` / `get_active_corruption`,
 resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
-- **Truth erişimi YALNIZCA `arac/` altındaki geliştirme/doğrulama scriptlerinde
-  yaşayabilir.** (`arsiv/` ve `test/` de uçuş dışıdır; paketlenmez.)
+- **Truth erişimi yalnızca iki yerde yaşayabilir:** (1) `arac/` altındaki
+  geliştirme/doğrulama scriptleri (uçuş sonrası analiz/ölçüm; üretim hattına
+  `arac/`'tan RUNTIME IMPORT YAPILMAZ), (2) çalışma anındaki TEK dev kod
+  noktası olan **`web/dev_truth.py`** (DEV hedef-kaynağı; teslim paketine
+  girmez). (`arsiv/` ve `test/` de uçuş dışıdır; paketlenmez.)
 - **Uçuş pipeline'ı (`detection/`, `guidance/`, `fusion/`, `web/`, `main.py`)
-  truth'a ASLA erişemez:** import, çağrı, yorum, log dizesi dahil hiçbir iz
-  bulunamaz. Görürsen hata say, kaldır. (İstisna: `sdk/drone_sdk.py` resmî verili
-  dosyadır; truth API'sinin orada TANIMLI olması bizim kullanmamız değildir.)
+  truth'a erişemez:** import, çağrı, yorum, log dizesi dahil hiçbir iz
+  bulunamaz. TEK istisna biçimi: `web/server.py` ve `web/index.html` içinde
+  `>>> DEV-ONLY >>> ... <<< DEV-ONLY <<<` işaretçileriyle ÇİTLENMİŞ bağlantı
+  blokları (dev_truth'a bağlanan az sayıda satır). Çit dışında hiçbir dosyada
+  truth/dev izi olamaz; görürsen hata say, kaldır. `web/dev_truth.py`
+  yoksa/yüklenemezse sunucu normal başlar, DEV butonu arayüzde hiç görünmez.
+  (`sdk/drone_sdk.py` resmî verili dosyadır; truth API'sinin orada TANIMLI
+  olması bizim kullanmamız değildir.)
+- **DEV hedef-kaynağı bir GÜDÜM modu değil KAYNAK seçicisidir:**
+  `AvciKontrol.set_hedef_kaynagi` dikişine bağlanır; yalnızca midcourse
+  (ARAMA/TAKIP) beslemesini değiştirir, OTO/GPS/GÖRSEL anahtarına ve
+  GORSEL_GUDUM sonrasına dokunmaz. GERÇEK (DEV) aktifken arayüzde kırmızı
+  bant çıkar; uçuş CSV'sine `hedef_kaynak` (filtre/gercek) yazılır.
 - **Truth kullanan her scriptin başına şerh:** "GELİŞTİRME/DOĞRULAMA ARACI —
   görev uçuşunda ve değerlendirme koşusunda kullanılmaz."
 - **Görev zinciri değişmez:** bozuk hedef GPS → fusion filtresi → midcourse
@@ -35,10 +48,12 @@ resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
 ## TESLİM PAKETİ KURALI
 Yarışmaya gidecek kod paketi = uçuş pipeline'ı (`main.py`, `detection/`,
 `guidance/`, `fusion/`, `web/`, `sdk/`, `models/`, requirements, README).
-`arac/` altındaki truth-erişimli geliştirme scriptleri pakete GİRMEZ.
-`arac/paket_kontrol.py` paket içeriğini truth anahtar kelimeleri için tarar;
-TEK eşleşmede paketlemeyi reddeder. **Gönderilecek video koşusu da bu paketin
-kodundan yapılır.**
+`arac/` altındaki geliştirme scriptleri ve **`web/dev_truth.py` pakete GİRMEZ**.
+`arac/paket_kontrol.py`: (a) dev_truth.py'yi dışlar, (b) DEV-ONLY çitli
+blokları server.py ve index.html'den otomatik siler (söküm sonrası server
+py_compile ile doğrulanır), (c) kalan TÜM pakette truth/dev_truth/gercek
+anahtar kelimelerini tarar — TEK eşleşmede paketlemeyi reddeder.
+**Gönderilecek video koşusu da bu paketten çıkan kodla yapılır.**
 
 ## GPS GÜDÜMÜNÜN ROLÜ (net sınır)
 GPS güdümü **öldürücü faz değildir.** Görevi:
