@@ -55,21 +55,32 @@ Marking artık otomatik: **yakalama + "üretildi" denetimi + "okunuyor" değerle
 4. **Sonuç:** aşağıdaki tablo otomatik doldurulur. Zayıf model kilidi tamamlayamazsa
    kalem 4-8 yine üretilir; kalem 9-10 İYİ MODEL geldiğinde (runbook MEVCUT_DURUM'da).
 
-## Otomatik sonuç (koşu sonrası doldurulur)
-> Aşağıdaki tablo son FSM provası koşusunun `--rapor` çıktısı + kare okumasıyla
-> asistan tarafından doldurulur. (Henüz koşu yapılmadıysa boştur.)
+## Otomatik sonuç — FSM provası 2026-07-04 20:34 (DEV kaynak)
+> Koşu: `ucus_log_20260704_203553.csv` + `olaylar.json` (159 olay/kare, ~4 dk).
+> FSM tam çalıştı: ARAMA→TAKIP→GORSEL_GUDUM döngüsü, kilit sayacı + engel teşhisi
+> canlı. Zayıf detection modeli (best.pt) kilidi **tutamadı** (hedef sürekli
+> coast/LOST → kümülatif 5 sn'ye ulaşmadı), bu yüzden kalem 9-10 üretilmedi
+> (İYİ MODEL runbook — beklenen). Kalem 1-8 üretildi ve **%50 vekilde de okunur**.
 
 | # | Kalem | Üretildi [CSV] | Okunuyor [kare] | Kanıt dosyası | Not |
 |---|---|---|---|---|---|
-| 1 | Sim ekranı | (kare) | — | — | — |
-| 2 | Drone+hedef konum | (kare) | — | — | — |
-| 3 | Bozuk GNSS | DEV-atlandı | — | — | DEV kaynak — kanıt teslim koşusunda |
-| 4 | Tespit anı | — | — | — | — |
-| 5 | bbox+ID+durum | — | — | — | — |
-| 6 | Tracker aktif/pasif | — | — | — | — |
-| 7 | Kayıp/yeniden-tespit | — | — | — | — |
-| 8 | Güdüm komutu | — | — | — | — |
-| 9 | Angajman/vuruş | — | — | — | — |
-| 10 | Görev sonu başarı | — | — | — | — |
+| 1 | Sim ekranı | (kare) | ✓ (tam+%50) | `ILK_TESPIT_203710`, `GENEL_*` | FPV canlı oyun görüntüsü + HUD (otomatik `/api/frame`) |
+| 2 | Drone+hedef konum | (kare) | ✓ | `ILK_TESPIT_203710` | AVCI DRONE + HEDEF İHA panelleri tek kadrajda |
+| 3 | Bozuk GNSS | DEV-atlandı | — | — | DEV kaynak koşusu; teslim koşusunda (filtre) doğrulanır |
+| 4 | Tespit anı | ✓ (satır 469) | ✓ | `ILK_TESPIT_203710` | FPV yeşil bbox + `conf=0.50` (ölçülen tespit) |
+| 5 | bbox+ID+durum | ✓ (6847 satır) | ✓ | `ILK_TESPIT_203710` | bbox + merkez nokta + `ex/ey/conf`; track durumu KİLİT panelinde |
+| 6 | Tracker aktif/pasif | ✓ (103 geçiş) | ✓ | `YENIDEN_TESPIT_203717` | Sayan EVET/coast; MODEL DETECT; CONFIRMED↔LOST |
+| 7 | Kayıp/yeniden-tespit | ✓ (52 coast/51 yeniden) | ✓ | `YENIDEN_TESPIT_203717` | Kırmızı bant: **"HEDEF KAYBEDİLDİ — takip sürüyor (coast)"** |
+| 8 | Güdüm komutu | ✓ (9242/9242) | ✓ (düzeltme sonrası) | `FIXCHECK` | Panel AVCI DRONE'un altına alındı → tek kadrajda (aşağıda) |
+| 9 | Angajman/vuruş | YOK | — | — | Zayıf model kilidi tamamlayamadı → ANGAJMAN 0 kare (İYİ MODEL runbook) |
+| 10 | Görev sonu başarı | YOK | — | — | Angajman olmadı → başarı ekranı tetiklenmedi |
 
-**Yapılan arayüz düzeltmeleri:** _(koşu sonrası; okunmaz kalem için)_ —
+**Ek gözlem (kalem 3'ün güçlü hali):** GORSEL_GUDUM'da FPV'de **HEDEF GNSS:
+KULLANILMIYOR ✓** yeşil rozeti okundu — GNSS bağımlılığının azaldığı an görünür
+(kalem 3'ün "kullanım" kanıtı yine teslim/filtre koşusuna bırakıldı).
+
+**Yapılan arayüz düzeltmeleri (prova bulgusu → düzeltme):**
+- **Kalem 8 tek-kadraj:** GÜDÜM KOMUTU paneli TELEMETRİ sütununda 6. sıradaydı;
+  DEV bandıyla birlikte kadraj dışına (scroll altına) düşüyordu. Panel **AVCI
+  DRONE'un hemen altına (2. sıra)** taşındı → throttle/pitch/roll/yaw artık üst
+  kartlarla aynı karede. `FIXCHECK` karesiyle doğrulandı.
