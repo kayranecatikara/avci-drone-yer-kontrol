@@ -14,10 +14,11 @@ W, H = 1920, 1080
 CONF = 0.45
 
 
-def _hedef(cx_n=0.5, cy_n=0.5, kaplama=0.10, conf=0.9, tespit_mi=True,
+def _hedef(cx_n=0.5, cy_n=0.5, kap=0.20, conf=0.9, tespit_mi=True,
            durum="CONFIRMED"):
-    # kaplama = w*h/(W*H); kare bbox varsay -> w=h=sqrt(kaplama*W*H)
-    wh = (kaplama * W * H) ** 0.5
+    # kap = EKSEN-max kaplama (max(w/W, h/H)); sartname eksen-bazli. Kucuk eksen
+    # (H) uzerinden bbox: h/H = kap (max), w/W = kap*H/W < kap. Kare bbox (w=h).
+    wh = kap * H
     return {"cx": cx_n * W, "cy": cy_n * H, "w": wh, "h": wh,
             "conf": conf, "tespit_mi": tespit_mi, "track_durumu": durum}
 
@@ -67,8 +68,24 @@ def test_av_disi_saymaz():
 
 def test_kaplama_dusuk_saymaz():
     kd = KilitDurumu()
-    out, _ = _besle(kd, _hedef(kaplama=0.03), 6.0)   # esik 0.06 alti
+    out, _ = _besle(kd, _hedef(kap=0.04), 6.0)       # eksen-max 0.04 < 0.06 esik
     assert out["sayan"] is False and out["kilit_tamam"] is False
+    assert out["engel"] == "kaplama_dusuk"
+
+
+def test_kaplama_eksen_bir_eksende_yeter():
+    # Sartname: EN AZ BIR eksende >=%5. Dar-yuksek bbox: w/W kucuk ama h/H >=%5 -> SAYAR.
+    kd = KilitDurumu()
+    W2, H2 = 1920, 1080
+    # w/W = 0.02 (dar), h/H = 0.10 (yuksek) -> max=0.10 >= 0.06 -> gecerli
+    h = {"cx": 0.5 * W2, "cy": 0.5 * H2, "w": 0.02 * W2, "h": 0.10 * H2,
+         "conf": 0.9, "tespit_mi": True, "track_durumu": "CONFIRMED"}
+    t = 0.0
+    for _ in range(20):
+        t += 0.05
+        out = kd.adim(h, W2, H2, t, CONF)
+    assert out["sayan"] is True, "bir eksende %5 yeter (alan orani DEGIL)"
+    assert abs(out["kaplama_dikey"] - 0.10) < 1e-6 and abs(out["kaplama_yatay"] - 0.02) < 1e-6
 
 
 def test_coast_saymaz():
@@ -177,7 +194,7 @@ def test_engel_teshisi():
     assert oz and "AV_disi_yatay" in oz and oz["AV_disi_yatay"] > 10
     # farkli engeller ayrik sayilir
     kd2 = KilitDurumu()
-    _besle(kd2, _hedef(kaplama=0.02), 1.0)            # kaplama dusuk
+    _besle(kd2, _hedef(kap=0.02), 1.0)                # kaplama dusuk (eksen)
     _besle(kd2, _hedef(durum="TENTATIVE"), 1.0, t0=1.0)  # track onaysiz
     oz2 = kd2.engel_ozeti()
     assert "kaplama_dusuk" in oz2 and "track_onaysiz" in oz2

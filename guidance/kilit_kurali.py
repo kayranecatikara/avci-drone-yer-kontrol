@@ -28,9 +28,11 @@ from collections import deque
 
 
 class KilitCfg:
-    AV_YATAY = (0.25, 0.75)     # merkez cx/W bu bantta (Angajman Volumu yatay)
+    AV_YATAY = (0.25, 0.75)     # merkez cx/W bu bantta (Hedef Vurus Alani yatay)
     AV_DIKEY = (0.10, 0.90)     # merkez cy/H bu bantta
-    KAPLAMA_ESIK = 0.06         # bbox alan / goruntu alani (sartname %5 + pay)
+    KAPLAMA_ESIK = 0.06         # EKSEN-bazli: max(w/W, h/H) >= bu (sartname %5 + pay).
+                                # ALAN orani DEGIL -> hedef ekranin YATAY veya DIKEY
+                                # ekseninin en az %5'ini kaplamali (sartname §6.1.4).
     PENCERE_SN = 10.0           # kayan pencere
     KUMULATIF_HEDEF_SN = 5.0    # kilit_tamam esigi
     SUREKLI_ANGAJMAN_SN = 3.0   # angajman on sarti (kesintisiz)
@@ -79,9 +81,21 @@ class KilitDurumu:
             return None
         return dict(sorted(self._engel_sayac.items(), key=lambda kv: -kv[1]))
 
+    @staticmethod
+    def kaplama_eksen(hedef, W, H):
+        """EKSEN-bazli kaplama (sartname): hedefin ekranin yatay VE dikey eksenini
+        ne kadar kapladigi -> (yatay=w/W, dikey=h/H). Sartname 'en az BIRINDE >=%5'
+        ister -> max(yatay, dikey) kullanilir (alan orani DEGIL)."""
+        if not hedef or W <= 1 or H <= 1:
+            return 0.0, 0.0
+        return float(hedef["w"]) / W, float(hedef["h"]) / H
+
     def _sayar_mi(self, hedef, W, H, conf_esik):
         """Bu frame kilit sayacinda sayilir mi? (sayan, engel). engel: sayilmadiysa
-        HANGI kosulun engel oldugu (5 kosuldan; kilit tamamlanamazsa teshis)."""
+        HANGI kosulun engel oldugu (kilit tamamlanamazsa teshis).
+        SIRA (sartname): conf/track/olcum -> KAPLAMA (eksen; AV'ye girmenin on
+        sarti) -> MERKEZ (AV bandi). Kaplama merkezden ONCE: eksen kaplamasi
+        %5 altindaysa hedef AV'ye GIRMEMIS sayilir."""
         if hedef is None or W is None or H is None or W <= 1 or H <= 1:
             return False, "hedef_yok"
         if not hedef.get("tespit_mi"):
@@ -90,16 +104,17 @@ class KilitDurumu:
             return False, "track_onaysiz"        # TENTATIVE/LOST
         if float(hedef.get("conf", 0.0)) < conf_esik:
             return False, "dusuk_conf"
+        c = self.cfg
+        # KAPLAMA (eksen-bazli) merkezden ONCE: en az bir eksende >=%5
+        kap_y, kap_d = self.kaplama_eksen(hedef, W, H)
+        if max(kap_y, kap_d) < c.KAPLAMA_ESIK:
+            return False, "kaplama_dusuk"        # hedef cok uzak/kucuk -> AV'ye girmedi
         cx_n = float(hedef["cx"]) / W
         cy_n = float(hedef["cy"]) / H
-        c = self.cfg
         if not (c.AV_YATAY[0] <= cx_n <= c.AV_YATAY[1]):
             return False, "AV_disi_yatay"        # merkez yatayda AV disinda
         if not (c.AV_DIKEY[0] <= cy_n <= c.AV_DIKEY[1]):
             return False, "AV_disi_dikey"
-        kaplama = (float(hedef["w"]) * float(hedef["h"])) / (W * H)
-        if kaplama < c.KAPLAMA_ESIK:
-            return False, "kaplama_dusuk"        # hedef cok uzak/kucuk
         return True, None
 
     def adim(self, hedef, W, H, t, conf_esik):
@@ -147,12 +162,14 @@ class KilitDurumu:
             self.kilit_tamam = True
             yeni_kilit = True
 
+        kap_y, kap_d = self.kaplama_eksen(hedef, W or 0, H or 0)
         self._son_sayan = sayan
         return {"sayan": sayan, "engel": engel,
                 "kumulatif_kilit_sn": self._kumulatif,
                 "surekli_kilit_sn": self.surekli_kilit_sn,
                 "kilit_tamam": self.kilit_tamam,
                 "yeni_kilit": yeni_kilit,
+                "kaplama_yatay": kap_y, "kaplama_dikey": kap_d,
                 "pencere_doluluk": min(1.0, self._kumulatif / c.KUMULATIF_HEDEF_SN)}
 
     def angajman_hazir(self):

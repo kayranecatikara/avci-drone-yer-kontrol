@@ -331,6 +331,7 @@
             <div id="kilitBar" style="height:100%;width:0%;background:linear-gradient(90deg,#c46bff,#25e0a0);transition:.2s"></div>
           </div>
           <div class="row"><span class="k">Kesintisiz</span><span class="v mono" id="kilitSurekli">—</span></div>
+          <div class="row"><span class="k">Kaplama (eksen)</span><span class="v mono" id="kilitKaplama">—</span></div>
           <div class="row"><span class="k">Sayan (bu kare)</span><span class="v mono" id="kilitSayan">—</span></div>
           <div class="row"><span class="k">Durum</span><span class="v mono" id="fsmDurum">—</span></div>
         </div>
@@ -785,6 +786,12 @@
         $("kilitSayan").innerHTML = kl.sayan
           ? '<span style="color:var(--accent)">EVET</span>'
           : '<span style="color:var(--muted)">hayır</span>';
+        // kaplama (eksen-bazlı): en az bir eksende %5 -> yeşil
+        if(kl.kaplama_yatay!=null){
+          const my=Math.max(kl.kaplama_yatay,kl.kaplama_dikey), yet=my>=(kl.kaplama_esik||0.06);
+          $("kilitKaplama").innerHTML='<span style="color:'+(yet?'var(--accent)':'var(--warn)')+'">'+
+            (100*kl.kaplama_yatay).toFixed(0)+'% / '+(100*kl.kaplama_dikey).toFixed(0)+'% <small>(yat/dik, ≥%5)</small></span>';
+        }
       }
       $("fsmDurum").textContent = gs.durum || "—";
       // kilit engel teshisi (tamamlanamiyorsa hangi kosulda takildi)

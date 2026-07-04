@@ -537,6 +537,8 @@ def build_telemetry():
             "engel": kilit_bilgi.get("engel"),     # bu kare saymadiysa hangi kosul
             "engel_ozet": kilit_engel,             # kilit tamamlanamadiysa dagilim (teshis)
             "kilit_tamam": bool(kilit_bilgi.get("kilit_tamam", False)),
+            "kaplama_yatay": kilit_bilgi.get("kaplama_yatay", 0.0),   # w/W (eksen)
+            "kaplama_dikey": kilit_bilgi.get("kaplama_dikey", 0.0),   # h/H (eksen)
             "av_yatay": [0.25, 0.75], "av_dikey": [0.10, 0.90], "kaplama_esik": 0.06,
         },
         "oipn": {"acik": oipn_acik, "beta": oipn_beta},
