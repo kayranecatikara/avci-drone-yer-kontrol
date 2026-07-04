@@ -36,9 +36,14 @@
 > 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
 >    İzle: FSM durumu ARAMA→TAKIP ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
 >    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).
->    **Zayıf detection hedefi göremezse görsel kilit olmaz → kilit paneli `engel` alanı
->    `track_onaysiz`/`coast` gösterir** (bu bir ÖLÇÜM: modelin FSM'i besleyemediğini kanıtlar;
->    beş koşuldan hangisinde takıldığı görünür). İyi model gelince kilit tamamlanır.
+>    **10 kalem tek kadrajda okunuyor mu → `docs/video_prova_kontrol.md` kontrol listesini
+>    işaretle** (özellikle kalem 7 kayıp/yeniden-tespit banner'ı, kalem 8 güdüm komutu, kalem
+>    10 başarı ekranı). **Zayıf detection hedefi göremezse görsel kilit olmaz → kilit paneli
+>    `engel` alanı** hangi koşulda takıldığını gösterir (güncel koşullar: `dortgen_tasma` /
+>    `kaplama_dusuk` [EKSEN: max(w/W,h/H)<0.06] / `AV_disi_yatay|dikey` / `dusuk_conf` /
+>    `track_onaysiz` / `coast` / `hedef_yok`). Bu bir ÖLÇÜM: modelin FSM'i besleyemediğini
+>    kanıtlar. Kaçak toleransı 200 ms (kümülatifi etkilemez; yalnız kesintisiz sayaçta köprü).
+>    İyi model gelince kilit tamamlanır.
 > 2. **CMC ROLL ±8°:** `python arac/kosu_yonetici.py cmc-test` (yaw zaten GEÇTİ, oran 0.27;
 >    roll fazı ±8° küçük genlik, hedef merkezde). **Geçti eşiği:** roll_oran < 0.5.
 > 3. **MENÜ FARE-TIK KALİBRASYONU:** PLAY/FLY buton koordinatlarını bir kez ölç
