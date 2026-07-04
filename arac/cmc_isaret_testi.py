@@ -42,7 +42,8 @@ import numpy as np
 from detection import kamera_model as km
 
 YAW_GENLIK = 0.35       # yaw osilasyon komut genligi
-ROLL_GENLIK = 0.30      # roll osilasyon komut genligi
+ROLL_GENLIK = 0.12      # roll osilasyon komut genligi (~+-8 deg; hedef merkezde kalsin;
+                        # buyuk roll drone'u yatirinca hedef FOV'dan cikip roll fazi bosalir)
 PERIYOT_S = 3.0         # osilasyon periyodu
 KENAR_PAY = 60          # truth reproj bu kadar kenara yakinsa kareyi alma
 

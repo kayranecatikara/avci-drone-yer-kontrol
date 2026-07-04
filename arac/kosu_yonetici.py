@@ -135,11 +135,80 @@ def oyunu_kapat():
 
 
 # ----------------------------------------------------------------------------
+#  MENU OTOMASYONU — START -> FLY -> E klavye simulasyonu (ctypes SendInput,
+#  scancode; oyunlar DirectInput'ta keybd_event'i bazen gormez). Menu akisi
+#  bilinmedigi icin BEST-EFFORT: E sonrasi telemetri akarsa BASARI; akmazsa net
+#  konsol istemi ("PLAY/FLY'a bas") + otomatik algilamaya devam. Tus dizisi
+#  PLAY_TUSLARI'ndan; oyun menusu netlestikce ayarlanir.
+# ----------------------------------------------------------------------------
+# scancode (set 1): enter=0x1C, space=0x39, e=0x12, w=0x11, f=0x21
+_SCANCODE = {"enter": 0x1C, "space": 0x39, "e": 0x12, "w": 0x11, "f": 0x21, "s": 0x1F}
+# START -> FLY -> E: menude iki onay + oyunda E (kalkis). Gecikmeli.
+PLAY_TUSLARI = [("enter", 1.2), ("enter", 1.2), ("e", 0.3)]
+
+
+def _tus_bas_birak(scancode):
+    """Tek tusu scancode ile bas+birak (SendInput; KEYEVENTF_SCANCODE)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        class KEYBDINPUT(ctypes.Structure):
+            _fields_ = [("wVk", wintypes.WORD), ("wScan", wintypes.WORD),
+                        ("dwFlags", wintypes.DWORD), ("time", wintypes.DWORD),
+                        ("dwExtraInfo", ctypes.POINTER(wintypes.ULONG))]
+
+        class INPUT(ctypes.Structure):
+            class _I(ctypes.Union):
+                _fields_ = [("ki", KEYBDINPUT)]
+            _anonymous_ = ("i",)
+            _fields_ = [("type", wintypes.DWORD), ("i", _I)]
+
+        KEYEVENTF_SCANCODE = 0x0008
+        KEYEVENTF_KEYUP = 0x0002
+
+        def _yolla(flags):
+            inp = INPUT(type=1)
+            inp.ki = KEYBDINPUT(0, scancode, KEYEVENTF_SCANCODE | flags, 0, None)
+            ctypes.windll.user32.SendInput(1, ctypes.byref(inp), ctypes.sizeof(INPUT))
+        _yolla(0)                      # bas
+        time.sleep(0.05)
+        _yolla(KEYEVENTF_KEYUP)        # birak
+        return True
+    except Exception:
+        return False
+
+
+def _play_otomasyonu():
+    """Oyun penceresini one getirip PLAY_TUSLARI dizisini gonder. (denendi_mi,)."""
+    # oyun penceresini one getir (tus dogru pencereye gitsin)
+    try:
+        import ctypes
+        from detection.pencere_yakala import pencere_bul
+        baslik, hwnd = pencere_bul(GAME_TITLE_HINTS)
+        if hwnd:
+            u32 = ctypes.windll.user32
+            if u32.IsIconic(hwnd):
+                u32.ShowWindow(hwnd, 9)
+            u32.SetForegroundWindow(hwnd)
+            time.sleep(0.5)
+    except Exception:
+        return False
+    print("[MENU] START->FLY->E otomasyonu deneniyor (best-effort)...")
+    gonderildi = False
+    for tus, bekle in PLAY_TUSLARI:
+        if _tus_bas_birak(_SCANCODE.get(tus, 0x1C)):
+            gonderildi = True
+        time.sleep(bekle)
+    return gonderildi
+
+
+# ----------------------------------------------------------------------------
 #  Baglanti + PLAY (telemetri) bekleme
 # ----------------------------------------------------------------------------
-def baglan_ve_bekle(play_bekle_s=120.0):
+def baglan_ve_bekle(play_bekle_s=120.0, oto_play=True):
     """Tek TCP baglantisi ac; telemetri (PLAY) baslayana kadar bekle.
-    drone modulu | None (basarisiz) doner."""
+    oto_play=True -> menu otomasyonunu bir kez dene. drone modulu | None doner."""
     from sdk import drone_sdk as drone
     if not drone.connect():
         # oyun yeni acildiysa TCP dinleyici birkac sn sonra hazir olur -> birkac dene
@@ -150,9 +219,11 @@ def baglan_ve_bekle(play_bekle_s=120.0):
         else:
             print("[BAGLANTI] Oyuna baglanilamadi (TCP dinleyici yok).")
             return None
-    print("[BAGLANTI] TCP kuruldu. PLAY'e gec (telemetri bekleniyor; en cok %.0f sn)..."
-          % play_bekle_s)
-    print("           >>> OYUNDA PLAY'E BAS <<<  (arac otomatik algilar, 'hazir' yazma)")
+    print("[BAGLANTI] TCP kuruldu. Menu otomasyonu denenecek (E sonrasi telemetri=basari)...")
+    # BEST-EFFORT PLAY otomasyonu (bir kez); telemetri gelmezse insan istemine duser
+    if oto_play:
+        _play_otomasyonu()
+    _istem_basildi = False
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < play_bekle_s:
         try:
@@ -161,6 +232,10 @@ def baglan_ve_bekle(play_bekle_s=120.0):
                 return drone
         except Exception:
             pass
+        if not _istem_basildi and time.perf_counter() - t0 > 4.0:
+            _istem_basildi = True     # otomasyon tutmadi -> net insan istemi
+            print("           >>> OYUNDA PLAY / FLY'a BAS <<<  (otomasyon tutmadi; arac "
+                  "telemetriyi otomatik algilar, 'hazir' yazma)")
         time.sleep(0.25)
     print("[BAGLANTI] Telemetri gelmedi (PLAY'e gecilmedi?).")
     try:
@@ -277,11 +352,27 @@ def _tur_cmc_test(drone, arg):
         return False, "CMC isaret testi olcum uretemedi (irtifa/FOV?)."
     ek = ""
     if "roll_oran" in r:
-        ek = " | roll oran %.2f" % r["roll_oran"]
+        ek = " | roll oran %.2f (n=%d)" % (r["roll_oran"], r.get("n_roll", 0))
     return r["gecti"], ("CMC isaret: YAW hata_HAM %.1f px -> hata_CMC %.1f px (oran %.2f%s)"
                         " -> %s" % (r["yaw_ham_med"], r["yaw_cmc_med"], r["oran"], ek,
                                     "GECTI (dogru isarette)" if r["gecti"]
                                     else "KALDI (isaret/eksen suphesi)"))
+
+
+def _tur_pnp_test(drone, arg):
+    """FAZ 2 sim dogrulamasi — UCUSLU (arm + pose zinciri gercek veride)."""
+    import pnp_sim_dogrula as pnp
+    if not truth_bekle(drone):
+        return False, "Truth AKMIYOR (sim debug kanali kapali?)."
+    r = pnp.kosu(drone, arg.sure if arg.sure else 60.0)
+    if r is None:
+        return False, "PnP sim dogrulama uretemedi (pose model/irtifa?)."
+    ks = r.get("k_sonuc") or {}
+    kstr = ("k*=%.3f (guvenilir=%s)" % (ks["k_star"], ks.get("guvenilir"))
+            if ks.get("k_star") is not None else "k* BORC (yetersiz frame)")
+    # ZINCIR dogrulandi -> basari (PnP-uygun oran DUSUK olabilir; model kalite olcumu)
+    return True, ("PnP zinciri DOGRULANDI: %s | PnP-uygun %%%.1f | PnP-gecerli %%%.1f | %s"
+                  % (r["pose_ad"], 100 * r["pnp_uygun_oran"], 100 * r["pnp_gecerli_oran"], kstr))
 
 
 # TUR_KAYDI: ad -> (fonksiyon, ucuslu_mu, aciklama). FAZ 1+ turleri buraya eklenir.
@@ -290,6 +381,7 @@ TUR_KAYDI = {
     "k-sanity": (_tur_k_sanity, False, "hakem + K sanity siluet olcumu (birlesik)"),
     "filtre":   (_tur_filtre,   False, "fusion filtre dogrulama (RMSE/gecikme)"),
     "cmc-test": (_tur_cmc_test, True,  "FAZ 1 CMC isaret testi (UCUSLU: yaw/roll osilasyon)"),
+    "pnp-test": (_tur_pnp_test, True,  "FAZ 2 sim dogrulamasi (UCUSLU: pose zinciri gercek veride)"),
 }
 
 
@@ -310,8 +402,8 @@ def tur_yurut(tur_adi, arg):
             print("[HATA] %s" % hata)
             return 1
 
-    # (b) Tek TCP oturumu + PLAY bekle
-    drone = baglan_ve_bekle()
+    # (b) Tek TCP oturumu + PLAY bekle (menu otomasyonu best-effort)
+    drone = baglan_ve_bekle(oto_play=not getattr(arg, "oto_play_kapali", False))
     if drone is None:
         if not arg.oyunu_acik_birak and not arg.oyun_hazir:
             oyunu_kapat()
@@ -361,6 +453,8 @@ def main():
                     help="kapanista oyunu KAPATMA (varsayilan: biz actiysak kapatilir)")
     ap.add_argument("--oyun-hazir", action="store_true",
                     help="oyunu ben baslatma/kapatma (zaten acik ve PLAY'de)")
+    ap.add_argument("--oto-play-kapali", action="store_true",
+                    help="menu (START/FLY/E) klavye otomasyonunu DENEME (elle PLAY'e bas)")
     arg = ap.parse_args()
     sys.exit(tur_yurut(arg.tur, arg))
 

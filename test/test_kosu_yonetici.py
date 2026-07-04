@@ -74,7 +74,7 @@ def test_zombilesme_karari():
     orij = (ky.oyunu_baslat, ky.oyunu_kapat, ky.baglan_ve_bekle, ky.kosu_bitti_bildir)
     ky.oyunu_baslat = lambda: (izler.append("baslat"), (True, None))[1]
     ky.oyunu_kapat = lambda: izler.append("kapat")
-    ky.baglan_ve_bekle = lambda play_bekle_s=120.0: types.SimpleNamespace(
+    ky.baglan_ve_bekle = lambda play_bekle_s=120.0, oto_play=True: types.SimpleNamespace(
         disconnect=lambda: None)
     ky.kosu_bitti_bildir = lambda s: izler.append("bildir")
     ky.TUR_KAYDI["_ucuslu_test"] = (lambda d, a: (True, "ok"), True, "test ucuslu")
