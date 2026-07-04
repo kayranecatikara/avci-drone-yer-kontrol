@@ -351,61 +351,110 @@ def kontrol_dongusu():
 
 
 # ----------------------------------------------------------
-#  GORSEL TESPIT (YOLO best.pt) — AYRI thread.
+#  GORSEL ALGI HATTI (tespit->takip->PnP) — AYRI thread.
 #  Agir inference beyin_lock DISINDA kosar; sonuc beyin_lock ICINDE beyne yazilir
-#  (kontrol dongusu 50Hz akici kalir). LAZY yukleme: ilk gorev tikinde model
-#  yuklenir (boot yavaslamaz). ultralytics/torch YOKSA hazir=False -> sistem GPS
-#  ile devam eder (gorsel faz sessizce devreye girmez, cokme YOK).
+#  (kontrol dongusu 50Hz akici kalir). Model registry (model_yonetici) aktif
+#  modeli yonetir (hot-swap); algi_hatti frame-senkron tespit->takip->PnP yapar.
+#  ultralytics/torch YOKSA model hazir olmaz -> sistem GPS ile devam eder (cokme YOK).
 # ----------------------------------------------------------
-dedektor = None
+model_yon = None           # ModelYonetici (lazy)
+algi = None                # AlgiHatti (lazy)
 _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock ile korunur)
+_son_pnp_ui = None         # UI icin son PnP ozeti
 
 
 def _normalize_tespit(det):
-    """Dedektor px ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz)."""
+    """Algi hedef ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz).
+    Track alanlari (id/durum/tespit_mi) korunur; keypoints normalize edilir."""
     if det is None:
         return None
     W = float(det.get("W", 0) or 0); H = float(det.get("H", 0) or 0)
     if W <= 1 or H <= 1:
         return None
-    return {
+    n = {
         "ex": (det["cx"] - W / 2.0) / (W / 2.0),   # + = hedef SAGDA
         "ey": (det["cy"] - H / 2.0) / (H / 2.0),   # + = hedef ALTTA
         "cx": det["cx"] / W, "cy": det["cy"] / H,  # normalize merkez [0..1]
         "w": det["w"] / W, "h": det["h"] / H,      # normalize bbox boyut [0..1]
         "conf": float(det.get("conf", 0.0)),
+        "track_id": det.get("track_id"),
+        "track_durumu": det.get("track_durumu"),
+        "tespit_mi": det.get("tespit_mi"),
     }
+    kp = det.get("keypoints")
+    if kp:                                          # normalize keypoints (overlay ciz)
+        n["keypoints"] = [[float(x) / W, float(y) / H, float(c)] for x, y, c in kp]
+    return n
+
+
+def _pnp_ui_ozet(pnp):
+    """PnP sonucundan arayuz ozeti (mesafe cm->m; None->None)."""
+    if not pnp:
+        return None
+    o = {"gecerli": bool(pnp.get("gecerli")), "sema": pnp.get("sema"),
+         "origin": pnp.get("origin"), "kullanilan_kp": pnp.get("kullanilan_kp")}
+    if pnp.get("gecerli"):
+        o["mesafe_m"] = float(pnp["mesafe"]) / 100.0
+        o["reproj_err"] = float(pnp.get("reproj_err", 0.0))
+        o["phi_T"] = float(pnp.get("phi_T", 0.0))
+        o["psi_T"] = float(pnp.get("psi_T", 0.0))
+    else:
+        o["sebep"] = pnp.get("sebep")
+    return o
+
+
+def _algi_kur():
+    """Model registry + algi hatti + PnP lazy kurulumu (ilk gorev tikinde)."""
+    global model_yon, algi
+    from detection.model_yonetici import ModelYonetici
+    from detection.algi_hatti import AlgiHatti
+    from detection.talon_pose_estimator import TalonPozKestirici
+    model_yon = ModelYonetici(baslangic_conf=Cfg.VIS_CONF_MIN)
+    algi = AlgiHatti(dedektor=model_yon)
+    algi.pnp_baglan(TalonPozKestirici(sema=model_yon.aktif_sema()))
+    # baslangic modeli: Cfg.VIS_MODEL_PATH adi (best) varsa onu, yoksa ilk .pt
+    tercih = os.path.splitext(os.path.basename(Cfg.VIS_MODEL_PATH))[0]
+    adlar = [k["ad"] for k in model_yon.modelleri_listele()]
+    baslangic = tercih if tercih in adlar else (adlar[0] if adlar else None)
+    if baslangic:
+        model_yon.model_yukle(baslangic, arka_plan=False)
+        print("[GORSEL] Registry: %d model; aktif '%s' (task=%s)."
+              % (len(adlar), model_yon.aktif_ad(), model_yon.durum().get("task")))
+    else:
+        print("[GORSEL] models/ altinda .pt YOK -> sistem GPS ile devam eder.")
 
 
 def dedektor_dongusu():
-    global dedektor, _son_tespit_ui
-    from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
+    global _son_tespit_ui, _son_pnp_ui
     while True:
-        # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
+        # Sadece OTONOM gorev sirasinda algi yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
             time.sleep(0.05)
             continue
-        if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
-            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN)
-            if dedektor.hazir:
-                print("[GORSEL] best.pt yuklendi (device=%s). Siniflar: %s"
-                      % (dedektor.device, dedektor.names))
-            else:
-                print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
-                      % dedektor.hata)
-        if not dedektor.hazir:
-            time.sleep(1.0)                           # kurulum yok -> CPU yakma
+        if algi is None:                              # LAZY: ilk gorev tikinde kur
+            try:
+                _algi_kur()
+            except Exception as e:
+                print("[GORSEL] Algi hatti kurulamadi (%s) -> GPS ile devam." % e)
+                time.sleep(1.0)
+                continue
+        if model_yon is None or not model_yon.hazir:
+            time.sleep(1.0)                           # model yok -> CPU yakma
             continue
         try:
-            dedektor.conf = float(Cfg.VIS_CONF_MIN)   # canli-tune: predict esigi slider'i izler
-            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
-            # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
-            det = dedektor.tespit_et(bgr) if bgr is not None else None
+            model_yon.conf = float(Cfg.VIS_CONF_MIN)  # canli-tune predict esigi (yalniz gorsel/metrik)
+            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi (kilit DISINDA)
+            att = drone.get_drone_rotation()          # gyro-CMC icin attitude (temiz/tam-hizli)
+            cikti = algi.adim(bgr, att) if bgr is not None else None
         except Exception:
-            bgr, det = None, None
+            bgr, cikti = None, None
+        # AlgiCiktisi.hedef eski det sozlesmesiyle uyumlu (cx,cy,w,h,conf,W,H) ->
+        # beyin.set_gorsel_tespit geriye uyumlu (FSM tracker sorgusu FAZ 3'te).
+        hedef = cikti.hedef if cikti else None
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
-            beyin.set_gorsel_tespit(det)
-            _son_tespit_ui = _normalize_tespit(det)
+            beyin.set_gorsel_tespit(hedef)
+            _son_tespit_ui = _normalize_tespit(hedef)
+            _son_pnp_ui = (cikti.pnp if cikti else None)
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
@@ -469,9 +518,18 @@ def build_telemetry():
         "ey_ref": float(getattr(Cfg, "VIS_EY_REF", 0.0)),   # dikey referans (tilt telafisi; overlay cizer)
         "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
-        "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
+        "dedektor_hazir": bool(model_yon is not None and model_yon.hazir),
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf} (normalize)
+        "track": ({"id": vis_tespit.get("track_id"), "durum": vis_tespit.get("track_durumu"),
+                   "tespit_mi": vis_tespit.get("tespit_mi")} if isinstance(vis_tespit, dict)
+                  and vis_tespit.get("track_id") is not None else None),
+        "pnp": (_pnp_ui_ozet(_son_pnp_ui)),        # None | {gecerli, mesafe, reproj_err, phi_T, psi_T}
     }
+    # MODEL REGISTRY durumu + canli metrikler (arayuz paneli)
+    if model_yon is not None:
+        gorsel["model"] = {"durum": model_yon.durum(),
+                           "liste": model_yon.modelleri_listele(),
+                           "metrik": model_yon.metrikler()}
 
     veri = {
         "connected": connected,
@@ -667,6 +725,32 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     ok = False
             self._send(200, json.dumps({"ok": ok, "param": p, "value": val}).encode("utf-8"),
+                       "application/json")
+        elif self.path == "/api/model":
+            # MODEL REGISTRY: {cmd: "tara"|"yukle", ad?}. Hot-swap arka planda.
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+            cmd = data.get("cmd", "")
+            msg, ok = "model yonetici hazir degil (once Gorev Baslat)", False
+            if model_yon is not None:
+                if cmd == "tara":
+                    adlar = model_yon.tara()
+                    ok, msg = True, "Tarandi: %d model" % len(adlar)
+                elif cmd == "yukle":
+                    ad = str(data.get("ad", ""))
+                    ok = model_yon.model_yukle(ad, arka_plan=True)
+                    # pose sema'sini PnP kestiriciye yansit (swap sonrasi)
+                    if ok and algi is not None and algi._pnp is not None:
+                        try:
+                            algi._pnp.sema_ayarla(model_yon.aktif_sema())
+                        except Exception:
+                            pass
+                    msg = ("'%s' yukleniyor (arka plan)" % ad) if ok else (model_yon._hata or "yuklenemedi")
+            self._send(200, json.dumps({"ok": ok, "msg": msg}).encode("utf-8"),
                        "application/json")
         else:
             self._send(404, b"yok", "text/plain; charset=utf-8")

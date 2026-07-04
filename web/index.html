@@ -64,6 +64,27 @@
   .tune-row .trlab b{color:var(--text);font-family:Consolas,monospace}
   .tune-row input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:18px;margin-top:2px}
 
+  /* ---- Model registry paneli ---- */
+  .model-panel{background:var(--panel2);border:1px solid var(--accent2);border-radius:8px;
+    padding:9px 11px;margin:-2px 0 10px}
+  .mp-baslik{font-size:11px;letter-spacing:1px;color:var(--muted);text-transform:uppercase;
+    display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+  .mp-rozet{font-size:10px;padding:2px 6px;border-radius:4px;background:var(--panel);
+    color:var(--muted);font-weight:600;letter-spacing:.5px}
+  .mp-rozet.pose{background:#20303f;color:var(--accent2)}
+  .mp-rozet.detect{background:#1c2b22;color:var(--accent)}
+  .mp-rozet.hata{background:#3a1113;color:var(--danger)}
+  .mp-rozet.yuk{background:#2a2410;color:var(--warn)}
+  .mp-sec{width:100%;padding:6px 8px;background:var(--panel);color:var(--text);
+    border:1px solid var(--border);border-radius:6px;font-size:12px;margin-bottom:6px}
+  .mp-btnrow{display:flex;gap:6px;margin-bottom:6px}
+  .mp-btn{flex:1;padding:6px;background:var(--panel);color:var(--text);border:1px solid var(--border);
+    border-radius:6px;font-size:12px;cursor:pointer;transition:.12s}
+  .mp-btn:hover{border-color:var(--accent2)}
+  .mp-metrik{font-size:11px;color:var(--muted);font-family:Consolas,monospace;line-height:1.5}
+  .mp-metrik b{color:var(--text)}
+  .mp-uyari{color:var(--warn);font-size:10px;margin-top:3px}
+
   /* ---- Güdüm pipeline switch (test: OTO / GPS / GÖRSEL) ---- */
   .gudum-switch{margin:2px 0 10px}
   .gudum-switch .gs-label{font-size:10px;letter-spacing:1px;color:var(--muted);
@@ -189,6 +210,17 @@
         <!-- <<< DEV-ONLY <<< -->
 
 
+        <!-- MODEL REGISTRY: dropdown + Yükle + Tara + rozetler (kod değişikliği olmadan model kıyası) -->
+        <div class="model-panel">
+          <div class="mp-baslik">🧠 MODEL <span id="mpRozet" class="mp-rozet">—</span></div>
+          <select id="modelSec" class="mp-sec"></select>
+          <div class="mp-btnrow">
+            <button class="mp-btn" onclick="modelYukle()">Yükle</button>
+            <button class="mp-btn" onclick="modelTara()">↻ Tara</button>
+          </div>
+          <div id="mpMetrik" class="mp-metrik">—</div>
+        </div>
+
         <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
         <div class="gudum-switch">
           <div class="gs-label">🔀 Güdüm Pipeline (test)</div>
@@ -283,6 +315,16 @@
           <div class="row"><span class="k">Δ hedef−drone (ham)</span><span class="v mono" id="zDelta">—</span></div>
         </div>
 
+        <!-- TAKİP + PnP: yarışma pipeline görsel faz göstergeleri -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent2)">🎯 TAKİP / PnP</div>
+          <div class="row"><span class="k">Track</span><span class="v mono" id="trkDurum">—</span></div>
+          <div class="row"><span class="k">tespit_mi</span><span class="v mono" id="trkTespit">—</span></div>
+          <div class="row"><span class="k">PnP mesafe</span><span class="v mono" id="pnpMes">—</span></div>
+          <div class="row"><span class="k">reproj err</span><span class="v mono" id="pnpReproj">—</span></div>
+          <div class="row"><span class="k">φ_T / ψ_T</span><span class="v mono" id="pnpAci">—</span></div>
+        </div>
+
         <div class="dist">
           <div class="k">HAM GPS — AVCI MESAFE</div>
           <div class="v mono"><span id="dist">—</span> <small>m</small></div>
@@ -320,6 +362,51 @@
   }
   function vurgulaVisMode(m){
     for(const k of ["OTO","GPS","GORSEL"]) $("gm_"+k).classList.toggle("active", k===m);
+  }
+
+  // ===== MODEL REGISTRY: dropdown + Yükle + Tara + canlı metrik =====
+  let modelListeSon = "";
+  function modelKomut(cmd, ad){
+    fetch("/api/model",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({cmd:cmd, ad:ad})})
+      .then(r=>r.json()).then(d=>{ $("leftStatus").textContent = d.msg || cmd; })
+      .catch(()=>{ $("leftStatus").textContent = "Model komutu gönderilemedi (görev başlat?)"; });
+  }
+  function modelYukle(){ const s=$("modelSec"); if(s.value) modelKomut("yukle", s.value); }
+  function modelTara(){ modelKomut("tara"); }
+  function modelPaneliGuncelle(mdl){
+    if(!mdl){ $("mpRozet").textContent="—"; $("mpMetrik").textContent="(görev başlat: model yüklenir)"; return; }
+    const du = mdl.durum||{}, liste = mdl.liste||[], mx = mdl.metrik||{};
+    // dropdown (liste değişince yeniden kur; seçimi koru)
+    const imza = liste.map(m=>m.ad).join("|");
+    if(imza !== modelListeSon){
+      modelListeSon = imza; const s=$("modelSec"); const secili=s.value;
+      s.innerHTML = liste.map(m=>{
+        const t = m.task ? " ["+m.task.toUpperCase()+"]" : "";
+        const u = m.uyumsuz ? " ⚠" : "";
+        return '<option value="'+m.ad+'">'+m.ad+t+u+'</option>';
+      }).join("");
+      if(secili) s.value=secili; else if(du.aktif) s.value=du.aktif;
+    }
+    // rozet
+    const r=$("mpRozet");
+    if(du.yukleniyor){ r.textContent="YÜKLENİYOR"; r.className="mp-rozet yuk"; }
+    else if(du.hata){ r.textContent="HATA"; r.className="mp-rozet hata"; }
+    else if(du.task==="pose"){ r.textContent="POSE"+(du.sema?" · "+du.sema:""); r.className="mp-rozet pose"; }
+    else if(du.task==="detect"){ r.textContent="DETECT"; r.className="mp-rozet detect"; }
+    else { r.textContent="—"; r.className="mp-rozet"; }
+    // metrik
+    let s = "";
+    if(du.aktif) s += "<b>"+du.aktif+"</b><br>";
+    if(mx.fps!=null) s += "FPS "+mx.fps.toFixed(0)+" · "+(mx.inference_ms_ort||0).toFixed(0)+
+      "/"+(mx.inference_ms_p95||0).toFixed(0)+" ms (ort/p95)<br>";
+    if(mx.tespit_ort!=null) s += "tespit "+mx.tespit_ort.toFixed(1)+" · conf ort "+
+      (mx.conf_ort||0).toFixed(2)+" max "+(mx.conf_max||0).toFixed(2)+"<br>";
+    if(mx.pnp_uygun_oran!=null) s += "kp görünür "+(mx.kp_gorunur_ort||0).toFixed(1)+
+      " · <b>PnP-uygun %"+(mx.pnp_uygun_oran*100).toFixed(0)+"</b>";
+    if(du.hata) s += '<div class="mp-uyari">'+du.hata+'</div>';
+    if(du.flip_idx_uyari) s += '<div class="mp-uyari">⚠ flip_idx tanımsız (sol/sağ kp çifti riski)</div>';
+    $("mpMetrik").innerHTML = s || "(metrik toplanıyor…)";
   }
 
   // =====================================================================
@@ -532,6 +619,16 @@
       ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2.5;                // bbox
       ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
       ctx.fillStyle="#25e0a0"; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
+      // POSE keypoints (görsel teyit: sıra doğru mu? renk = index sırası + numara)
+      if(det.keypoints){
+        const kpRenk=["#ff5d5d","#ffb454","#ffe14a","#4aff7a","#33a0ff","#c46bff"];
+        det.keypoints.forEach((kp,i)=>{
+          if(kp[2]<0.3) return;                    // düşük conf kp çizme
+          const kx=rc.x+kp[0]*rc.w, ky=rc.y+kp[1]*rc.h;
+          ctx.fillStyle=kpRenk[i%6]; ctx.beginPath(); ctx.arc(kx,ky,4,0,6.2832); ctx.fill();
+          ctx.fillStyle="#fff"; ctx.font="10px monospace"; ctx.fillText(i, kx+5, ky-3);
+        });
+      }
       ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // REFERANS -> hedef sapma cizgisi (gudum hatasi)
       ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();
       ctx.font="12px monospace"; ctx.fillStyle="#cfe";
@@ -595,6 +692,24 @@
         const yon   = delta>0 ? 'tırman ↑' : 'alçal ↓';
         $("zDelta").innerHTML = '<span style="color:'+renk+'">'+f1(delta)+' <small>m · '+yon+'</small></span>';
       } else { $("zDelta").innerHTML = "—"; }
+
+      // 🎯 Takip + PnP kartı
+      const gs = t.gorsel || {};
+      const trk = gs.track;
+      $("trkDurum").textContent = trk ? ("#"+trk.id+" "+trk.durum) : "—";
+      $("trkTespit").innerHTML = trk ? (trk.tespit_mi
+        ? '<span style="color:var(--accent)">ölçüm</span>'
+        : '<span style="color:var(--warn)">coast</span>') : "—";
+      const pn = gs.pnp;
+      if(pn && pn.gecerli){
+        $("pnpMes").innerHTML = f1(pn.mesafe_m)+' <small>m</small>';
+        $("pnpReproj").innerHTML = pn.reproj_err.toFixed(1)+' <small>px</small>';
+        $("pnpAci").textContent = f0(pn.phi_T)+"° / "+f0(pn.psi_T)+"°";
+      } else {
+        const sb = pn ? (pn.sebep||"—") : "pasif (pose yok)";
+        $("pnpMes").innerHTML = '<small>'+sb+'</small>'; $("pnpReproj").textContent="—"; $("pnpAci").textContent="—";
+      }
+      modelPaneliGuncelle(gs.model);
 
       if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i sunucudaki moda eşitle
       // >>> DEV-ONLY >>>

@@ -26,6 +26,8 @@ class HedefDedektor:
         self.imgsz = int(imgsz)
         self.device = device
         self.hata = None
+        self.task = None            # 'detect' | 'pose' (yukleme sonrasi)
+        self.kpt_shape = None       # pose ise (n, dim); PnP [6,3] bekler
         try:
             from ultralytics import YOLO
             if self.device is None:                       # cihaz otomatik: cuda varsa kullan
@@ -36,6 +38,10 @@ class HedefDedektor:
                     self.device = "cpu"
             self.model = YOLO(model_path)
             self.names = dict(getattr(self.model, "names", {}) or {})
+            self.task = getattr(self.model, "task", None)
+            if self.task == "pose":
+                ks = getattr(getattr(self.model, "model", None), "kpt_shape", None)
+                self.kpt_shape = tuple(ks) if ks is not None else None
             self.hazir = True
             self._warmup()                                # ilk predict yavas -> onceden isit
         except Exception as e:
