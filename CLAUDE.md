@@ -64,6 +64,18 @@ Otonomi: manuel hedef seçimi/işaretleme YOK; tespit ve tracking otonom devreye
 Teslim .zip: input, hedef tespit, tracking, füzyon/filtre, güdüm, ana çalıştırma, config,
 bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod tutarlı olmalı.
 
+## POZ KESTİRİMİ (2026-07-04'te eklendi — GÖZLEMCİ modda)
+`models/talon_pose.pt` (yolo11m-pose, 6 keypoint) + PnP artık pipeline'da:
+- `detection/poz_tespit.py` (PozDedektor) + `pose/poz_cozucu.py` (PnP+EMA; **EGITIM_SIRASI
+  ve MESH_PIVOT_OFFSET kritik** — POSE_REHBERI "EĞİTİM SIRASI" bölümü).
+- `server.py` dedektör döngüsü best.pt'ye İLAVE koşar; **beyin/güdüm girdisi DEĞİŞMEDİ**
+  (best.pt bbox akışı aynen). Telemetri: `gorsel.poz` + `gorsel.poz_hazir`.
+- Arayüz: FPV'de iskelet + "MESAFE (KAM) / HEDEF YAW" satırları + 📐 POZ KESTİRİMİ kartı
+  (kamera vs gerçek kıyas). Video isteri "GNSS bağımlılığının azalması" kanıtına birebir.
+- Kalite (eğitim karelerinde İYİMSER): mesafe medyan %8 / yaw medyan 6° (<10 m iyi);
+  15 m+ mesafe şişer; %27 kare tespitsiz → **yalnız terminal faz (≈4-12 m) aracı**.
+  Güdüme besleme (dalış zamanlaması / lead) modeli kullanıcı onaylarsa SONRAKİ adım.
+
 ## BEKLEYEN İŞ
 - **Görsel güdüm fazı — YZ modelleri / ekstra özellikler:** görsel güdüm algoritmasına yapay
   zeka modelleri ve ek yetenekler eklenecek (ör. daha güçlü tespit/tracking, hedef sınıf/ID
@@ -72,6 +84,8 @@ bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod t
   Arayüz mimarisi buna HAZIR: yeni sinyalleri `server.py` `_gorev_izle()` içinde `beyin`'den
   okuyup `build_telemetry` payload'ına ekle + `index.html`'de kart/overlay çiz (güdüm koduna
   minimum dokunuş; VİDEO ÇIKTILARI ARAYÜZÜ bölümündeki desen).
+  → İLK ADIM ATILDI: poz kestirimi gözlemci modda entegre (üstteki bölüm). Sıradaki karar:
+  poz çıktısı güdüme girsin mi (kamera-mesafeli angajman / hedef-yaw lead)?
 - **Otonom angajman/vuruş (İster 9/10) — güdüm bağımlılığı:** UI göstergeleri hazır ama drone
   OTO uçuşta hedefe otonom VURMUYOR. Gerekli 3 iş: `Cfg.AUTO_VISUAL_HANDOFF=True`, kamera-
   tabanlı terminal vuruş mantığı, `Cfg.GPS_TERMINAL_STRIKE` (şu an hepsi kapalı). Bunlar gelince

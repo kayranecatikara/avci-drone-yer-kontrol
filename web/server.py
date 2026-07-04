@@ -643,6 +643,19 @@ def kontrol_dongusu():
 dedektor = None
 _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock ile korunur)
 
+# --- POZ KESTIRIMI (talon_pose.pt + PnP) — PARALEL GOZLEMCI --------------------
+# best.pt akisina ILAVE kosar: ayni karede 6 keypoint bulur, PnP ile KAMERADAN
+# mesafe/yonelim cikarir. GUDUME GIRMEZ (beyin girdisi best.pt bbox'i olarak
+# kalir) -> mevcut sistem bozulmaz; sadece overlay/telemetri beslenir. Model
+# dosyasi yoksa veya yuklenemezse sessizce kapali (hazir=False deseni).
+# Kalite notu (pose/degerlendir_foto.py, egitim karelerinde iyimser): <10 m'de
+# mesafe medyan ~%8, yaw medyan ~6 der; 15 m+ guvenilmez -> terminal faz araci.
+POSE_MODEL_PATH = os.path.join(PROJ_ROOT, "models", "talon_pose.pt")
+poz_dedektor = None        # PozDedektor | None (lazy; ilk gorev tikinde denenir)
+poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
+_poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
+_son_poz_ui = None         # UI icin son NORMALIZE poz (beyin_lock ile korunur)
+
 
 def _normalize_tespit(det):
     """Dedektor px ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz)."""
@@ -668,9 +681,38 @@ def _normalize_tespit(det):
     }
 
 
+def _normalize_poz(pdet, poz, yaw_pitch):
+    """Poz dedektor + PnP ciktisini UI/telemetri icin normalize et.
+    kp listesi REF SIRAYA cevrilir (0 burun, 1 sol_kanat, 2 sag_kanat,
+    3 sol_kuyruk, 4 sag_kuyruk, 5 kuyruk_arka) — overlay renk/iskeleti sabit."""
+    if pdet is None:
+        return None
+    W = float(pdet.get("W", 0) or 0); H = float(pdet.get("H", 0) or 0)
+    if W <= 1 or H <= 1:
+        return None
+    kp_ref = [None] * 6
+    for i in range(6):
+        r = _poz_sira[i] if _poz_sira else i
+        u, v = pdet["kp_xy"][i]
+        kp_ref[r] = [u / W, v / H, round(float(pdet["kp_conf"][i]), 3)]
+    d = {"kp": kp_ref, "conf": float(pdet.get("conf", 0.0)),
+         "ok": poz is not None}                      # ok=False: nokta var, PnP oturmadi
+    if poz is not None:
+        d["mesafe_m"] = poz["mesafe_cm"] / 100.0
+        d["mesafe_ema_m"] = poz["mesafe_ema_cm"] / 100.0
+        d["aspect_deg"] = poz["aspect_deg"]
+        d["rms_px"] = poz["rms_px"]
+        d["n_kp"] = poz["n_kp"]
+        if yaw_pitch is not None:                    # dunya yonelimi (tilt'e bagli)
+            d["yaw_deg"] = yaw_pitch[0] % 360.0
+            d["pitch_deg"] = yaw_pitch[1]
+    return d
+
+
 def dedektor_dongusu():
-    global dedektor, _son_tespit_ui
+    global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
+    from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
     while True:
         # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
@@ -684,6 +726,27 @@ def dedektor_dongusu():
             else:
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
+            # POZ modeli (ILAVE gozlemci) — best.pt ile AYNI anda, bir kez denenir.
+            if os.path.exists(POSE_MODEL_PATH):
+                # conf=0.35: 0.20'de model bos gokyuzune "talon" diyor (canli test,
+                # 4 Tem) -> overlay'e cop iskelet ciziliyordu. Offline eval 0.20
+                # kullanir (orada GT eslesme var); CANLIDA yanlis-alarm maliyeti yuksek.
+                poz_dedektor = PozDedektor(POSE_MODEL_PATH, conf=0.35)
+                if poz_dedektor.hazir:
+                    try:
+                        from pose.poz_cozucu import PozCozucu, EGITIM_SIRASI
+                        poz_cozucu = PozCozucu(conf_esik=0.5, ema_alpha=0.4)
+                        _poz_sira = list(EGITIM_SIRASI)
+                        print("[POZ] talon_pose.pt yuklendi (device=%s) -> PnP poz "
+                              "kestirimi AKTIF (gozlemci; gudume girmez)." % poz_dedektor.device)
+                    except Exception as e:
+                        poz_dedektor.hazir = False
+                        print("[POZ] PnP cozucu yuklenemedi (%r) -> poz kapali." % e)
+                else:
+                    print("[POZ] pose modeli YUKLENEMEDI (%s) -> poz kapali "
+                          "(best.pt/GPS normal calisir)." % poz_dedektor.hata)
+            else:
+                print("[POZ] %s yok -> poz kestirimi kapali." % POSE_MODEL_PATH)
         if not dedektor.hazir:
             time.sleep(1.0)                           # kurulum yok -> CPU yakma
             continue
@@ -694,9 +757,29 @@ def dedektor_dongusu():
             det = dedektor.tespit_et(bgr) if bgr is not None else None
         except Exception:
             bgr, det = None, None
+        # POZ kestirimi: AYNI kare uzerinde ILAVE inference + PnP (kilit DISINDA).
+        # Her turlu hata poz'u None yapar; best.pt/gudum akisini ETKILEYEMEZ.
+        poz_ui = None
+        if (poz_dedektor is not None and poz_dedektor.hazir
+                and poz_cozucu is not None and bgr is not None):
+            try:
+                pdet = poz_dedektor.tespit_et(bgr)
+                if pdet is not None:
+                    poz = poz_cozucu.coz(pdet["kp_xy"], pdet["kp_conf"],
+                                         pdet["W"], pdet["H"], t=pdet["t"])
+                    yp = None
+                    if poz is not None:
+                        try:   # dunya yaw/pitch: kare anindaki drone rotasyonuyla
+                            yp = poz_cozucu.dunya_yonelim(poz, drone.get_drone_rotation())
+                        except Exception:
+                            yp = None
+                    poz_ui = _normalize_poz(pdet, poz, yp)
+            except Exception:
+                poz_ui = None
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det)
             _son_tespit_ui = _normalize_tespit(det)
+            _son_poz_ui = poz_ui
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
@@ -755,6 +838,7 @@ def build_telemetry():
         ham_list = list(beyin.ham_hatalar)
         j_list = list(beyin.j_hatalar)
         vis_tespit = _son_tespit_ui       # normalize son tespit (dedektor thread yazar)
+        vis_poz = _son_poz_ui             # normalize son POZ kestirimi (ayni thread yazar)
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
@@ -873,6 +957,18 @@ def build_telemetry():
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
     }
+    # POZ KESTIRIMI (kamera): gozlemci akisi — kp REF sirada normalize, mesafe/yaw
+    # KAMERADAN. yaw_gercek kiyas icin telemetriden eklenir (sim/debug gostergesi).
+    if vis_poz is not None:
+        vis_poz = dict(vis_poz)                    # paylasilan dict'i bozmadan kopyala
+        try:
+            trot = drone.get_target_rotation()     # (roll, pitch, yaw) — deger bozulmaz
+            vis_poz["yaw_gercek"] = float(trot[2]) % 360.0
+        except Exception:
+            pass
+    gorsel["poz"] = vis_poz                        # None | {kp,ok,mesafe_m,yaw_deg,...}
+    gorsel["poz_hazir"] = bool(poz_dedektor is not None
+                               and getattr(poz_dedektor, "hazir", False))
 
     return {
         "connected": connected,

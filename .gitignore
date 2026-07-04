@@ -5,6 +5,9 @@ Drones of War Teknofest/
 # pose modeli 123 MB > GitHub 100 MB siniri (push REDDEDILIR). Aktif model best.pt (50 MB).
 bestpose.pt
 models/bestpose.pt
+# ham Colab ciktisi 126 MB (optimizer dahil) > 100 MB siniri. Calisan kopyasi
+# models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
+talon_yolo11m_pose_2_best.pt
 
 # --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
 veri/

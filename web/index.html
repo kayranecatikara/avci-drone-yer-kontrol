@@ -337,6 +337,20 @@
           <div class="row"><span class="k">Yeniden tespit</span><span class="v mono" id="tkYeniden">—</span></div>
         </div>
 
+        <!-- POZ KESTİRİMİ: talon_pose.pt 6-nokta + PnP → KAMERADAN mesafe/yönelim.
+             Gözlemci akış (güdüme girmez); "gerçek" satırları sim/debug kıyası. -->
+        <div class="card" style="border-color:#1f3a45">
+          <div class="title" style="color:var(--accent2)">📐 POZ KESTİRİMİ (KAMERA)</div>
+          <div class="note" style="margin:-4px 0 8px">Mesafe/yön GNSS'siz, yalnız kameradan (keypoint+PnP). ~4-12 m bandında güvenilir; 15 m+ şişer.</div>
+          <div class="row"><span class="k">Durum</span><span class="v" id="pzDurum"><span class="rozet pasif">KAPALI</span></span></div>
+          <div class="row"><span class="k">Mesafe (kamera)</span><span class="v mono" id="pzMesafe">—</span></div>
+          <div class="row"><span class="k">Mesafe (gerçek)</span><span class="v mono" id="pzMesafeG">—</span></div>
+          <div class="row"><span class="k">Hedef yaw (kam)</span><span class="v mono" id="pzYaw">—</span></div>
+          <div class="row"><span class="k">Hedef yaw (gerçek)</span><span class="v mono" id="pzYawG">—</span></div>
+          <div class="row"><span class="k">Aspect açısı</span><span class="v mono" id="pzAspect">—</span></div>
+          <div class="row"><span class="k">Nokta / RMS</span><span class="v mono" id="pzKp">—</span></div>
+        </div>
+
         <!-- GÜDÜM KOMUTLARI (ister 8): uygulanan 4 komut + karar -->
         <div class="card" style="border-color:#26314a">
           <div class="title" style="color:var(--accent2)">🕹️ GÜDÜM KOMUTLARI</div>
@@ -646,6 +660,33 @@
       ctx.fillText("ex="+Number(det.ex).toFixed(2)+" ey="+Number(det.ey).toFixed(2),
                    bx-bw/2, by+bh/2+13);
     }
+    // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
+    // kp REF sırada gelir (0 burun,1 solK,2 sağK,3 solKuy,4 sağKuy,5 kuyArk);
+    // renkler pose/onizle.py ile aynı aile. Mesafe/yaw KAMERADAN (GNSS bağımsız).
+    const pz = gs.poz;
+    if(pz && pz.kp){
+      const PK=["#ff4646","#3dff7a","#ffc400","#3f9dff","#ff52ff","#2ee6e6"];
+      const KE=[[0,5],[1,2],[0,1],[0,2],[3,5],[4,5],[3,4]];
+      const P=pz.kp.map(p=>(p && p[2]>0.25) ? [rc.x+p[0]*rc.w, rc.y+p[1]*rc.h] : null);
+      ctx.lineWidth=1.5; ctx.strokeStyle="rgba(255,255,255,.75)";
+      for(const e of KE){ const a=P[e[0]], b=P[e[1]];
+        if(a&&b){ ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); } }
+      for(let i=0;i<6;i++){ const p=P[i]; if(!p) continue;
+        ctx.fillStyle=PK[i]; ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.fill();
+        ctx.strokeStyle="rgba(0,0,0,.8)"; ctx.lineWidth=1;
+        ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.stroke(); }
+      if(pz.ok && pz.mesafe_ema_m!=null){
+        ctx.font="bold 13px monospace"; ctx.fillStyle="#6ee7ff";
+        let s="MESAFE (KAM): "+Number(pz.mesafe_ema_m).toFixed(1)+" m";
+        if(t.gercek_mesafe_m!=null) s+="  ·  GERÇEK: "+Number(t.gercek_mesafe_m).toFixed(1)+" m";
+        ctx.fillText(s, rc.x+10, rc.y+58);
+        if(pz.yaw_deg!=null){
+          let s2="HEDEF YAW (KAM): "+Number(pz.yaw_deg).toFixed(0)+"°";
+          if(pz.yaw_gercek!=null) s2+="  ·  GERÇEK: "+Number(pz.yaw_gercek).toFixed(0)+"°";
+          ctx.fillText(s2, rc.x+10, rc.y+76);
+        }
+      }
+    }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
@@ -737,6 +778,36 @@
     $("tkKilit").textContent= (tk.pos_count!=null && tk.n_lock) ? (tk.pos_count+"/"+tk.n_lock) : "—";
     $("tkKayip").innerHTML  = (tk.kayip_s!=null && tk.kayip_s>0.05) ? f1(tk.kayip_s)+' <small>s</small>' : '0.0 <small>s</small>';
     $("tkYeniden").textContent = (tk.yeniden!=null) ? tk.yeniden : "—";
+  }
+  // POZ KESTİRİMİ kartı: kamera-PnP mesafe/yaw + gerçekle kıyas (fark renklenir)
+  function _aciFark(a,b){ return Math.abs(((a-b+540)%360)-180); }
+  function guncellePoz(gs, gercekM){
+    gs = gs || {};
+    const pz = gs.poz, ok = !!(pz && pz.ok);
+    let roz;
+    if(!gs.poz_hazir)      roz='<span class="rozet pasif">KAPALI</span>';
+    else if(ok)            roz='<span class="rozet ok">ÇÖZÜM VAR</span>';
+    else if(pz)            roz='<span class="rozet kes">PnP OTURMADI</span>';
+    else                   roz='<span class="rozet pasif">TESPİT YOK</span>';
+    $("pzDurum").innerHTML = roz;
+    $("pzMesafe").innerHTML = (ok && pz.mesafe_ema_m!=null)
+      ? f1(pz.mesafe_ema_m)+' <small>m</small>' : "—";
+    if(gercekM!=null){
+      let renk="var(--muted)";
+      if(ok && pz.mesafe_ema_m!=null){
+        const fark=Math.abs(pz.mesafe_ema_m-gercekM);
+        renk = (fark<=Math.max(1,0.10*gercekM)) ? "var(--accent)" : "var(--warn)";
+      }
+      $("pzMesafeG").innerHTML = '<span style="color:'+renk+'">'+f1(gercekM)+' <small>m</small></span>';
+    } else $("pzMesafeG").textContent="—";
+    $("pzYaw").textContent = (ok && pz.yaw_deg!=null) ? Number(pz.yaw_deg).toFixed(0)+"°" : "—";
+    if(ok && pz.yaw_deg!=null && pz.yaw_gercek!=null){
+      const fy=_aciFark(pz.yaw_deg, pz.yaw_gercek);
+      const renk = fy<=15 ? "var(--accent)" : "var(--warn)";
+      $("pzYawG").innerHTML = '<span style="color:'+renk+'">'+Number(pz.yaw_gercek).toFixed(0)+'° (Δ'+fy.toFixed(0)+'°)</span>';
+    } else $("pzYawG").textContent = (pz && pz.yaw_gercek!=null) ? Number(pz.yaw_gercek).toFixed(0)+"°" : "—";
+    $("pzAspect").textContent = (ok && pz.aspect_deg!=null) ? Number(pz.aspect_deg).toFixed(0)+"°" : "—";
+    $("pzKp").textContent = ok ? (pz.n_kp+"/6 · rms "+Number(pz.rms_px).toFixed(1)+" px") : "—";
   }
   function setCmdBar(id, v){
     v = Number(v)||0; if(v>1)v=1; if(v<-1)v=-1;
@@ -902,6 +973,7 @@
       guncelleGorev(t.gorev);
       guncelleGnss(t.gnss);
       guncelleTakip(t.takip, t.gorsel && t.gorsel.tespit);
+      guncellePoz(t.gorsel, t.gercek_mesafe_m);   // POZ kartı: kamera-PnP vs gerçek
       guncelleGudum(t.gudum);
       olayGuncelle(t.olaylar, t.gorev);
       cizMinimap(t);
