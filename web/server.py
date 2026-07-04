@@ -461,6 +461,34 @@ def dedektor_dongusu():
 
 
 # ----------------------------------------------------------
+#  GOREV SONU / VURUS degerlendirmesi (video kalem 9-10).
+#  Bir kez BASARILI olunca kilitlenir (dalgalanan mesafe geri almasin).
+# ----------------------------------------------------------
+VURUS_ESIK_M = 3.0           # ham GPS mesafe bu altina inince "vurus" (sim)
+_gorev_sonu_durum = {"basarili": False, "min_mesafe_m": None, "an": None}
+
+
+def _gorev_sonu_degerlendir(fsm_durum, mesafe_m):
+    global gorev_aktif
+    st = _gorev_sonu_durum
+    if not gorev_aktif:                          # gorev bitti/durduruldu -> sifirla
+        if st["basarili"] or st["min_mesafe_m"] is not None:
+            _gorev_sonu_durum.update(basarili=False, min_mesafe_m=None, an=None)
+        return {"basarili": False, "vurus_menzili": False, "min_mesafe_m": None}
+    if mesafe_m is not None:
+        if st["min_mesafe_m"] is None or mesafe_m < st["min_mesafe_m"]:
+            st["min_mesafe_m"] = mesafe_m
+        # ANGAJMAN + mesafe esigi -> BASARILI (bir kez kilitle)
+        if not st["basarili"] and mesafe_m <= VURUS_ESIK_M and fsm_durum in (
+                "ANGAJMAN", "KILIT_BILDIR", "GORSEL_GUDUM"):
+            st["basarili"] = True
+            print("[GOREV] BASARILI — hedefe %.1f m'de vurus (FSM=%s)." % (mesafe_m, fsm_durum))
+    return {"basarili": st["basarili"],
+            "vurus_menzili": (mesafe_m is not None and mesafe_m <= VURUS_ESIK_M),
+            "min_mesafe_m": st["min_mesafe_m"]}
+
+
+# ----------------------------------------------------------
 #  Telemetriyi oku ve arayuz icin sade bir sozluge cevir.
 #  Tum konum/irtifa degerleri METRE, hizlar hem m/s hem km/h.
 # ----------------------------------------------------------
@@ -505,13 +533,15 @@ def build_telemetry():
                            "y": j_temiz[1] * CM_TO_M,
                            "z": j_temiz[2] * CM_TO_M}
 
-    # (GECICI TANI) kontrolcunun SON gonderdigi dikey/ileri komut -> tani_irtifa.py icin.
-    # Drone davranisini DEGISTIRMEZ; sadece son komutu gosterir. Sorun cozulunce silinebilir.
+    # GUDUM KOMUT TELEMETRISI (video kalem 8): kontrolcunun SON gonderdigi TUM
+    # eksenler (throttle/pitch/roll/yaw). Drone davranisini DEGISTIRMEZ; gosterir.
     try:
         _cmd_thr = float(drone._drone.throttle)
         _cmd_pit = float(drone._drone.pitch)
+        _cmd_rol = float(drone._drone.roll)
+        _cmd_yaw = float(drone._drone.yaw)
     except Exception:
-        _cmd_thr = _cmd_pit = None
+        _cmd_thr = _cmd_pit = _cmd_rol = _cmd_yaw = None
 
     # GORSEL GUDUM durumu + son NORMALIZE tespit (overlay/rozet icin). durum
     # GORSEL_GUDUM ise GPS yonelimi MIMARI olarak kesilmistir -> index.html
@@ -544,6 +574,9 @@ def build_telemetry():
         "oipn": {"acik": oipn_acik, "beta": oipn_beta},
         # HEDEF GNSS: GORSEL ailesinde (GORSEL_GUDUM/KILIT_BILDIR/ANGAJMAN) KULLANILMIYOR
         "gnss_kullaniliyor": (j_durum in ("ARAMA", "TAKIP")),
+        # GOREV SONU / VURUS (video kalem 9-10): ANGAJMAN + hedefe cok yakin -> vurus.
+        # Sim'de vurus = ham GPS mesafe VURUS_ESIK alti (model/terminal vurus hedefe girer).
+        "gorev_sonu": _gorev_sonu_degerlendir(j_durum, distance_m),
     }
     # MODEL REGISTRY durumu + canli metrikler (arayuz paneli)
     if model_yon is not None:
@@ -560,6 +593,7 @@ def build_telemetry():
             "speed_kmh": drone_spd_ms * MS_TO_KMH,
             "roll": drot[0], "pitch": drot[1], "yaw": drot[2],
             "cmd_throttle": _cmd_thr, "cmd_pitch": _cmd_pit,
+            "cmd_roll": _cmd_rol, "cmd_yaw": _cmd_yaw,     # video kalem 8: tam komut
         },
         "target": {
             "x": tx, "y": ty, "z": tz,

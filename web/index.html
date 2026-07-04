@@ -177,6 +177,23 @@
 
   /* alt durum çubuğu */
   .status{font-size:12px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border)}
+
+  /* Video kalem 7: takip kayıp/yeniden-tespit uçucu bildirim */
+  .takip-bildirim{display:none;position:fixed;left:50%;top:64px;transform:translateX(-50%);
+    z-index:90;padding:8px 18px;border-radius:8px;font-size:14px;font-weight:700;
+    letter-spacing:.5px;box-shadow:0 4px 16px rgba(0,0,0,.5)}
+  .takip-bildirim.kayip{display:block;background:#c62828;color:#fff}
+  .takip-bildirim.yeniden{display:block;background:#1a8a5a;color:#fff}
+  /* Video kalem 10: görev-sonu başarı tam ekran overlay */
+  .basari-ekran{display:none;position:fixed;inset:0;z-index:200;
+    background:radial-gradient(circle at center,rgba(20,160,90,.32),rgba(6,8,12,.94));
+    align-items:center;justify-content:center}
+  .basari-ekran.on{display:flex;animation:beIn .4s ease}
+  @keyframes beIn{from{opacity:0;transform:scale(.9)}to{opacity:1;transform:scale(1)}}
+  .be-ic{text-align:center}
+  .be-ikon{font-size:96px;filter:drop-shadow(0 0 20px var(--accent))}
+  .be-baslik{font-size:44px;font-weight:800;color:var(--accent);letter-spacing:3px;margin-top:8px}
+  .be-alt{font-size:18px;color:var(--text);margin-top:10px}
 </style>
 <!-- >>> DEV-ONLY >>> -->
 <style>
@@ -198,6 +215,13 @@
 <!-- >>> DEV-ONLY >>> -->
 <div id="devBant" class="dev-bant">🛠️ GELİŞTİRME MODU — GERÇEK VERİ — yarışma/video koşusu DEĞİL</div>
 <!-- <<< DEV-ONLY <<< -->
+
+<!-- Video kalem 7: hedef kaybı / yeniden-tespit uçucu bildirimi -->
+<div id="takipBildirim" class="takip-bildirim"></div>
+<!-- Video kalem 10: görev-sonu başarı ekranı -->
+<div id="basariEkran" class="basari-ekran"><div class="be-ic">
+  <div class="be-ikon">🎯</div><div class="be-baslik">GÖREV BAŞARILI</div>
+  <div class="be-alt" id="basariAlt">Hedef imha edildi</div></div></div>
 
   <header>
     <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span></h1>
@@ -361,6 +385,15 @@
           <div class="row"><span class="k">PnP mesafe</span><span class="v mono" id="pnpMes">—</span></div>
           <div class="row"><span class="k">reproj err</span><span class="v mono" id="pnpReproj">—</span></div>
           <div class="row"><span class="k">φ_T / ψ_T</span><span class="v mono" id="pnpAci">—</span></div>
+        </div>
+
+        <!-- 🎮 GÜDÜM KOMUT TELEMETRİSİ (video kalem 8): kontrolcünün son komutu -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent2)">🎮 GÜDÜM KOMUTU</div>
+          <div class="row"><span class="k">Throttle</span><span class="v mono" id="cmdThr">—</span></div>
+          <div class="row"><span class="k">Pitch</span><span class="v mono" id="cmdPit">—</span></div>
+          <div class="row"><span class="k">Roll</span><span class="v mono" id="cmdRol">—</span></div>
+          <div class="row"><span class="k">Yaw</span><span class="v mono" id="cmdYaw">—</span></div>
         </div>
 
         <div class="dist">
@@ -716,6 +749,23 @@
     ctx.fillStyle="#fff"; ctx.fillText(bt, rx+pad, ry+17);
   }
 
+  // Video kalem 7: takip sürekliliği — kayıp (CONFIRMED->LOST) ve yeniden-tespit
+  // (LOST->CONFIRMED) geçişlerini uçucu banner ile göster.
+  let _trkDurumOnce = null, _trkBildirimTimer = null;
+  function takipGecisIzle(trk){
+    const d = trk ? trk.durum : null;
+    if(d !== _trkDurumOnce){
+      if(_trkDurumOnce==="CONFIRMED" && d==="LOST") _takipBanner("kayip","📡 HEDEF KAYBEDİLDİ — takip sürüyor (coast)");
+      else if(_trkDurumOnce==="LOST" && d==="CONFIRMED") _takipBanner("yeniden","✅ HEDEF YENİDEN TESPİT — takip sürekliliği korundu");
+      _trkDurumOnce = d;
+    }
+  }
+  function _takipBanner(sinif,metin){
+    const b=$("takipBildirim"); b.className="takip-bildirim "+sinif; b.textContent=metin;
+    if(_trkBildirimTimer) clearTimeout(_trkBildirimTimer);
+    _trkBildirimTimer=setTimeout(()=>{ b.className="takip-bildirim"; }, 2500);
+  }
+
   let lastOk = 0;
   async function tick(){
     try{
@@ -794,6 +844,17 @@
         }
       }
       $("fsmDurum").textContent = gs.durum || "—";
+      // 🎮 Güdüm komutu (kalem 8)
+      const cf=(x)=> (x==null?"—":(x>=0?"+":"")+Number(x).toFixed(2));
+      $("cmdThr").textContent=cf(d.cmd_throttle); $("cmdPit").textContent=cf(d.cmd_pitch);
+      $("cmdRol").textContent=cf(d.cmd_roll); $("cmdYaw").textContent=cf(d.cmd_yaw);
+      // 🎯 Görev-sonu başarı ekranı (kalem 10)
+      const gsonu = t.gorev_sonu||{};
+      $("basariEkran").classList.toggle("on", !!gsonu.basarili);
+      if(gsonu.basarili && gsonu.min_mesafe_m!=null)
+        $("basariAlt").textContent = "Hedefe "+f1(gsonu.min_mesafe_m)+" m'de otonom angajman — insan müdahalesi yok";
+      // 📡 Takip kayıp/yeniden-tespit bildirimi (kalem 7)
+      takipGecisIzle(gs.track);
       // kilit engel teshisi (tamamlanamiyorsa hangi kosulda takildi)
       if(kl && !kl.kilit_tamam && kl.engel){
         $("kilitSayan").innerHTML += ' <small style="color:var(--warn)">('+kl.engel+')</small>';

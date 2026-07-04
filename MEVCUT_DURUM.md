@@ -5,6 +5,25 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🎬 MÜSABAKA VİDEO KAYDEDİCİ — FİNAL AŞAMASI ZORUNLULUĞU (2026-07-04, ŞİMDİ KODLANMAZ).**
+> Müsabaka (gerçek uçuş) teslimi için ayrı bir kayıt zorunluluğu var; **kod finalde yazılır,
+> spec burada dursun.** Gereksinimler (Teslim Esasları):
+> - **Kaynak:** orijinal FPV karesinin ÜZERİNE canlı çizim — **ekran/masaüstü kaydı KABUL EDİLMEZ**
+>   (yani program karesini alıp encode eden bir kaydedici; OBS/ekran-capture değil).
+> - **Overlay:** hedef üstünde canlı **#FF0000 (saf kırmızı) kilit dörtgeni** (çizgi ≤3 px —
+>   `KilitCfg.CIZGI_PX`) + **sağ üstte ms hassasiyetli SUNUCU saati** (yerel saat değil, hakem/
+>   sunucu zamanı; senkron).
+> - **Format:** H.264 / MP4; **postprocessing YOK** (canlı, ham); **OpenCV 4.5 + FFPLAY uyumlu**
+>   (VideoWriter fourcc `avc1`/`H264`, oynatma ffplay ile sınanır).
+> - **Dosya adı:** `[MusabakaNo]_[TakimAdi]_[gg_aa_yyyy].mp4`.
+> - **Doğrulama:** her kare dörtgeni `arac/kilit_dortgeni.py` kurallarını geçmeli (≥%90 içerme,
+>   merkez farkı, çizgi ≤3 px). Kaydedici bu doğrulamayı canlı çağırır.
+> - **MUAF:** **Simülasyon Uçuş Kanıt Videosu bu şartlardan MUAF** (kendi dokümanı: arayüz +
+>   kod ekranı + sesli anlatım isteniyor; YouTube liste dışı, ham/postprocessing kısıtı yok).
+>   Bu iki video KARIŞTIRILMAZ — müsabaka kaydedici yalnız gerçek uçuş teslimi içindir.
+> **Kod yeri (finalde):** `web/musabaka_kaydedici.py` (yeni); `arac/kilit_dortgeni.py` doğrulama
+> hazır; dörtgen bbox pipeline'dan (AlgiCiktisi.hedef) gelir.
+
 > **🔔 FAZ 1-4 KOD TAMAM (2026-07-04): pipeline uçtan uca kurulu, pose'suz TAM çalışır.**
 > takip (ByteTrack+gyro-CMC) → PnP → APN/OIPN → kilit_kurali (§6.1.4, kaçak toleransı
 > dahil) → FSM (ARAMA→TAKIP→GORSEL_GUDUM→KILIT_BILDIR→ANGAJMAN) → hakem stub → FAZ 4
