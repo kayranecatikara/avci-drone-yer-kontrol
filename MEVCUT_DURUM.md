@@ -102,6 +102,55 @@
 > | 4. OIPN açık/kapalı CSV kıyası + β | dönen hedefe 2 görev (OIPN AÇIK/KAPALI), `veri/ucus_log_*.csv` a_OIPN_terim | OIPN açıkken kilit-tutma iyileşir (LOS hatası düşer), salınım artmaz; β loglardan ayarla |
 > **Pose borçları "iyi model şart" etiketli — hepsinin komutu yukarıda hazır.**
 
+> ## 🔬 REFERANS KOŞU (2026-07-04 20:34, DEV kaynak) — TP/FP + kilit anatomisi
+> **Baseline:** `veri/ucus_log_20260704_203553.csv` (9242 satır) + `veri/prova_kareleri/`.
+> Profil: drone başlangıç (−184.5, −2394.7, 48.4 m); hedef hızlı kaçan; drone yaklaşıp
+> 13 m'ye indi, sonra hedef açtı (mesafe 336 m); ~4 dk; model `best.pt` (DETECT).
+> **İyi model AYNI profille koşulup bu CSV'ye karşı kıyaslanacak.** Analiz aracı:
+> `python arac/tp_fp_analiz.py [csv]` (dev; truth kullanır, pakete girmez).
+>
+> **1) TP/FP — bu koşudan ÇIKARILAMADI (iki blokör); qualitatif FP-eğilimli:**
+> - **Blokör A (DÜZELTİLDİ):** truth (`est_*`) tespit anında loglanmıyordu (yalnız
+>   ARAMA/TAKIP; GORSEL_GUDUM tespit→truth medyan 3.8 s uzakta). `_log_gorsel` artık
+>   `son_temiz`'i logluyor (DEV'de = truth) → **sonraki koşu analiz edilebilir**.
+> - **Blokör B (PREREQ, açık):** kamera reprojeksiyon attitude konvansiyonu
+>   DOĞRULANMAMIŞ (`detection/kamera_model.py` ">>> SIM'DE DOGRULA <<<"). Kanıt:
+>   drone hedefe yaklaşırken truth yalnız **%21 kadraj-içi** reprojekte oluyor, **%57
+>   "kamera arkası"** (yanlış). Truth loglansa bile reprojeksiyon güvenilmez →
+>   attitude işaret/sıra doğrulaması gerekli (k_sanity/pnp; iyi model/yakın hedef).
+> - **Qualitatif (kare gözlemi):** bbox'lar ufuk/arazi kenarı/güneş-parlaması üzerinde
+>   (203717 conf=0.78 sol-alt arazi; 203710 parlak nokta) → **FP-eğilimli**, ama
+>   küçük/uzak bbox kesinlik vermiyor.
+> - **CONF EŞİĞİ BULGUSU (önemli):** handoff (GORSEL_GUDUM geçişi) VE kilit **AYNI**
+>   eşiği kullanıyor: `VIS_CONF_MIN=0.45`, `VIS_N_LOCK=5`. **Kodda 0.72 YOK.** FP-track
+>   0.45–0.72 arası hem faz geçişini tetikliyor hem kilit sayıyor (dağa-güdüm riski).
+>   **ÖNERİ:** kilit için ayrı **sıkı eşik (≥0.72)** ekle; handoff 0.45 kalabilir.
+>
+> **2) KİLİT ENGELİ ANATOMİSİ (truth-bağımsız, GÜVENİLİR):**
+> - GORSEL_GUDUM tespit karesi 6847; **ÖLÇÜLEN (coast değil) yalnız 541 = %7.9** → %92 coast.
+> - **CONFIRMED kesintisiz: medyan 0.17 s, maks 0.4 s** → track hiç 5 s tutamıyor.
+> - **Coast blok: 51 ad., medyan 2536 ms, p90 6054 ms, maks 12160 ms** → 200 ms köprünün
+>   çok üstünde (köprüleme kurtaramıyor).
+> - conf (ölçülen) medyan 0.771; dağılım `<0.45=0 · 0.45–0.72=237 · ≥0.72=304`.
+> - engel: `coast 6306 · (sayan) 484 · AV_disi_yatay 57`.
+> - **Kök neden: model tespiti TUTAMIYOR** (oran %7.9, CONFIRMED ≤0.4 s) — TP/FP'den bağımsız.
+>
+> **3) YENİ MODEL HEDEF KARTI (bu koşunun verisinden; iyi model bunları geçmeli):**
+> - Tespit oranı (GORSEL_GUDUM ölçülen/toplam): **%7.9 → hedef ≥%70**.
+> - Coast p90: **6054 ms → hedef ≤200 ms** (köprü kapsar).
+> - CONFIRMED kesintisiz maks: **0.4 s → hedef ≥3 s** (angajman ön şartı).
+> - conf: ölçülenlerin **%56'sı ≥0.72 → hedef ≥%80**.
+> - FP/dk: **ölçülemedi** (blokör A+B) → düzeltme sonrası koşuda hesaplanacak (hedef ≤ birkaç/dk).
+>
+> **4) DATASET ALIŞVERİŞ LİSTESİ (kaçırma + yanılma):**
+> - **Kaçırma** (blokör B nedeniyle "hedef görünürken kaçırma" anları kesinleştirilemedi):
+>   qualitatif → küçük/uzak (<20 px) + hızlı + motion-blur + gökyüzü-glare hedefi kaçırıyor.
+>   → bu koşullardan bol **pozitif** örnek.
+> - **Yanılma (FP kaynağı):** ufuk çizgisi, arazi/kaya dokusu, güneş parlaması →
+>   bunlardan **etiketsiz negatif/background** kareleri ekle (model "bu Talon değil"i öğrensin).
+> - **Kompozisyon önerisi (rafine edilecek):** ~%40 küçük-uzak Talon (blur/glare dahil),
+>   ~%30 orta mesafe net Talon, ~%30 negatif/background (ufuk+arazi+glare).
+
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
 > veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose

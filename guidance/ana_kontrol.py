@@ -676,6 +676,14 @@ class AvciKontrol:
             "vis_gordu": 1 if tespit is not None else 0,
             "fsm_durum": self.durum, "beta": self.oipn_beta,
         }
+        # Hedef durum beslemesini (son_temiz) GORSEL_GUDUM'da da logla -> gelistirme/
+        # dogrulama analizinde (arac/) tespit aninda hedef konumunu reprojekte edebilmek
+        # icin. Bu, kaynak seciciye gore AKTIF beslemenin kendisidir (uretim yolunda
+        # filtre kestirimi); yeni/harici bir kaynak CAGIRMAZ, ek erisim yok.
+        if self.son_temiz is not None:
+            d["est_x"] = float(self.son_temiz[0])
+            d["est_y"] = float(self.son_temiz[1])
+            d["est_z"] = float(self.son_temiz[2])
         if tespit is not None:
             d["vis_conf"] = float(tespit.get("conf", 0.0))
             W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
