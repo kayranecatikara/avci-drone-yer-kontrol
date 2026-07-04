@@ -34,14 +34,14 @@ class KilitCfg:
     PENCERE_SN = 10.0           # kayan pencere
     KUMULATIF_HEDEF_SN = 5.0    # kilit_tamam esigi
     SUREKLI_ANGAJMAN_SN = 3.0   # angajman on sarti (kesintisiz)
-    # KARE KACAGI TOLERANSI (sartname): kisa kaclar (blur/tek-kare parazit/coast
-    # sicramasi) KESINTISIZ (surekli) sayaci BOZMAZ. Ardisik kacak SURESI bu esigi
-    # gecmedikce surekli DONAR (sifirlanmaz, o kare de eklenmez); gecerse sifirlanir.
-    # %5 kare ~ 10 sn pencerenin %5'i = 0.5 sn. Kumulatif zaten toleranslidir (kacak
-    # kareler dusurmez, yalniz eklenmez). "Tolerans pencere SINIRLARINDA gecerli
-    # DEGIL": 10 sn kayan pencerenin eski frame'leri her halukarda dusurulur (pencere
-    # mekanigi; tolerans bunu ETKILEMEZ) -> kacaga ragmen pencere disi sayilmaz.
-    KACAK_TOLERANS_SN = 0.5
+    # KARE KACAGI TOLERANSI (sartname §6.1.4 + Sim Teslim Esaslari): 5 sn kilitlenme
+    # icin %5 = 200 ms. KUMULATIF sayac toleransa GUVENMEZ -> yalnizca gecerli
+    # (sayan) karelerle 5.0 sn'yi doldurur (kacak kareler EKLENMEZ; tolerans
+    # kumulatif'i ETKILEMEZ). KESINTISIZ-3sn sayacinda: <=200 ms kaclar KOPRULENIR
+    # (surekli donar, sifirlanmaz) AMA kilit araliginin ILK karesinde (surekli=0
+    # iken) ve SON karesinde (kopru acikken angajman verilmez) KOPRULEME YOK
+    # ("baslangic/bitiste gecersiz").
+    KACAK_TOLERANS_SN = 0.2
 
 
 class KilitDurumu:
@@ -57,7 +57,9 @@ class KilitDurumu:
         self.kilit_tamam = False     # kenar-tetikli (bir kez)
         self._son_t = None
         self._son_sayan = False
-        self._kacak_ardisik = 0.0    # ardisik kacak (saymayan) suresi (tolerans icin)
+        self._kacak_ardisik = 0.0    # ardisik kacak (saymayan) suresi (kopru toleransi)
+        self._kopru_acik = False     # kesintisiz sayacta aktif kopru (kaçak koprulendi,
+                                     # henuz sayan kare gelmedi) -> bitiste angajman YOK
         self._engel_sayac = {}       # kilit tamamlanamazsa: hangi kosul kac kez engel
 
     def sifirla(self):
@@ -68,6 +70,7 @@ class KilitDurumu:
         self._son_t = None
         self._son_sayan = False
         self._kacak_ardisik = 0.0
+        self._kopru_acik = False
         self._engel_sayac = {}
 
     def engel_ozeti(self):
@@ -122,17 +125,21 @@ class KilitDurumu:
         if self._kumulatif < 0:
             self._kumulatif = 0.0
 
-        # kesintisiz sayac + KARE KACAGI TOLERANSI: sayan ise +dt (kacak sifir);
-        # saymayan ise ardisik kacak biriktir -> tolerans altinda surekli DONAR
-        # (sifirlanmaz, eklenmez), tolerans asilinca sifirlanir.
+        # kesintisiz sayac + KOPRULEME (kare kacagi toleransi):
+        #  - sayan: +dt; kacak sifir; kopru KAPANIR (sayan kare koprüyü tamamlar)
+        #  - saymayan: ILK karede (surekli=0) VEYA kacak>200ms -> sifirla (kopru YOK);
+        #    aksi halde surekli DONAR + kopru_acik=True (bitiste angajman verilmez)
         if sayan:
             self.surekli_kilit_sn += dt
             self._kacak_ardisik = 0.0
+            self._kopru_acik = False
         else:
             self._kacak_ardisik += dt
-            if self._kacak_ardisik > self.cfg.KACAK_TOLERANS_SN:
-                self.surekli_kilit_sn = 0.0
-            # else: surekli DONAR (kisa blur/parazit kilidi dusurmez)
+            if self.surekli_kilit_sn <= 0.0 or self._kacak_ardisik > self.cfg.KACAK_TOLERANS_SN:
+                self.surekli_kilit_sn = 0.0      # ILK kare / uzun kacak -> koprü YOK
+                self._kopru_acik = False
+            else:
+                self._kopru_acik = True          # kisa kacak: surekli DONAR, kopru aday
 
         # kilit_tamam: kumulatif >=5 sn ilk kez -> kenar tetik
         yeni_kilit = False
@@ -149,5 +156,8 @@ class KilitDurumu:
                 "pencere_doluluk": min(1.0, self._kumulatif / c.KUMULATIF_HEDEF_SN)}
 
     def angajman_hazir(self):
-        """Angajman on sarti: kilit paketi gonderilebilir VE kesintisiz >=3 sn."""
-        return self.kilit_tamam and self.surekli_kilit_sn >= self.cfg.SUREKLI_ANGAJMAN_SN
+        """Angajman on sarti: kilit paketi gonderilebilir VE kesintisiz >=3 sn.
+        BITISTE KOPRU GECERSIZ: kopru_acik iken (kaçak devam, sayan kare gelmedi)
+        kesintisiz garanti YOK -> angajman verilmez (kopru sayan kareyle tamamlanmali)."""
+        return (self.kilit_tamam and not self._kopru_acik
+                and self.surekli_kilit_sn >= self.cfg.SUREKLI_ANGAJMAN_SN)

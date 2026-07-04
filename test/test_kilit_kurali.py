@@ -121,42 +121,51 @@ def test_angajman_hazir_surekli():
     assert kd.kilit_tamam is True and kd.angajman_hazir() is False
 
 
-def test_kacak_tolerans_kisa_surekli_bozmaz():
-    # Kisa kacak (<0.5 sn tolerans; tek-kare blur/parazit) KESINTISIZ sayaci
-    # BOZMAZ: surekli donar, sifirlanmaz.
+def test_kacak_kopru_kisa_dondurur_ama_angajman_bitiste_yok():
+    # Kisa kacak (<=200 ms) surekli'yi DONDURUR (kopru) ama KOPRU ACIKKEN angajman
+    # VERILMEZ (bitiste gecersiz); sonraki sayan kare kopruyu KAPATIR -> angajman.
     kd = KilitDurumu()
     _, t = _besle(kd, _hedef(), 5.5)           # kilit_tamam + surekli >=5
     surekli_once = kd.surekli_kilit_sn
     assert kd.kilit_tamam and surekli_once >= 5.0
-    # 0.3 sn kisa kacak (AV disi) -> tolerans altinda; surekli KORUNMALI
-    out, t = _besle(kd, _hedef(cx_n=0.9), 0.3, t0=t)
+    # 0.15 sn kisa kacak (<=0.2) -> surekli DONAR + kopru acik
+    out, t = _besle(kd, _hedef(cx_n=0.9), 0.15, t0=t)
     assert abs(kd.surekli_kilit_sn - surekli_once) < 1e-6, "kisa kacak surekli'yi DONDURUR"
-    assert kd.angajman_hazir() is True         # kilit_tamam + surekli >=3 korundu
-    # tekrar say -> surekli devam eder (sifirlanmadi)
-    out, t = _besle(kd, _hedef(), 0.5, t0=t)
-    assert kd.surekli_kilit_sn > surekli_once
+    assert kd._kopru_acik is True
+    assert kd.angajman_hazir() is False        # KOPRU ACIK -> bitiste angajman YOK
+    # tekrar sayan kare -> kopru KAPANIR -> angajman hazir
+    out, t = _besle(kd, _hedef(), 0.1, t0=t)
+    assert kd._kopru_acik is False and kd.surekli_kilit_sn > surekli_once
+    assert kd.angajman_hazir() is True
 
 
-def test_kacak_tolerans_uzun_sifirlar():
-    # Uzun kacak (>0.5 sn tolerans) KESINTISIZ sayaci SIFIRLAR.
+def test_kacak_uzun_sifirlar():
+    # Uzun kacak (>200 ms) KESINTISIZ sayaci SIFIRLAR.
     kd = KilitDurumu()
     _, t = _besle(kd, _hedef(), 3.5)
     assert kd.surekli_kilit_sn >= 3.0
-    out, t = _besle(kd, _hedef(cx_n=0.9), 0.8, t0=t)   # 0.8 sn > 0.5 tolerans
+    out, t = _besle(kd, _hedef(cx_n=0.9), 0.35, t0=t)  # 0.35 sn > 0.2 tolerans
     assert kd.surekli_kilit_sn == 0.0, "uzun kacak surekli'yi SIFIRLAR"
     assert kd.angajman_hazir() is False
 
 
-def test_kacak_tolerans_kumulatif_bozmaz():
-    # %5 kare kacagi kumulatif sayaci "bozmaz": kacak kareler DUSURMEZ, yalniz
-    # eklenmez -> kilit biraz gec ama olusur (pencere ici birikim korunur).
+def test_kopru_ilk_karede_yok():
+    # ILK karede (surekli=0) kacak -> KOPRULEME YOK (surekli 0 kalir; baslangicta gecersiz)
     kd = KilitDurumu()
-    # 5.5 sn say arasinda serpistirilmis kisa kacaklar -> kumulatif yine >=5 olur
+    out, _ = _besle(kd, _hedef(cx_n=0.9), 0.15)   # hic sayan yok, hep kacak
+    assert kd.surekli_kilit_sn == 0.0 and kd._kopru_acik is False
+
+
+def test_kumulatif_toleransa_guvenmez():
+    # KUMULATIF toleransa GUVENMEZ: yalniz SAYAN karelerle 5.0 dolar. Serpistirilmis
+    # kisa kaclar (kopru surekli'yi tutar) -> kumulatif kacak sirasinda ARTMAZ,
+    # yalniz sayan karelerle dolar; yine de yeterli sayan-sure birikince kilit olur.
+    kd = KilitDurumu()
     t = 0.0
-    for blok in range(12):
+    for blok in range(14):
         _, t = _besle(kd, _hedef(), 0.5, t0=t)          # 0.5 sn say
-        _, t = _besle(kd, _hedef(cx_n=0.9), 0.05, t0=t) # 0.05 sn kacak (%~9 ama kisa)
-    assert kd.kilit_tamam is True, "serpistirilmis kisa kacak kilidi engellemez"
+        _, t = _besle(kd, _hedef(cx_n=0.9), 0.05, t0=t) # 0.05 sn kacak (<=0.2 kopru)
+    assert kd.kilit_tamam is True, "sayan kareler 5.0 sn'yi doldurur (kacak eklenmez)"
 
 
 def test_engel_teshisi():
