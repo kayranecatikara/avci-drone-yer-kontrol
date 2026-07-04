@@ -111,11 +111,21 @@ class Cfg:
     # --- HANDOFF (histerezisli) ---
     HANDOFF_RANGE = 4000.0      # cm; tespit menziline gore TUNE et (genis tut)
     HANDOFF_EXIT  = 5000.0      # bu mesafenin disina cikinca handoff iptal
+    # OTOMATIK GORSEL DEVRI (YOLO kilidi + yakinlik -> GORSEL_GUDUM). SIMDILIK KAPALI:
+    # GPS hedefi standoff'ta TAKIP ETMEYE DEVAM etsin; gorsel faz olgunlasinca True yap.
+    # Manuel GORSEL switch (set_vis_mode "GORSEL") bu bayraktan BAGIMSIZ calisir.
+    AUTO_VISUAL_HANDOFF = False
 
-    # --- TERMINAL VURUS (yumusak YAKLASMA-CARPMA) — GPS ile CARPMA ---
-    # Carpisma-rotasi: v_des = v_hedef + v_close*LOS. AMA v_close SABIT degil; mesafeyle
-    # ORANTILI ve tavanli: v_close = clamp(KP_CLOSE*d, 0, V_CLOSE). Boylece uzakta hizli
-    # yaklasir, hedefe YAKINDA yavaslar -> hedefi GECMEZ (overshoot yok), yumusak oturur.
+    # --- TERMINAL VURUS (GPS ile CARPMA) — VARSAYILAN KAPALI ---
+    # GOREV MIMARISI: GPS yalnizca hedefe YETERINCE YAKLASIR (yaklasma + hedefi kadraj/FOV'da
+    # tutma); SALDIRI (vurus) KAMERA VERISIYLE yapilir (gorsel faz). Bu yuzden GPS terminal
+    # carpmasi (asagidaki ram blogu) VARSAYILAN OLARAK DEVRE DISI. Silinmedi -> kavram korunur,
+    # gerekirse tek bayrakla geri acilir. Kamera-tabanli vurus mantigi SONRA eklenecek.
+    #   True  : d < STRIKE_RANGE'de GPS carpisma-rotasiyla hedefe dalar (eski davranis).
+    #   False : GPS terminalde de sadece YAKLASIR/kadrajlar; yakinlik+YOLO kilidinde kameraya devreder.
+    GPS_TERMINAL_STRIKE = False
+    # Carpisma-rotasi (yalnizca GPS_TERMINAL_STRIKE=True iken): v_des = v_hedef + v_close*LOS;
+    # v_close = clamp(KP_CLOSE*d, V_CLOSE_MIN, V_CLOSE); uzakta hizli, yakinda kademeli yavaslar.
     STRIKE_RANGE = 6000.0       # cm (60 m); bu menzil altinda vurus moduna gec
     V_CLOSE      = 1200.0       # cm/s (12 m/s) kapanis hizi TAVANI (uzakta)
     KP_CLOSE     = 0.6          # 1/s; kapanis hizi = KP_CLOSE*mesafe -> yakinda kademeli yavaslar
@@ -138,6 +148,27 @@ class Cfg:
     V_CAP_NEAR = 500.0          # cm/s handoff yakininda
     BRAKE_DIST = 7000.0         # cm; bu mesafe altinda hizi kademeli dusur
 
+    # --- ANTI-OVERSHOOT STANDOFF (B) — yalnizca GPS_TERMINAL_STRIKE=False (yaklasma-only) ---
+    # GPS hedefin USTUNE ucup GECMESIN diye pozisyon komutu hedefe DEGIL, hedeften
+    # APPROACH_STANDOFF kadar GERIDEKI noktaya surulur -> drone standoff'ta durur/paceler,
+    # hedef HEP ONDE (FOV'da) kalir; kamera devralana kadar gorsel temas korunur (nose_off
+    # ~180 flip'leri biter). KISA lead (APPROACH_LEAD_S), 2sn tam lead'in manevrada nisan
+    # noktasini savurup drone'u hedefin KARSISINA atmasini onler. (GPS_TERMINAL_STRIKE=True
+    # iken bu blok DEVRE DISI -> eski ram davranisi birebir korunur.)
+    APPROACH_STANDOFF = 500.0   # cm (5 m) KOMUT; EFEKTIF takip mesafesi bunun USTUNDE cikar:
+                               # hareketli hedefi kovalarken PD gecikmesi (pursuit lag) fazladan
+                               # mesafe ekler -> komut ~2x'i efektif olur. Sim gozlemi: komut 10m ->
+                               # efektif ~20m; efektifi ~10m'ye indirmek icin komut 5m'ye cekildi.
+                               # TUNE (sim): hala uzaksa dusur / KP_H veya V_CAP_NEAR ile kapanisi guclendir.
+                               # (sim-tune 2026-07-03: 30m -> 10m; 2026-07-04: efektif ~20m -> komut 5m)
+    APPROACH_LEAD_S   = 0.5     # s; yaklasma nisan noktasi icin KISA lead (tam 2sn overshoot yapiyordu)
+    # KAMERA CERCEVELEME (dikey): drone hedefin bu kadar ALTINDA ucar -> kamera 25 derece
+    # YUKARI tilt'li oldugundan hedef kadrajin MERKEZININ BIRAZ USTUNDE durur (net gorunur,
+    # gorsel kilide hazir). Geometri (~10 m standoff'ta): ~466 cm hedefi tam ortalar; "biraz
+    # ustu" icin biraz fazlasi. TUNE (sim): kadrajda hedefi istedigin yukseklige getir.
+    # NOT: yalnizca yaklasma-only'de uygulanir (GPS_TERMINAL_STRIKE=True iken carpma bozulmasin).
+    APPROACH_ALT_OFFSET = 500.0  # cm (5 m); drone hedefin ALTINDA kalacagi dikey ofset
+
     # --- PD GAINS (hata cm cinsinden) — DEGISTIRME ---
     KP_H = 0.00025              # yatay konum -> komut
     KD_H = 0.00060             # yatay turev -> sonumleme (modest; filtre zaten lead'liyor)
@@ -149,7 +180,7 @@ class Cfg:
                                # oturur (sim: 14 m -> ~0). Anti-windup icin band+clamp asagida.
     INT_Z_BAND = 2500.0        # cm; integrali SADECE |ez|<25 m iken biriktir (tirmanista windup yok)
     INT_Z_MAX  = 5000.0        # cm; integral clamp (KI_Z*INT_Z_MAX = 1.0 -> tavani asmaz)
-    KP_YAW = 1.0               # yaw hatasi (rad) -> yaw komutu
+    KP_YAW = 1.3               # yaw hatasi (rad) -> yaw komutu (sim-tune 2026-07-03: 1.0->1.3, burun hizli)
 
     # --- KOMUT TAVANLARI ---
     PITCH_MAX = 0.75
@@ -159,9 +190,8 @@ class Cfg:
                               # ustundeyken THR=-0.40 komutuna RAGMEN +3 m/s tirmanmaya devam
                               # ediyordu (ileri-ucus tasimasi -0.40'i yeniyor). Tam inme yetkisi
                               # gerekli; PD sadece cok yukaridayken -1'e gider, hedefe yakinda 0'a doner.
-    YAW_MAX   = 0.30           # burnu (kamerayi) hedefe donuk tutar. Eski salinim ram/orbit
-                               # kaynakliydi; yumusak yaklasma-carpma (kademeli kapanis) o sorunu
-                               # kaldirdigindan 0.30 guvenli: burun daha iyi takip eder, salinmaz.
+    YAW_MAX   = 0.45           # burnu (kamerayi) hedefe donuk tutar (sim-tune 2026-07-03: 0.30->0.45,
+                               # burun manevrali hedefe daha hizli doner -> FOV kaybi azalir; salinim yok).
 
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
@@ -730,17 +760,24 @@ class AvciKontrol:
                 if not self._vis_ilan:
                     print("[GORSEL] Manuel switch -> GORSEL GUDUM (GPS yonelimi kapali).")
                     self._vis_ilan = True
-        else:  # OTO — otomatik kilit histerezisi
+        else:  # OTO — otomatik kilit: YAKINLIK + YOLO kilidi (ikisi birden)
             if self.durum != "GORSEL_GUDUM":
                 if tespit is not None and float(tespit.get("conf", 0.0)) >= Cfg.VIS_CONF_MIN:
                     self._vis_pos_count += 1
                 else:
                     self._vis_pos_count = 0
-                if self._vis_pos_count >= Cfg.VIS_N_LOCK:
+                # HANDOFF: GPS hedefe YETERINCE YAKLASMIS OLMALI (self.handoff = d_h<HANDOFF_RANGE,
+                # onceki tikte hesaplanir) VE YOLO kilidi (ard arda VIS_N_LOCK gecerli tespit).
+                # Ikisi birden saglaninca saldiri KAMERAYA devredilir; oncesinde GPS yaklasmaya
+                # devam eder (uzaktan yanlis-kilit yok).
+                # SIMDILIK KAPALI (Cfg.AUTO_VISUAL_HANDOFF=False): kilit+yakinlik saglansa
+                # bile GPS takibe DEVAM eder, gorsele gecmez. Manuel GORSEL switch etkilenmez.
+                if (Cfg.AUTO_VISUAL_HANDOFF
+                        and self._vis_pos_count >= Cfg.VIS_N_LOCK and self.handoff):
                     self.durum = "GORSEL_GUDUM"
                     if not self._vis_ilan:
-                        print("[GORSEL] Gorsel temas KILITLENDI -> GPS GUDUMU KESILDI "
-                              "(yonelim yalnizca kamera).")
+                        print("[GORSEL] Yakinlik + gorsel kilit saglandi -> GPS YAKLASMAYI BIRAKTI, "
+                              "yonelim/saldiri yalnizca KAMERA verisiyle.")
                         self._vis_ilan = True
 
         if self.durum == "GORSEL_GUDUM":
@@ -771,13 +808,38 @@ class AvciKontrol:
             return
         self.last_est = est
 
-        # YATAY: 2sn lead'li kestirim (intercept). DIKEY: lead'siz anlik irtifa
-        # (lead dikeyde irtifa asimina/yukari kacmaya yol aciyor).
+        # YATAY nisan noktasi:
+        #   - GPS_TERMINAL_STRIKE=True (ram): 2sn lead'li kestirim (est) = intercept (eski davranis).
+        #   - approach-only (ram KAPALI): B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde
+        #     dur. KISA lead (APPROACH_LEAD_S) ile nisan (savrulmayi onler); pozisyon KOMUTU
+        #     hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
+        # DIKEY: lead'siz anlik irtifa (lead dikeyde irtifa asimina/yukari kacmaya yol aciyor).
         z_ref = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
-        ex = float(est[0] - drone_pos[0])
-        ey = float(est[1] - drone_pos[1])
+        # KAMERA CERCEVELEME: hedefi kadrajda merkezin BIRAZ USTUNDE tut. z_ref'i (hedef
+        # irtifasi) APPROACH_ALT_OFFSET kadar ASAGI cek -> drone hedefin altinda dengelenir
+        # -> 25 derece yukari-tilt kamerada hedef LOS'u yukselir -> kadrajda yukari kayar.
+        # Yalnizca yaklasma-only'de (ram KAPALI); carpma geometrisini bozmasin.
+        if not Cfg.GPS_TERMINAL_STRIKE:
+            z_ref -= Cfg.APPROACH_ALT_OFFSET
         ez = float(z_ref - drone_pos[2])
+        if (not Cfg.GPS_TERMINAL_STRIKE) and self.son_xy_anlik is not None and self.son_hiz is not None:
+            tx = float(self.son_xy_anlik[0]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[0])  # kisa lead
+            ty = float(self.son_xy_anlik[1]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[1])
+        else:
+            tx, ty = float(est[0]), float(est[1])                 # ram / fallback: 2sn lead
+        ex = tx - float(drone_pos[0])                             # HEDEFE hata (yaw/handoff/FOV/log)
+        ey = ty - float(drone_pos[1])
         d_h = math.hypot(ex, ey)
+        # POZISYON KOMUT hatasi (PD bunu surer): ram'de hedefe git; approach-only'de standoff'a.
+        if not Cfg.GPS_TERMINAL_STRIKE:
+            if d_h > 1e-6:
+                _ux, _uy = ex / d_h, ey / d_h
+                _dcmd = d_h - Cfg.APPROACH_STANDOFF              # +: yaklas, 0: dur, -: cok yakin -> geri cekil
+                ex_cmd, ey_cmd = _ux * _dcmd, _uy * _dcmd
+            else:
+                ex_cmd = ey_cmd = 0.0
+        else:
+            ex_cmd, ey_cmd = ex, ey
 
         # ZORUNLU None-init (ucus logu icin): strike/alc bloklari calismazsa bile bu
         # degiskenler 559'daki log dict'inde referanslanir -> NameError'i onle (yoksa
@@ -793,11 +855,11 @@ class AvciKontrol:
             self.handoff_announced = False
         self.durum = "KILIT" if self.handoff else "ARAMA"
 
-        # 5) turev (EMA)
-        de = self._derivative((ex, ey, ez), t)
+        # 5) turev (EMA) — YATAY komut hatasi (standoff'lu) uzerinden; dikey ez uzerinden
+        de = self._derivative((ex_cmd, ey_cmd, ez), t)
 
-        # 6) yatay: hata ve turevi govde cercevesine cevir
-        e_fwd, e_right = world_to_body(ex, ey, drone_yaw)
+        # 6) yatay: KOMUT hatasini (standoff) ve turevini govde cercevesine cevir
+        e_fwd, e_right = world_to_body(ex_cmd, ey_cmd, drone_yaw)
         de_fwd, de_right = world_to_body(de[0], de[1], drone_yaw)
 
         pitch_raw = Cfg.PITCH_SIGN * (Cfg.KP_H * e_fwd   + Cfg.KD_H * de_fwd)
@@ -847,12 +909,15 @@ class AvciKontrol:
             roll_raw = 0.0
 
         # 10b) TERMINAL VURUS (COMMIT / RAM) — hedefin ICINE dal, delip GEC (hit).
+        #      >>> VARSAYILAN KAPALI (Cfg.GPS_TERMINAL_STRIKE=False): GPS VURMAZ, sadece yaklasir;
+        #          saldiri KAMERA verisiyle (gorsel faz) yapilir. Blok korunur, bayrakla acilir. <<<
         #      v_des = v_hedef + v_close*LOS.  v_close = clamp(KP_CLOSE*d, V_CLOSE_MIN, V_CLOSE):
         #      uzakta hizli, YAKINDA TABAN'da (V_CLOSE_MIN) kalir -> temasta 0'a inmez, drone
         #      hedefin icine itmeye devam eder (GERI ATILMA yok). Hedef hizini esledigimiz
         #      icin lead OTOMATIK. ivme = KV*(v_des - v_own). Cok yakinda (d_s<COMMIT_RANGE)
         #      YANAL (LOS'a dik) ivme kisilir -> LOS singula rite salinimi kovalanmaz, DUZ dalinir.
-        if d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None and self.son_xy_anlik is not None:
+        if (Cfg.GPS_TERMINAL_STRIKE and d_h < Cfg.STRIKE_RANGE
+                and self.son_hiz is not None and self.son_xy_anlik is not None):
             # LOS = lead'siz ANLIK hedefe (carpisma icin gercek yon; lead son_temiz'de DEGIL).
             ex_s = float(self.son_xy_anlik[0] - drone_pos[0])
             ey_s = float(self.son_xy_anlik[1] - drone_pos[1])
@@ -914,7 +979,8 @@ class AvciKontrol:
 
         # --- UCUS LOGU: ana yol (APPROACH/STRIKE) tam teshis satiri ---
         if Cfg.LOG_ENABLE:
-            mod = "STRIKE" if (d_h < Cfg.STRIKE_RANGE and self.son_hiz is not None
+            mod = "STRIKE" if (Cfg.GPS_TERMINAL_STRIKE and d_h < Cfg.STRIKE_RANGE
+                               and self.son_hiz is not None
                                and self.son_xy_anlik is not None) else "APPROACH"
             sh = self.son_hiz; sx = self.son_xy_anlik; sm = self.son_ham
             self._log(mod, {
