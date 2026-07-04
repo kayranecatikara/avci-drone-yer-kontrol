@@ -67,8 +67,12 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 - `inovasyonlu_j_v2.py` → sensör füzyonu / filtreleme / tahmin (GNSS temizleme + hız kestirimi).
 - `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + ARAMA→KILIT FSM).
 - `server.py`+`index.html` → görev arayüzü, telemetri, bozuk-GNSS görünürlüğü (video çıktıları).
-- [SÜRÜYOR] görüntü işleme + hedef tespit + tracking (YOLO .pt) → görsel faz; yarışma
-  pipeline refaktörüyle genişliyor (takip/PnP). Teslim .zip'i bu modülü + model dosyasını içermeli.
+- [FAZ 1-4 KOD TAMAM] görsel pipeline: `detection/` (kamera_model, takip=ByteTrack+gyro-CMC,
+  algi_hatti, talon_pose_estimator=PnP, model_yonetici=registry) + `guidance/` (kilit_kurali
+  §6.1.4, gudum_yasasi APN+OIPN) + `iletisim/hakem_istemci`. FSM: ARAMA→TAKIP→GORSEL_GUDUM→
+  KILIT_BILDIR→ANGAJMAN. **Pose'suz TAM çalışır** (PnP/OIPN otomatik pasif → IBVS fallback;
+  regresyon: OIPN kapalı+pose'suz = eski hat birebir). ~91 birim testi. Sim borçları +
+  "iyi model geldiğinde" runbook MEVCUT_DURUM'da. Teslim .zip bu modülleri + model .pt içerir.
 
 ## VİDEO İSTERLERİ (karşılanması zorunlu — özet)
 İlk 3 dk (hızlandırma YOK, sesli teknik anlatım): sistem mimarisi; bozuk GNSS'in girdi

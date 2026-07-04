@@ -5,6 +5,56 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 FAZ 1-4 KOD TAMAM (2026-07-04): pipeline uçtan uca kurulu, pose'suz TAM çalışır.**
+> takip (ByteTrack+gyro-CMC) → PnP → APN/OIPN → kilit_kurali (§6.1.4, kaçak toleransı
+> dahil) → FSM (ARAMA→TAKIP→GORSEL_GUDUM→KILIT_BILDIR→ANGAJMAN) → hakem stub → FAZ 4
+> arayüz (kilit sayacı+AV çerçevesi+HEDEF GNSS rozeti+OIPN slider+CSV). **~91 birim testi.**
+> Regresyon kuralı kanıtlı: OIPN kapalı + pose'suz = mevcut IBVS birebir.
+>
+> ## 🎮 TEK SİM OTURUMU PLANI (pose'suz; taze oyun başlatınca, tek oturum)
+> Menü: **PLAY (fare) → FLY (fare) → E (klavye)**. Oyun art arda arm sonrası zombileşir →
+> her uçuşlu turdan sonra kosu_yonetici otomatik restart eder (ya da elle yeniden başlat).
+> 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
+>    İzle: FSM durumu ARAMA→TAKIP ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
+>    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).
+>    **Zayıf detection hedefi göremezse görsel kilit olmaz → kilit paneli `engel` alanı
+>    `track_onaysiz`/`coast` gösterir** (bu bir ÖLÇÜM: modelin FSM'i besleyemediğini kanıtlar;
+>    beş koşuldan hangisinde takıldığı görünür). İyi model gelince kilit tamamlanır.
+> 2. **CMC ROLL ±8°:** `python arac/kosu_yonetici.py cmc-test` (yaw zaten GEÇTİ, oran 0.27;
+>    roll fazı ±8° küçük genlik, hedef merkezde). **Geçti eşiği:** roll_oran < 0.5.
+> 3. **MENÜ FARE-TIK KALİBRASYONU:** PLAY/FLY buton koordinatlarını bir kez ölç
+>    (pencere W/H yüzdesi), `kosu_yonetici._play_otomasyonu`'na fare-tık ekle.
+>
+> ## 🏋️ EĞİTİM ZİNCİRİ (PLAN modundan çıkışa hazır; `arac/egitim/`)
+> **Dataset nereye:** ultralytics pose formatı (images/ + labels/ + data.yaml). data.yaml'da
+> **kpt_shape [6,3], flip_idx [0,1,3,2,5,4]** (sol/sağ çift!), names: talon, train/val yolları.
+> **Komut (sırayla):**
+> ```
+> python arac/egitim/dataset_dogrula.py <data.yaml>        # kpt/flip/split kapısı; KRİTİK hata->eğitme
+> python arac/egitim/pose_egit.py --data <data.yaml> --agirlik models/yolo26m_pose_best.pt \
+>     --calistir --epochs 100 --imgsz 640 --isim yolo_pose_talon_v11
+> ```
+> **Çıktı:** en iyi .pt → `models/<isim>.pt` + yanına .yaml (imgsz/sema/açıklama) otomatik;
+> VAL mAP raporu (box + pose mAP50/50-95) basılır. **Kıyas:** yeni modeli arayüzden
+> **↻ Tara → Yükle**, canlı panelde FPS/latency/conf/**PnP-uygun oran**ı eskiyle karşılaştır.
+> mAP eğitim-içi; ASIL kabul PnP-uygun oran (sim `pnp-test`).
+>
+> ## 📗 "İYİ MODEL GELDİĞİNDE" RUNBOOK (kod yazmadan, liste takibiyle entegrasyon)
+> **(i)** `.pt`'yi `models/`'a koy + yanına `<ad>.yaml` (`imgsz: 640`, `sema: kuyruk_ucu`,
+> `aciklama: ...`). **(ii)** Arayüz → **↻ Tara → Yükle**; task/şema rozetini kontrol
+> (pose ise kpt_shape=[6,3] yeşil; değilse reddedilir). **(iii) DETECTION modeli:**
+> canlı panelden conf/tespit sayısı/FP davranışını oku; **FSM provasını tekrarla — bu kez
+> kilit TAMAMLANMALI** (kilit paneli kümülatif 5s'ye ulaşır, `engel` boşalır). Geçti eşiği:
+> kilit_tamam=✓, `pnp_uygun` gerekmez (detection). **(iv) POSE modeli — sıralı borç kapatma
+> (her adım komut + geçti eşiği):**
+> | Adım | Komut | Geçti eşiği |
+> |---|---|---|
+> | 1. Keypoint görsel teyit (özellikle **sol/sağ**!) | `pnp-test` → `veri/pnp_teyit_*.png` göz kontrolü | 6 nokta 3D tablo sırasıyla eşleşiyor; sol/sağ ters DEĞİL |
+> | 2. PnP-uygun oran + reproj | `kosu_yonetici pnp-test` | PnP-uygun >%20; reproj medyan <8 px |
+> | 3. Yakın geçişte k* | `pnp-test` (hedef ~5-20 m) | k* `guvenilir`=True; k*≈0.867'ye yakınsa FAZ 0 ile tutarlı |
+> | 4. OIPN açık/kapalı CSV kıyası + β | dönen hedefe 2 görev (OIPN AÇIK/KAPALI), `veri/ucus_log_*.csv` a_OIPN_terim | OIPN açıkken kilit-tutma iyileşir (LOS hatası düşer), salınım artmaz; β loglardan ayarla |
+> **Pose borçları "iyi model şart" etiketli — hepsinin komutu yukarıda hazır.**
+
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
 > veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose

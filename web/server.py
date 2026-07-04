@@ -496,6 +496,7 @@ def build_telemetry():
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
         kilit_bilgi = dict(getattr(beyin, "_son_kilit_bilgi", {}) or {})
+        kilit_engel = beyin.kilit.engel_ozeti() if hasattr(beyin, "kilit") else None
         oipn_acik = bool(getattr(beyin, "oipn_acik", True))
         oipn_beta = float(getattr(beyin, "oipn_beta", 0.3))
     j_info = {"durum": j_durum, "hazir": j_temiz is not None}
@@ -533,6 +534,8 @@ def build_telemetry():
             "surekli_sn": kilit_bilgi.get("surekli_kilit_sn", 0.0),
             "hedef_sn": 5.0, "pencere_doluluk": kilit_bilgi.get("pencere_doluluk", 0.0),
             "sayan": bool(kilit_bilgi.get("sayan", False)),
+            "engel": kilit_bilgi.get("engel"),     # bu kare saymadiysa hangi kosul
+            "engel_ozet": kilit_engel,             # kilit tamamlanamadiysa dagilim (teshis)
             "kilit_tamam": bool(kilit_bilgi.get("kilit_tamam", False)),
             "av_yatay": [0.25, 0.75], "av_dikey": [0.10, 0.90], "kaplama_esik": 0.06,
         },

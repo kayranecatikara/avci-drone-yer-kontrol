@@ -787,6 +787,10 @@
           : '<span style="color:var(--muted)">hayır</span>';
       }
       $("fsmDurum").textContent = gs.durum || "—";
+      // kilit engel teshisi (tamamlanamiyorsa hangi kosulda takildi)
+      if(kl && !kl.kilit_tamam && kl.engel){
+        $("kilitSayan").innerHTML += ' <small style="color:var(--warn)">('+kl.engel+')</small>';
+      }
       // OIPN paneli (server durumuyla eşitle)
       if(gs.oipn){ oipnAcik=gs.oipn.acik; vurgulaOipn();
         if(document.activeElement!==$("betaSlider")){

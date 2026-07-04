@@ -121,6 +121,59 @@ def test_angajman_hazir_surekli():
     assert kd.kilit_tamam is True and kd.angajman_hazir() is False
 
 
+def test_kacak_tolerans_kisa_surekli_bozmaz():
+    # Kisa kacak (<0.5 sn tolerans; tek-kare blur/parazit) KESINTISIZ sayaci
+    # BOZMAZ: surekli donar, sifirlanmaz.
+    kd = KilitDurumu()
+    _, t = _besle(kd, _hedef(), 5.5)           # kilit_tamam + surekli >=5
+    surekli_once = kd.surekli_kilit_sn
+    assert kd.kilit_tamam and surekli_once >= 5.0
+    # 0.3 sn kisa kacak (AV disi) -> tolerans altinda; surekli KORUNMALI
+    out, t = _besle(kd, _hedef(cx_n=0.9), 0.3, t0=t)
+    assert abs(kd.surekli_kilit_sn - surekli_once) < 1e-6, "kisa kacak surekli'yi DONDURUR"
+    assert kd.angajman_hazir() is True         # kilit_tamam + surekli >=3 korundu
+    # tekrar say -> surekli devam eder (sifirlanmadi)
+    out, t = _besle(kd, _hedef(), 0.5, t0=t)
+    assert kd.surekli_kilit_sn > surekli_once
+
+
+def test_kacak_tolerans_uzun_sifirlar():
+    # Uzun kacak (>0.5 sn tolerans) KESINTISIZ sayaci SIFIRLAR.
+    kd = KilitDurumu()
+    _, t = _besle(kd, _hedef(), 3.5)
+    assert kd.surekli_kilit_sn >= 3.0
+    out, t = _besle(kd, _hedef(cx_n=0.9), 0.8, t0=t)   # 0.8 sn > 0.5 tolerans
+    assert kd.surekli_kilit_sn == 0.0, "uzun kacak surekli'yi SIFIRLAR"
+    assert kd.angajman_hazir() is False
+
+
+def test_kacak_tolerans_kumulatif_bozmaz():
+    # %5 kare kacagi kumulatif sayaci "bozmaz": kacak kareler DUSURMEZ, yalniz
+    # eklenmez -> kilit biraz gec ama olusur (pencere ici birikim korunur).
+    kd = KilitDurumu()
+    # 5.5 sn say arasinda serpistirilmis kisa kacaklar -> kumulatif yine >=5 olur
+    t = 0.0
+    for blok in range(12):
+        _, t = _besle(kd, _hedef(), 0.5, t0=t)          # 0.5 sn say
+        _, t = _besle(kd, _hedef(cx_n=0.9), 0.05, t0=t) # 0.05 sn kacak (%~9 ama kisa)
+    assert kd.kilit_tamam is True, "serpistirilmis kisa kacak kilidi engellemez"
+
+
+def test_engel_teshisi():
+    # Kilit tamamlanamazsa hangi kosulun engel oldugu sayilir (teshis).
+    kd = KilitDurumu()
+    out, _ = _besle(kd, _hedef(cx_n=0.85), 3.0)        # hep AV disi yatay
+    assert out["engel"] == "AV_disi_yatay"
+    oz = kd.engel_ozeti()
+    assert oz and "AV_disi_yatay" in oz and oz["AV_disi_yatay"] > 10
+    # farkli engeller ayrik sayilir
+    kd2 = KilitDurumu()
+    _besle(kd2, _hedef(kaplama=0.02), 1.0)            # kaplama dusuk
+    _besle(kd2, _hedef(durum="TENTATIVE"), 1.0, t0=1.0)  # track onaysiz
+    oz2 = kd2.engel_ozeti()
+    assert "kaplama_dusuk" in oz2 and "track_onaysiz" in oz2
+
+
 def test_sifirla():
     kd = KilitDurumu()
     _besle(kd, _hedef(), 5.5)

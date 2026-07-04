@@ -34,6 +34,14 @@ class KilitCfg:
     PENCERE_SN = 10.0           # kayan pencere
     KUMULATIF_HEDEF_SN = 5.0    # kilit_tamam esigi
     SUREKLI_ANGAJMAN_SN = 3.0   # angajman on sarti (kesintisiz)
+    # KARE KACAGI TOLERANSI (sartname): kisa kaclar (blur/tek-kare parazit/coast
+    # sicramasi) KESINTISIZ (surekli) sayaci BOZMAZ. Ardisik kacak SURESI bu esigi
+    # gecmedikce surekli DONAR (sifirlanmaz, o kare de eklenmez); gecerse sifirlanir.
+    # %5 kare ~ 10 sn pencerenin %5'i = 0.5 sn. Kumulatif zaten toleranslidir (kacak
+    # kareler dusurmez, yalniz eklenmez). "Tolerans pencere SINIRLARINDA gecerli
+    # DEGIL": 10 sn kayan pencerenin eski frame'leri her halukarda dusurulur (pencere
+    # mekanigi; tolerans bunu ETKILEMEZ) -> kacaga ragmen pencere disi sayilmaz.
+    KACAK_TOLERANS_SN = 0.5
 
 
 class KilitDurumu:
@@ -49,6 +57,8 @@ class KilitDurumu:
         self.kilit_tamam = False     # kenar-tetikli (bir kez)
         self._son_t = None
         self._son_sayan = False
+        self._kacak_ardisik = 0.0    # ardisik kacak (saymayan) suresi (tolerans icin)
+        self._engel_sayac = {}       # kilit tamamlanamazsa: hangi kosul kac kez engel
 
     def sifirla(self):
         self._pencere.clear()
@@ -57,28 +67,37 @@ class KilitDurumu:
         self.kilit_tamam = False
         self._son_t = None
         self._son_sayan = False
+        self._kacak_ardisik = 0.0
+        self._engel_sayac = {}
+
+    def engel_ozeti(self):
+        """Kilit tamamlanamadiysa: en cok hangi kosul engel oldu (teshis)."""
+        if not self._engel_sayac:
+            return None
+        return dict(sorted(self._engel_sayac.items(), key=lambda kv: -kv[1]))
 
     def _sayar_mi(self, hedef, W, H, conf_esik):
-        """Bu frame kilit sayacinda sayilir mi? (tum kosullar)."""
+        """Bu frame kilit sayacinda sayilir mi? (sayan, engel). engel: sayilmadiysa
+        HANGI kosulun engel oldugu (5 kosuldan; kilit tamamlanamazsa teshis)."""
         if hedef is None or W is None or H is None or W <= 1 or H <= 1:
-            return False
+            return False, "hedef_yok"
         if not hedef.get("tespit_mi"):
-            return False             # coast: kilit sayilmaz
+            return False, "coast"                # olcum yok (bbox tahmini)
         if hedef.get("track_durumu") != "CONFIRMED":
-            return False
+            return False, "track_onaysiz"        # TENTATIVE/LOST
         if float(hedef.get("conf", 0.0)) < conf_esik:
-            return False
+            return False, "dusuk_conf"
         cx_n = float(hedef["cx"]) / W
         cy_n = float(hedef["cy"]) / H
         c = self.cfg
         if not (c.AV_YATAY[0] <= cx_n <= c.AV_YATAY[1]):
-            return False
+            return False, "AV_disi_yatay"        # merkez yatayda AV disinda
         if not (c.AV_DIKEY[0] <= cy_n <= c.AV_DIKEY[1]):
-            return False
+            return False, "AV_disi_dikey"
         kaplama = (float(hedef["w"]) * float(hedef["h"])) / (W * H)
         if kaplama < c.KAPLAMA_ESIK:
-            return False
-        return True
+            return False, "kaplama_dusuk"        # hedef cok uzak/kucuk
+        return True, None
 
     def adim(self, hedef, W, H, t, conf_esik):
         """Bir algi frame'i isle. hedef: AlgiCiktisi.hedef | None. t: sn (algi
@@ -89,7 +108,9 @@ class KilitDurumu:
         if dt < 0:
             dt = 0.0
         self._son_t = t
-        sayan = self._sayar_mi(hedef, W, H, conf_esik)
+        sayan, engel = self._sayar_mi(hedef, W, H, conf_esik)
+        if engel is not None:
+            self._engel_sayac[engel] = self._engel_sayac.get(engel, 0) + 1
 
         # kayan pencere: sayan-frame surelerini ekle, 10 sn'den eskiyi at
         if sayan and dt > 0:
@@ -101,11 +122,17 @@ class KilitDurumu:
         if self._kumulatif < 0:
             self._kumulatif = 0.0
 
-        # kesintisiz sayac: sayan ise +dt, degilse sifirla
+        # kesintisiz sayac + KARE KACAGI TOLERANSI: sayan ise +dt (kacak sifir);
+        # saymayan ise ardisik kacak biriktir -> tolerans altinda surekli DONAR
+        # (sifirlanmaz, eklenmez), tolerans asilinca sifirlanir.
         if sayan:
             self.surekli_kilit_sn += dt
+            self._kacak_ardisik = 0.0
         else:
-            self.surekli_kilit_sn = 0.0
+            self._kacak_ardisik += dt
+            if self._kacak_ardisik > self.cfg.KACAK_TOLERANS_SN:
+                self.surekli_kilit_sn = 0.0
+            # else: surekli DONAR (kisa blur/parazit kilidi dusurmez)
 
         # kilit_tamam: kumulatif >=5 sn ilk kez -> kenar tetik
         yeni_kilit = False
@@ -114,7 +141,7 @@ class KilitDurumu:
             yeni_kilit = True
 
         self._son_sayan = sayan
-        return {"sayan": sayan,
+        return {"sayan": sayan, "engel": engel,
                 "kumulatif_kilit_sn": self._kumulatif,
                 "surekli_kilit_sn": self.surekli_kilit_sn,
                 "kilit_tamam": self.kilit_tamam,

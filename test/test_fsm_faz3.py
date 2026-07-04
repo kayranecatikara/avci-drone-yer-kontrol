@@ -150,13 +150,14 @@ def test_fsm_kesintili_kilit_bildirde_bekler():
     b.durum = "GORSEL_GUDUM"
     tt = 0.0
     durumlar = []
-    # Faz 1: her 1 sn'de 0.85 say + 0.15 kesinti -> kumulatif buyur, surekli kucuk
+    # Faz 1: her blokta 0.85 say + 0.6 kesinti (>0.5 tolerans -> surekli SIFIRLANIR)
+    # -> kumulatif buyur (kacak dusurmez), surekli hep <3 -> KILIT_BILDIR'de bekle.
     for blok in range(9):
         for _ in range(17):                      # 0.85 sn say (0.05*17)
             tt += 0.05
             b._faz3_kilit_fsm(_hedef(durum="CONFIRMED"), tt, np.array([0, 0, 5000.0]))
             durumlar.append(b.durum)
-        for _ in range(3):                       # 0.15 sn kesinti (AV disi -> saymaz)
+        for _ in range(12):                      # 0.6 sn kesinti (>tolerans -> surekli sifir)
             tt += 0.05
             b._faz3_kilit_fsm(_hedef(cx_n=0.9), tt, np.array([0, 0, 5000.0]))
             durumlar.append(b.durum)

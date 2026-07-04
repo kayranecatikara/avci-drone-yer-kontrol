@@ -85,17 +85,47 @@ def main():
     sonuc = model.train(data=arg.data, epochs=arg.epochs, imgsz=arg.imgsz,
                         batch=arg.batch, task="pose")
     # en iyi agirligi models/'a anlamli adla kopyala
+    best = None
     try:
         save_dir = getattr(sonuc, "save_dir", None) or model.trainer.save_dir
         best = os.path.join(str(save_dir), "weights", "best.pt")
         if os.path.isfile(best):
             shutil.copy2(best, hedef)
             print("[EGITIM] En iyi agirlik kopyalandi -> %s" % hedef)
-            print("[EGITIM] Registry'de gorunmesi icin arayuzde '↻ Tara'.")
+            # yaninda yaml (registry per-model config): sema + aciklama
+            try:
+                yml = os.path.splitext(hedef)[0] + ".yaml"
+                with open(yml, "w", encoding="utf-8") as f:
+                    f.write("imgsz: %d\nsema: kuyruk_ucu\n"
+                            "aciklama: pose fine-tune %s (epochs=%d)\n"
+                            % (arg.imgsz, os.path.basename(arg.data), arg.epochs))
+                print("[EGITIM] Per-model yaml yazildi -> %s" % yml)
+            except Exception:
+                pass
         else:
             print("[EGITIM][UYARI] best.pt bulunamadi: %s" % best)
     except Exception as e:
         print("[EGITIM][UYARI] cikti kopyalanamadi: %s" % e)
+
+    # VAL: mAP raporu (yeni modelin PnP'yi besleyebilme kalitesinin ilk sayisi)
+    try:
+        print("\n[EGITIM] VAL (mAP) hesaplaniyor...")
+        m2 = YOLO(hedef if os.path.isfile(hedef) else (best or arg.agirlik))
+        metr = m2.val(data=arg.data, imgsz=arg.imgsz, task="pose")
+        box = getattr(metr, "box", None)
+        pose = getattr(metr, "pose", None)
+        print("[EGITIM] === VAL RAPORU ===")
+        if box is not None:
+            print("[EGITIM] box  mAP50=%.3f mAP50-95=%.3f"
+                  % (getattr(box, "map50", 0.0), getattr(box, "map", 0.0)))
+        if pose is not None:
+            print("[EGITIM] pose mAP50=%.3f mAP50-95=%.3f (keypoint kalitesi)"
+                  % (getattr(pose, "map50", 0.0), getattr(pose, "map", 0.0)))
+        print("[EGITIM] Not: asil kabul PnP-uygun oran (kosu_yonetici pnp-test);")
+        print("           mAP egitim-ici metrik, sim'de gercek kalite olculur.")
+    except Exception as e:
+        print("[EGITIM][UYARI] val hesaplanamadi: %s" % e)
+    print("\n[EGITIM] BITTI. Registry'de gorunmesi icin arayuzde '↻ Tara' -> Yukle.")
     return 0
 
 
