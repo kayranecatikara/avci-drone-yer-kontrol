@@ -109,11 +109,12 @@ class AlgiHatti:
         # 3) TAKIP (ByteTrack + CMC) -> onayli track
         hedef = self.takipci.guncelle(tespitler, dt, H_cmc)
 
-        # 4) PnP (FAZ 2; hedef keypoints'i varsa) — opsiyonel
+        # 4) PnP (FAZ 2; hedef keypoints'i varsa) — opsiyonel. t verilir ki
+        # oryantasyon low-pass'i algi timestamp'iyle calissin.
         pnp = None
         if self._pnp is not None and hedef is not None and hedef.get("keypoints"):
             try:
-                pnp = self._pnp.kestir(hedef["keypoints"], attitude, W, H)
+                pnp = self._pnp.kestir(hedef["keypoints"], attitude, W, H, t)
             except Exception:
                 pnp = None
 

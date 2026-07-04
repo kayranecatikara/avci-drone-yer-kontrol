@@ -5,6 +5,18 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 FAZ 2 — pose modeli şema keşfi (2026-07-04, metadata):**
+> `models/yolo26m_pose_best.pt`: task=pose, **kpt_shape=[6,3]** (6 keypoint, PnP için
+> ideal), tek sınıf 'talon', dataset `talon_v10` (Colab `/content/datasets/`; repoda
+> YOK). **flip_idx TANIMLI DEĞİL** (model.yaml'da None) → yatay-flip augmentation
+> sol/sağ keypoint çiftlerini yer değiştirmez; eğitim iskeletinde ve arayüzde kalıcı
+> uyarı. **Keypoint SIRASI metadata'da yok** (sadece sınıf adı) → görsel teyit ŞART
+> (FAZ 2 sim doğrulamasında: model tahminlerini gerçek karede çizip 3D tablo sırasıyla
+> eşle). PnP object-points seti şema-parametreli (`sema: kuyruk_ucu | motor`); kullanılan
+> origin (AM = tablo referans merkezi) tvec referansını belirler, çıktıya yazılır.
+> Detection modelleri (3 adet: best.pt aktif, bbox_det_30haziran, best_aircraft_yolo11m)
+> + bu pose modeli registry'den kıyaslanacak (hepsi "kalitesiz", yeniler eğitilecek).
+
 > **🔔 FAZ 1 — CMC işaret testi GEÇTİ (2026-07-04, uçuşlu tur):**
 > gyro-CMC'nin sim attitude konvansiyonuyla tutarlılığı canlı doğrulandı.
 > Yöntem (YOLO'suz, truth reproj hedef pikseli; avcıya yaw osilasyonu): ardışık
