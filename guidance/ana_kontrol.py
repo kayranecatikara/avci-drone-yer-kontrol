@@ -90,6 +90,10 @@ _LOG_COLS = [
     "thr_raw", "pitch_raw", "roll_raw", "yaw_raw", "thr_cmd", "pitch_cmd", "roll_cmd", "yaw_cmd",
     # GORSEL GUDUM (VISUAL fazi): normalize bbox-merkez hatasi + gordu/conf/alan
     "vis_ex", "vis_ey", "vis_gordu", "vis_conf", "vis_area",
+    # FAZ 3/4: takip + kilit sayaci + PnP + APN/OIPN + FSM
+    "track_id", "track_durumu", "tespit_mi", "kumulatif_kilit_sn", "surekli_kilit_sn",
+    "pnp_gecerli", "reproj_err", "phi_T", "a_PN", "a_APN_terim", "a_OIPN_terim",
+    "beta", "fsm_durum",
 ]
 
 
@@ -351,12 +355,14 @@ class AvciKontrol:
         self.kilit = KilitDurumu()      # sartname 6.1.4 sayaci (GORSEL_GUDUM'da isler)
         self.hakem = HakemIstemci()     # kilit paketi + telemetri (stub; jsonl log)
         self.oipn_acik = True           # OIPN anahtari (arayuz; pose gecersizken zaten pasif)
+        self.oipn_beta = GudumCfg.BETA  # OIPN feedforward katsayisi (canli slider)
         # Algi snapshot (server AlgiCiktisi'ndan yazar): PnP + turevler. FAZ 3 guduum
         # bunlari tuketir; yoksa (pose'suz) OIPN pasif -> IBVS fallback (regresyon yok).
         self._algi_pnp = None           # {gecerli, phi_T, mesafe, rel_konum_dunya, ...} | None
         self._algi_lam_dot = 0.0        # LOS acisal hizi (rad/s; algi timestamp'iyle)
         self._algi_Vc = 0.0             # kapanma vekili (1/s)
         self._son_kilit_bilgi = {}      # arayuz/log icin son kilit sayac ciktisi
+        self._son_gudum = {}            # son APN/OIPN bilesenleri (CSV/panel)
 
     # ----------------------------------------------------------------
     #  Gorev durumunu TAZE baslat (yeni filtre + FAZ-1 sifirlama; soft-start).
@@ -667,12 +673,31 @@ class AvciKontrol:
             "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
             "vis_ex": self.ibvs.ex_f, "vis_ey": self.ibvs.ey_f,
             "vis_gordu": 1 if tespit is not None else 0,
+            "fsm_durum": self.durum, "beta": self.oipn_beta,
         }
         if tespit is not None:
             d["vis_conf"] = float(tespit.get("conf", 0.0))
             W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
             if W > 1 and H > 1:
                 d["vis_area"] = (float(tespit["w"]) * float(tespit["h"])) / (W * H)
+            d["track_id"] = tespit.get("track_id")
+            d["track_durumu"] = tespit.get("track_durumu")
+            d["tespit_mi"] = (1 if tespit.get("tespit_mi") else 0)
+        kb = self._son_kilit_bilgi
+        if kb:
+            d["kumulatif_kilit_sn"] = kb.get("kumulatif_kilit_sn")
+            d["surekli_kilit_sn"] = kb.get("surekli_kilit_sn")
+        pnp = self._algi_pnp
+        if pnp:
+            d["pnp_gecerli"] = (1 if pnp.get("gecerli") else 0)
+            if pnp.get("gecerli"):
+                d["reproj_err"] = pnp.get("reproj_err")
+                d["phi_T"] = pnp.get("phi_T")
+        g = self._son_gudum
+        if g:
+            d["a_PN"] = g.get("a_pn")
+            d["a_APN_terim"] = g.get("a_apn")
+            d["a_OIPN_terim"] = g.get("a_oipn")
         self._log("VISUAL", d)
 
     # ----------------------------------------------------------------
@@ -742,7 +767,8 @@ class AvciKontrol:
         los_yon = (rel[0] / d, rel[1] / d)
         r = apn_oipn(self._algi_lam_dot, self._algi_Vc, los_yon,
                      phi_T=pnp.get("phi_T"), V_T=(self.son_hiz[0] if self.son_hiz is not None else None),
-                     oipn_acik=self.oipn_acik)
+                     oipn_acik=self.oipn_acik, beta=self.oipn_beta)
+        self._son_gudum = r             # CSV/panel icin son APN/OIPN bilesenleri
         # APN+OIPN yatay ivmesini govde-yaw duzeltmesine cevir (kucuk katki; ivmeyi
         # A_MAX'a normalize edip yaw komutuna BETA agirlikli ekle). Isaret guduumde
         # kalibre; simdilik konservatif (yalniz yaw ince ayari, dikey/ileri IBVS'de).

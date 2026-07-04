@@ -495,6 +495,9 @@ def build_telemetry():
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
+        kilit_bilgi = dict(getattr(beyin, "_son_kilit_bilgi", {}) or {})
+        oipn_acik = bool(getattr(beyin, "oipn_acik", True))
+        oipn_beta = float(getattr(beyin, "oipn_beta", 0.3))
     j_info = {"durum": j_durum, "hazir": j_temiz is not None}
     if j_temiz is not None:
         j_info["temiz"] = {"x": j_temiz[0] * CM_TO_M,
@@ -524,6 +527,18 @@ def build_telemetry():
                    "tespit_mi": vis_tespit.get("tespit_mi")} if isinstance(vis_tespit, dict)
                   and vis_tespit.get("track_id") is not None else None),
         "pnp": (_pnp_ui_ozet(_son_pnp_ui)),        # None | {gecerli, mesafe, reproj_err, phi_T, psi_T}
+        # FAZ 4: kilit sayaci gostergesi + AV sinirlari + OIPN anahtari/beta
+        "kilit": {
+            "kumulatif_sn": kilit_bilgi.get("kumulatif_kilit_sn", 0.0),
+            "surekli_sn": kilit_bilgi.get("surekli_kilit_sn", 0.0),
+            "hedef_sn": 5.0, "pencere_doluluk": kilit_bilgi.get("pencere_doluluk", 0.0),
+            "sayan": bool(kilit_bilgi.get("sayan", False)),
+            "kilit_tamam": bool(kilit_bilgi.get("kilit_tamam", False)),
+            "av_yatay": [0.25, 0.75], "av_dikey": [0.10, 0.90], "kaplama_esik": 0.06,
+        },
+        "oipn": {"acik": oipn_acik, "beta": oipn_beta},
+        # HEDEF GNSS: GORSEL ailesinde (GORSEL_GUDUM/KILIT_BILDIR/ANGAJMAN) KULLANILMIYOR
+        "gnss_kullaniliyor": (j_durum in ("ARAMA", "TAKIP")),
     }
     # MODEL REGISTRY durumu + canli metrikler (arayuz paneli)
     if model_yon is not None:
@@ -678,6 +693,19 @@ class Handler(BaseHTTPRequestHandler):
                     with beyin_lock:
                         _ok, msg = dev_yardimci.uygula(beyin, m)
             # <<< DEV-ONLY <<<
+            elif cmd == "oipn":
+                # OIPN anahtari + beta (canli tune). Yalniz gorsel guduum katkisini
+                # etkiler; PnP gecersizken zaten pasif (regresyon yok).
+                with beyin_lock:
+                    if "acik" in data:
+                        beyin.oipn_acik = bool(data.get("acik"))
+                    if "beta" in data:
+                        try:
+                            beyin.oipn_beta = max(0.0, min(1.0, float(data.get("beta"))))
+                        except Exception:
+                            pass
+                    msg = "OIPN: %s (beta=%.2f)" % (
+                        "ACIK" if beyin.oipn_acik else "KAPALI", beyin.oipn_beta)
             payload = json.dumps({"ok": True, "msg": msg,
                                   "gorev_aktif": gorev_aktif,
                                   "manuel_aktif": manuel_aktif})

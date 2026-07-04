@@ -44,7 +44,7 @@ def _birim(vx, vy):
 
 
 def apn_oipn(lam_dot, Vc, los_yon, a_T=None, phi_T=None, V_T=None,
-            oipn_acik=True, cfg=None):
+            oipn_acik=True, cfg=None, beta=None):
     """APN + OIPN ivme komutu (dunya yatay duzlem, cm/s^2).
 
     lam_dot : LOS acisal hizi (rad/s; algi hattindan)
@@ -54,9 +54,11 @@ def apn_oipn(lam_dot, Vc, los_yon, a_T=None, phi_T=None, V_T=None,
     phi_T   : hedef roll (derece; PnP'den) | None -> OIPN 0
     V_T     : hedef yer hizi (cm/s; fusion'dan) | None -> OIPN 0
     oipn_acik: OIPN terimi devrede mi (arayuz anahtari)
+    beta    : OIPN feedforward katsayisi (canli-tune; None -> cfg.BETA)
     -> {a_cmd:(ax,ay), a_pn, a_apn, a_oipn, kullanildi}
     """
     c = cfg or GudumCfg()
+    b_oipn = c.BETA if beta is None else float(beta)
     ux, uy = los_yon
     # LOS'a dik birim (saga-dik): (uy, -ux). PN ivmesi bu yonde, buyukluk N·Vc·λ̇.
     px, py = uy, -ux
@@ -80,7 +82,7 @@ def apn_oipn(lam_dot, Vc, los_yon, a_T=None, phi_T=None, V_T=None,
         # hedef hiz yonu = -Vc·LOS + ... (yaklasik LOS; V_T buyuklugu). Basit:
         # hedef hiz vektorune dik yatay = LOS'a dik (yakin geometri) -> px,py.
         a_ff = c.G * math.tan(math.radians(phi_T))
-        a_oipn_mag = c.BETA * a_ff
+        a_oipn_mag = b_oipn * a_ff
         ax += a_oipn_mag * px
         ay += a_oipn_mag * py
         kullanildi = "APN+OIPN"

@@ -85,6 +85,18 @@
   .mp-metrik b{color:var(--text)}
   .mp-uyari{color:var(--warn);font-size:10px;margin-top:3px}
 
+  /* ---- OIPN paneli ---- */
+  .oipn-panel{background:var(--panel2);border:1px solid #6b4a9a;border-radius:8px;
+    padding:8px 11px;margin:-2px 0 10px}
+  .op-row{display:flex;justify-content:space-between;align-items:center}
+  .op-lbl{font-size:11px;color:var(--muted)}
+  .op-lbl b{color:var(--text);font-family:Consolas,monospace}
+  .op-toggle{padding:3px 12px;background:#13202b;color:var(--accent);border:1px solid var(--accent);
+    border-radius:5px;font-size:11px;font-weight:700;cursor:pointer}
+  .op-toggle.kapali{background:var(--panel);color:var(--muted);border-color:var(--border)}
+  .op-slider{margin-top:7px}
+  .op-slider input[type=range]{width:100%;accent-color:#c46bff;cursor:pointer;height:16px}
+
   /* ---- Güdüm pipeline switch (test: OTO / GPS / GÖRSEL) ---- */
   .gudum-switch{margin:2px 0 10px}
   .gudum-switch .gs-label{font-size:10px;letter-spacing:1px;color:var(--muted);
@@ -231,6 +243,19 @@
           </div>
         </div>
 
+        <!-- OIPN anahtarı + β slider (canlı tune; PnP geçersizken zaten pasif) -->
+        <div class="oipn-panel">
+          <div class="op-row">
+            <span class="op-lbl">🧭 OIPN (yönelim-öngörülü)</span>
+            <button id="oipnBtn" class="op-toggle" onclick="oipnToggle()">AÇIK</button>
+          </div>
+          <div class="op-slider">
+            <span class="op-lbl">β <b id="betaVal">0.30</b></span>
+            <input id="betaSlider" type="range" min="0" max="1" step="0.05" value="0.30"
+                   oninput="betaAyarla(this.value)">
+          </div>
+        </div>
+
         <!-- CANLI TUNE paneli: slider'lar Cfg'yi aninda degistirir (server restart YOK) -->
         <div id="tunePanel" class="tune-panel" style="display:none">
           <div class="tnote"><b>Sırayla 1→6 dene.</b> Bir slider'ı oynat → drone <b>anında</b> tepki verir.
@@ -296,6 +321,18 @@
           <div class="row"><span class="k">İrtifa</span><span class="v mono" id="dalt">—</span></div>
           <div class="row"><span class="k">Hız</span><span class="v mono" id="dspd">—</span></div>
           <div class="row"><span class="k">Yön (Yaw)</span><span class="v mono" id="dyaw">—</span></div>
+        </div>
+
+        <!-- 🔒 KİLİT SAYACI (§6.1.4): kümülatif/5 + 10 sn pencere doluluk + kaplama -->
+        <div class="card" style="border-color:#3a2050">
+          <div class="title" style="color:#c46bff">🔒 KİLİT SAYACI</div>
+          <div class="row"><span class="k">Kümülatif</span><span class="v mono" id="kilitKum">—</span></div>
+          <div style="height:9px;background:var(--panel);border-radius:5px;overflow:hidden;margin:4px 0 8px">
+            <div id="kilitBar" style="height:100%;width:0%;background:linear-gradient(90deg,#c46bff,#25e0a0);transition:.2s"></div>
+          </div>
+          <div class="row"><span class="k">Kesintisiz</span><span class="v mono" id="kilitSurekli">—</span></div>
+          <div class="row"><span class="k">Sayan (bu kare)</span><span class="v mono" id="kilitSayan">—</span></div>
+          <div class="row"><span class="k">Durum</span><span class="v mono" id="fsmDurum">—</span></div>
         </div>
 
         <div class="card target">
@@ -374,6 +411,19 @@
   }
   function modelYukle(){ const s=$("modelSec"); if(s.value) modelKomut("yukle", s.value); }
   function modelTara(){ modelKomut("tara"); }
+
+  // ===== OIPN anahtarı + β slider (canlı tune) =====
+  let oipnAcik = true;
+  function oipnGonder(body){
+    fetch("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({cmd:"oipn"}, body))})
+      .then(r=>r.json()).then(d=>{ $("leftStatus").textContent=d.msg||"OIPN"; }).catch(()=>{});
+  }
+  function oipnToggle(){ oipnAcik=!oipnAcik; oipnGonder({acik:oipnAcik}); vurgulaOipn(); }
+  function betaAyarla(v){ $("betaVal").textContent=Number(v).toFixed(2); oipnGonder({beta:parseFloat(v)}); }
+  function vurgulaOipn(){
+    const b=$("oipnBtn"); b.textContent=oipnAcik?"AÇIK":"KAPALI"; b.classList.toggle("kapali",!oipnAcik);
+  }
   function modelPaneliGuncelle(mdl){
     if(!mdl){ $("mpRozet").textContent="—"; $("mpMetrik").textContent="(görev başlat: model yüklenir)"; return; }
     const du = mdl.durum||{}, liste = mdl.liste||[], mx = mdl.metrik||{};
@@ -602,6 +652,18 @@
     if(camEl.style.display!=="block" || !gs) return; // paylasim yoksa / veri yoksa temiz birak
     const rc=_icerikRect(camEl);
     const mcx=rc.x+rc.w/2, mcy=rc.y+rc.h/2;
+    // AV (Angajman Volumu) çerçevesi: kilit sayacının merkez-kabul bandı (yatay %25-75,
+    // dikey %10-90). Hedef merkezi bu çerçeve içindeyken + kaplama yeterken sayaç işler.
+    const kl=(gs.kilit)||null;
+    if(kl && kl.av_yatay){
+      const ax1=rc.x+kl.av_yatay[0]*rc.w, ax2=rc.x+kl.av_yatay[1]*rc.w;
+      const ay1=rc.y+kl.av_dikey[0]*rc.h, ay2=rc.y+kl.av_dikey[1]*rc.h;
+      ctx.strokeStyle=kl.sayan?"rgba(37,224,160,.75)":"rgba(196,107,255,.5)";
+      ctx.lineWidth=1.5; ctx.setLineDash([8,5]);
+      ctx.strokeRect(ax1,ay1,ax2-ax1,ay2-ay1); ctx.setLineDash([]);
+      ctx.font="10px monospace"; ctx.fillStyle=kl.sayan?"rgba(37,224,160,.9)":"rgba(196,107,255,.7)";
+      ctx.fillText("AV"+(kl.sayan?" ✓ sayıyor":""), ax1+4, ay1+12);
+    }
     ctx.strokeStyle="rgba(120,200,255,.7)"; ctx.lineWidth=1.5;      // goruntu merkezi +
     ctx.beginPath(); ctx.moveTo(mcx-12,mcy); ctx.lineTo(mcx+12,mcy);
     ctx.moveTo(mcx,mcy-12); ctx.lineTo(mcx,mcy+12); ctx.stroke();
@@ -642,11 +704,13 @@
     if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
       ctx.fillStyle="#8aa"; ctx.fillText("KİLİT: "+(gs.pos_count||0)+"/"+gs.n_lock, rc.x+10, rc.y+40);
     }
-    const kapali=!!gs.gps_kesildi;                                  // GPS rozeti (sag-ust)
-    const bt = kapali ? "GPS GÜDÜMÜ: KAPALI" : "GPS GÜDÜMÜ: AÇIK";
+    // HEDEF GNSS rozeti (sag-ust): GORSEL fazında yeşil "KULLANILMIYOR" (yarışma
+    // videosu kanıt paneli — GNSS bağımlılığının azaldığının göstergesi).
+    const gnssKul = (gs.gnss_kullaniliyor !== false);              // undefined -> kullanılıyor
+    const bt = gnssKul ? "HEDEF GNSS: KULLANILIYOR" : "HEDEF GNSS: KULLANILMIYOR ✓";
     const tw=ctx.measureText(bt).width, pad=8;
     const rx=rc.x+rc.w-tw-2*pad-10, ry=rc.y+10;
-    ctx.fillStyle = kapali ? "rgba(220,40,40,.9)" : "rgba(20,140,90,.85)";
+    ctx.fillStyle = gnssKul ? "rgba(150,110,30,.9)" : "rgba(20,150,90,.9)";
     ctx.fillRect(rx, ry, tw+2*pad, 24);
     ctx.fillStyle="#fff"; ctx.fillText(bt, rx+pad, ry+17);
   }
@@ -710,6 +774,23 @@
         $("pnpMes").innerHTML = '<small>'+sb+'</small>'; $("pnpReproj").textContent="—"; $("pnpAci").textContent="—";
       }
       modelPaneliGuncelle(gs.model);
+
+      // 🔒 Kilit sayacı paneli (§6.1.4)
+      const kl = gs.kilit;
+      if(kl){
+        $("kilitKum").innerHTML = f1(kl.kumulatif_sn)+' <small>/ '+f0(kl.hedef_sn)+' s</small>';
+        $("kilitBar").style.width = Math.min(100, 100*kl.kumulatif_sn/kl.hedef_sn)+"%";
+        $("kilitSurekli").innerHTML = f1(kl.surekli_sn)+' <small>s</small>'+
+          (kl.kilit_tamam?' <span style="color:var(--accent)">✓ KİLİT</span>':'');
+        $("kilitSayan").innerHTML = kl.sayan
+          ? '<span style="color:var(--accent)">EVET</span>'
+          : '<span style="color:var(--muted)">hayır</span>';
+      }
+      $("fsmDurum").textContent = gs.durum || "—";
+      // OIPN paneli (server durumuyla eşitle)
+      if(gs.oipn){ oipnAcik=gs.oipn.acik; vurgulaOipn();
+        if(document.activeElement!==$("betaSlider")){
+          $("betaSlider").value=gs.oipn.beta; $("betaVal").textContent=Number(gs.oipn.beta).toFixed(2); } }
 
       if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i sunucudaki moda eşitle
       // >>> DEV-ONLY >>>
