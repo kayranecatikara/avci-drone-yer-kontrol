@@ -15,6 +15,7 @@ Sonra tarayicida:   http://127.0.0.1:8000
 Kapatmak icin:      Ctrl + C
 """
 
+import ctypes
 import io
 import json
 import os
@@ -142,8 +143,41 @@ if PENCERE_YAKALA_AKTIF:
     except Exception as _py_e:
         print("[SERVER] pencere_yakala yuklenemedi (%s) -> mss fallback." % _py_e)
 else:
-    print("[SERVER] pencere-yakalama KAPALI -> dedektor kare kaynagi mss "
-          "(oyun penceresi gorunur/kucultulmemis olmali).")
+    print("[SERVER] windows-capture KAPALI -> birincil kare kaynagi PrintWindow "
+          "(occlusion-proof, saf Win32; tarayici onde iken bile oyunu yakalar). "
+          "PrintWindow siyah donerse mss'e duser.")
+
+
+# ----------------------------------------------------------
+#  PrintWindow kare kaynagi (occlusion-proof, saf Win32 -> bu makinede KARARLI;
+#  windows-capture GEREKMEZ). Tek monitorde arayuz oyunun onunde olsa bile dogru
+#  oyun karesini verir (mss'in "oyun onde olmali" sartini kaldirir). K sanity
+#  zinciriyle AYNI yakalama yolu -> kalibrasyon tutarli.
+# ----------------------------------------------------------
+_pw_hwnd_cache = {"hwnd": None}
+def _printwindow_grab_bgr():
+    """(kaynak_adi, BGR) | None. Oyun hwnd'sini coz (onbellekli; gecersizse yeniden
+    bul) + PrintWindow ile pencere icerigini yakala. windows-capture'a bagimli degil."""
+    try:
+        from detection.pencere_yakala import pencere_icerik_bgr, pencere_bul
+    except Exception:
+        return None
+    h = _pw_hwnd_cache["hwnd"]
+    gecerli = False
+    if h:
+        try:
+            gecerli = bool(ctypes.windll.user32.IsWindow(int(h)))
+        except Exception:
+            gecerli = False
+    if not gecerli:
+        _, h = pencere_bul(GAME_TITLE_HINTS)     # SUREC-ADI oncelikli (dogru pencere garantisi)
+        _pw_hwnd_cache["hwnd"] = h
+    if not h:
+        return None
+    bgr = pencere_icerik_bgr(h)
+    if bgr is None:
+        return None
+    return "PrintWindow (pencere icerigi; occlusion-proof)", bgr
 
 
 def _olcekle_bgr(bgr):
@@ -185,17 +219,28 @@ def _mss_grab_bgr():
 def grab_frame_bgr():
     """(BGR kare, W, H) doner — hem YOLO dedektoru hem FPV bunu kullanir.
     HER ZAMAN kare uretmeye calisir (fallback zinciri):
-      1) windows-capture canli karesi (occlusion-proof; oyun arkada olsa bile dogru)
-      2) mss oyun-penceresi bolgesi (oyun goruunur/onde ise)
-      3) mss tum ekran (son care; ayna riski)
-    Yalnizca mss de basarisizsa (None, 0, 0)."""
+      1) windows-capture canli karesi (varsa; bu makinede KAPALI)
+      2) PrintWindow pencere-icerigi (occlusion-proof, saf Win32; BIRINCIL yol —
+         tarayici oyunun onunde olsa bile dogru oyun karesi)
+      3) mss oyun-penceresi bolgesi (oyun goruunur/onde ise)
+      4) mss tum ekran (son care; ayna riski)
+    Yalnizca hepsi basarisizsa (None, 0, 0)."""
     pym = pencere_yakala_motoru
     if pym is not None and pym.hazir and pym.calisiyor():
         bgr = pym.get_latest_bgr()
         if bgr is not None:
             _fpv_log("windows-capture (pencere icerigi)")
             return _olcekle_bgr(bgr)
-    # Fallback: mss (windows-capture yok / henuz kare uretmedi / pencere bulunamadi)
+    # 2) PrintWindow (occlusion-proof; windows-capture kapali olsa bile calisir).
+    #    Tek monitorde arayuz onde iken mss'in tarayiciyi/aynayi yakalamasini onler.
+    try:
+        pw = _printwindow_grab_bgr()
+    except Exception:
+        pw = None
+    if pw is not None:
+        _fpv_log(pw[0])
+        return _olcekle_bgr(pw[1])
+    # 3-4) Fallback: mss (PrintWindow siyah dondu / pencere bulunamadi)
     try:
         kaynak, bgr = _mss_grab_bgr()
         _fpv_log(kaynak)

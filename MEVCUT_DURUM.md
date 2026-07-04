@@ -33,6 +33,22 @@
 > ## 🎮 TEK SİM OTURUMU PLANI (pose'suz; taze oyun başlatınca, tek oturum)
 > Menü: **PLAY (fare) → FLY (fare) → E (klavye)**. Oyun art arda arm sonrası zombileşir →
 > her uçuşlu turdan sonra kosu_yonetici otomatik restart eder (ya da elle yeniden başlat).
+>
+> **YAKALAMA YOLU (prova ön koşulu):** windows-capture bu makinede KAPALI; kare kaynağı
+> artık **PrintWindow** (occlusion-proof, saf Win32) — tarayıcı oyunun önünde olsa bile
+> doğru oyun karesini yakalar (tek monitör prova için şart; mss son çare). Konsolda
+> `[FPV] goruntu kaynagi -> PrintWindow ...` görülmeli; `mss (TUM EKRAN...)` görülürse
+> oyun penceresi bulunamamış demektir (oyun açık/PLAY modunda mı bak).
+>
+> **KAYNAK (bu koşu):** hedef kaynağı **GERÇEK (DEV)** ile uçulur (üretim filtresi henüz
+> devrede değil; midcourse bozulmamış konumla). Arayüzde kırmızı GERÇEK (DEV) bandı çıkar,
+> CSV `hedef_kaynak=gercek`. **Geçiş korumaları HAZIR** (dev_truth.uygula): (a) birim/eksen
+> tutarlılık kapısı — ham/filtre/truth cm logu, |truth|/|ham| 0.5–2.0 dışı veya |fark|>300 m
+> → geçiş RED; (b) hız kelepçesi V_KELEPCE=4000 cm/s + geçişte hız sıfırdan başlar (lead
+> patlaması yok); (c) DEV kaynakta lead'siz/anlık konum kullanılır → dikey aşım/tırmanış yok.
+> **Kalem 3 (bozuk GNSS) bu koşuda İŞARETLENMEZ** → teslim-videosu koşusunda (kaynak=FİLTRE)
+> doğrulanır (`docs/video_prova_kontrol.md` DEV notu).
+>
 > 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
 >    İzle: FSM durumu ARAMA→TAKIP ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
 >    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).

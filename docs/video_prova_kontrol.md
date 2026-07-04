@@ -8,7 +8,7 @@
 |---|---|---|---|
 | 1 | Simülasyon ekranı | Orta panel FPV (mss/PrintWindow oyun karesi) | ☐ |
 | 2 | Drone + hedef saha konumu | Sağ panel: 🛸 AVCI (x/y/z) + 🎯 HEDEF (x/y/z) | ☐ |
-| 3 | Bozuk GNSS kullanımı çıktısı/arayüz | 🎯 HEDEF (ham GPS) + HAM GPS–AVCI mesafe + FPV **HEDEF GNSS** rozeti | ☐ |
+| 3 | Bozuk GNSS kullanımı çıktısı/arayüz | 🎯 HEDEF (ham GPS) + HAM GPS–AVCI mesafe + FPV **HEDEF GNSS** rozeti | ☐ ⚠️(bkz. DEV notu) |
 | 4 | Tespit anı | FPV bbox belirir + 🎯 TAKİP/PnP kartı doldu | ☐ |
 | 5 | bbox + merkez + hedef ID + takip durumu | FPV: yeşil bbox + merkez nokta + `#id DURUM`; sağ TAKİP kartı | ☐ |
 | 6 | Tracker aktif/pasif | TAKİP kartı `track durumu` (TENTATIVE/CONFIRMED/LOST); MODEL paneli | ☐ |
@@ -24,6 +24,17 @@
   eksen kaplama + AV çerçevesi FPV overlay'de). Kilit tamamlanamazsa `engel` alanı hangi
   koşulda takıldığını gösterir (video anlatımında "model şu an göremiyor" kanıtı).
 - **Otonomi:** manuel hedef seçimi YOK; tespit+tracking otonom (MODEL paneli + tespit anı).
+
+## ⚠️ DEV-kaynak prova koşusu notu (kalem 3)
+Bu FSM prova koşusu **hedef kaynağı = GERÇEK (DEV)** ile uçar (üretim filtresi
+İnovasyonlu J bu koşuda devrede DEĞİL; midcourse bozulmamış hedef konumuyla
+güdülür — amaç görsel hattı/FSM'i filtreden bağımsız doğrulamak). Sonuç:
+- **Kalem 3 (bozuk GNSS kullanımı) bu koşuda İŞARETLENMEZ** → drone bozuk GNSS
+  ile değil truth ile güdülüyor; "kullanım" kanıtlanamaz. Arayüzde kırmızı
+  **GERÇEK (DEV)** bandı görünür; CSV'ye `hedef_kaynak=gercek` yazılır.
+- Kalem 3, **teslim-videosu koşusunda** (kaynak = FİLTRE; İnovasyonlu J bozuk
+  GNSS'i temizler) doğrulanır — asıl "bozuk GNSS girdi + filtre" kanıtı orada.
+- Diğer 9 kalem (tespit/tracking/kilit/FSM/başarı) bu koşuda geçerli ve işaretlenir.
 
 ## Prova protokolü (FSM provası koşusunda)
 1. `python main.py` → tarayıcı → **Görev Başlat**.

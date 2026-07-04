@@ -14,6 +14,7 @@ lock altinda saklariz. get_latest_bgr() son BGR (H,W,3) kareyi doner (yoksa None
 ZARIF BOZULMA: windows-capture yoksa / pencere bulunamazsa hazir=False, get_latest_bgr=None
 -> server.py mss'e geri duser (mevcut davranis korunur, sistem cokmez).
 """
+import ctypes
 import threading
 
 
@@ -81,6 +82,69 @@ def pencere_bul(title_hints):
             continue                          # psutil yoksa baslik sonekiyle ele
         return t, hwnd
     return None, None
+
+
+# ============================================================
+#  PrintWindow pencere-ICERIGI yakalama (occlusion-proof, SAF Win32)
+# ============================================================
+# windows-capture (Windows.Graphics.Capture) bazi makinelerde (Win10 LTSC 19044)
+# KARARSIZ. Bu katman yalnizca GDI + PrintWindow kullanir (ek native kutuphane
+# YOK) -> kararli. Oyun BASKA PENCERELERIN (orn. tarayici) ARKASINDAYKEN bile
+# dogru kareyi verir -> tek monitorde arayuz onde iken sart. K sanity zinciri de
+# bu yolla olculdu (yakalama yolu tutarli). Basarisiz/siyah icerik -> None.
+class _BMIH(ctypes.Structure):
+    _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_long),
+                ("biHeight", ctypes.c_long), ("biPlanes", ctypes.c_uint16),
+                ("biBitCount", ctypes.c_uint16), ("biCompression", ctypes.c_uint32),
+                ("biSizeImage", ctypes.c_uint32), ("biXPelsPerMeter", ctypes.c_long),
+                ("biYPelsPerMeter", ctypes.c_long), ("biClrUsed", ctypes.c_uint32),
+                ("biClrImportant", ctypes.c_uint32)]
+
+
+def pencere_icerik_bgr(hwnd):
+    """PrintWindow (PW_CLIENTONLY|PW_RENDERFULLCONTENT) ile pencere ICERIGINI BGR
+    ndarray (H,W,3) doner. Oyun arkada/ortulu olsa bile dogru kare. Basarisiz veya
+    tumu-siyah icerik -> None (cagiran mss'e duser). SAF Win32 GDI; sim/veri izi yok."""
+    import ctypes
+    import numpy as np
+    try:
+        u32, g32 = ctypes.windll.user32, ctypes.windll.gdi32
+        r = (ctypes.c_long * 4)()
+        if not u32.GetClientRect(int(hwnd), ctypes.byref(r)):
+            return None
+        w, h = int(r[2] - r[0]), int(r[3] - r[1])
+        if w < 64 or h < 64:
+            return None
+        wdc = u32.GetDC(int(hwnd))
+        if not wdc:
+            return None
+        mdc = g32.CreateCompatibleDC(wdc)
+        bmp = g32.CreateCompatibleBitmap(wdc, w, h)
+        eski = g32.SelectObject(mdc, bmp)
+        try:
+            if not u32.PrintWindow(int(hwnd), mdc, 3):   # 1|2: CLIENTONLY|RENDERFULLCONTENT
+                return None
+            bi = _BMIH()
+            bi.biSize = ctypes.sizeof(_BMIH)
+            bi.biWidth = w
+            bi.biHeight = -h                             # negatif: satirlar yukaridan asagi
+            bi.biPlanes = 1
+            bi.biBitCount = 32
+            bi.biCompression = 0                         # BI_RGB
+            buf = ctypes.create_string_buffer(w * h * 4)
+            if g32.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bi), 0) != h:
+                return None
+            fr = np.frombuffer(buf, dtype=np.uint8).reshape(h, w, 4)[:, :, :3]
+            if float(fr.std()) < 1.0:                    # tumu siyah/tek renk -> icerik yok
+                return None
+            return fr.copy()
+        finally:
+            g32.SelectObject(mdc, eski)
+            g32.DeleteObject(bmp)
+            g32.DeleteDC(mdc)
+            u32.ReleaseDC(int(hwnd), wdc)
+    except Exception:
+        return None
 
 
 class PencereYakala:
