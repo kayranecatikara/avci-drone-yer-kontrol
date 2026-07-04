@@ -222,8 +222,15 @@ def fpv_jpeg():
 #  Oyun kapaliyken veya baglanti kopunca surekli yeniden dener.
 # ----------------------------------------------------------
 def connection_manager():
+    _conn_prev = None
     while True:
-        if not drone.is_connected():
+        c = drone.is_connected()
+        if c and _conn_prev != True:            # ilk basarili baglanma / yeniden baglanma
+            olay_ekle("iyi", "Oyuna baglanildi")
+        elif (not c) and _conn_prev == True:    # True -> False kenari (kopma)
+            olay_ekle("uyari", "Oyun baglantisi koptu")
+        _conn_prev = c
+        if not c:
             # Yeniden baglanmadan once eski baglantiyi temizle (cift baglanmayi onler)
             try:
                 drone.disconnect()
@@ -323,6 +330,193 @@ _gps_log_t0 = None
 _gps_log_son_yaz = 0.0
 
 
+# ============================================================
+#  GOREV OLAY GUNLUGU + GOREV IZLEYICI  (video isterleri 3/4/6/7/8/9/10)
+#  Bu blok GUDUME DOKUNMAZ: her sey beyin'in VAR OLAN alanlarindan
+#  kenar-tespitiyle (onceki tik <-> bu tik) turetilir. ana_kontrol.py ve
+#  gorsel_tespit.py DEGISMEZ. Kural 8 uyumu: sadece "durum degisti mi?".
+# ============================================================
+GNSS_KESINTI_S    = 1.0    # sn; hedef GPS paketi bu suredir yenilenmediyse KESINTI
+                           # (nominal 5 Hz -> 0.2 s; sartname kesintisi ~2 s -> 5x marj)
+VURUS_ESIK_M      = 3.0    # m; angajmanda mesafe bu esigin altina inerse VURUS (sim'de kalibre)
+BASARI_GECIKME_S  = 1.5    # sn; VURUS latch'inden sonra BASARI ilani
+TAKIP_TAM_KAYIP_S = Cfg.VIS_STALE_S + Cfg.VIS_LOST_TO_GPS_S   # 1.5 s; takip-ID kapanma esigi
+                           # (gudumun GPS'e donus penceresiyle AYNI -> tutarli anlatim)
+
+olay_lock = threading.Lock()          # YAPRAK kilit: tutulurken asla beyin_lock/SDK cagrisi YOK
+_olaylar  = deque(maxlen=400)         # {"id","t","sv","m"}
+_olay_id  = 0
+
+
+def olay_ekle(sv, mesaj):
+    """Gorev olayini gunluge ekle. sv: bilgi|iyi|uyari|kritik. Thread-safe (yaprak kilit).
+    Kilit sirasi tek yonlu (beyin_lock -> olay_lock) oldugundan deadlock imkansiz."""
+    global _olay_id
+    with olay_lock:
+        _olay_id += 1
+        _olaylar.append({"id": _olay_id, "t": time.time(), "sv": sv, "m": mesaj})
+    print("[OLAY] %s" % mesaj)         # konsol kaydi da videoyla tutarli kalsin
+
+
+# --- Izleyici durumu: YALNIZ kontrol thread'i yazar (tek-yazar); build_telemetry beyin_lock ile okur ---
+_takip = {"id": None, "sonraki": 1, "yeniden": 0, "aktif": False, "kayip_t": None}
+_gorev = {"faz": "HAZIR", "t0": None, "vurus": False, "basari": False,
+          "en_yakin_m": None, "vurus_t": None, "mesafe_kaynak": None}
+_izci = {"durum_prev": None, "handoff_prev": False, "kilit_ilan": False,
+         "angajman_ilan": False, "angajman_min": None, "iska_ilan": False,
+         "kesinti": False, "son_paket_t": None}
+
+
+def _gorev_sifirla(faz):
+    """Yeni gorev baslarken izleyici latch'lerini sifirla (basari banner'i dahil)."""
+    _takip.update(id=None, sonraki=1, yeniden=0, aktif=False, kayip_t=None)
+    _gorev.update(faz=faz, t0=time.time(), vurus=False, basari=False,
+                  en_yakin_m=None, vurus_t=None, mesafe_kaynak=None)
+    _izci.update(durum_prev=None, handoff_prev=False, kilit_ilan=False,
+                 angajman_ilan=False, angajman_min=None, iska_ilan=False)
+
+
+def _mesafe_olc():
+    """VURUS/BASARI icin DURUST mesafe (m): truth varsa gercek 3B, yoksa J-temiz kestirim.
+    HAM ASLA kullanilmaz (buyuk ham hata sahte vurus tetikler). -> (mesafe_m, kaynak) | (None, None)."""
+    truth = drone.get_debug_truth()
+    if truth.get("available"):
+        adx, ady, adz = truth["drone"]["position"]
+        tgx, tgy, tgz = truth["target"]["position"]
+        d = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
+        return d * CM_TO_M, "gercek"
+    if beyin.son_xy_anlik is not None and beyin.son_z_anlik is not None:
+        dp = drone.get_drone_location()
+        tx, ty, tz = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]), float(beyin.son_z_anlik)
+        d = ((dp[0] - tx) ** 2 + (dp[1] - ty) ** 2 + (dp[2] - tz) ** 2) ** 0.5
+        return d * CM_TO_M, "temiz"
+    return None, None
+
+
+def _yatay_mesafe_cm():
+    """Avci <-> hedef YATAY mesafe (cm): temiz kestirim, yoksa ham. Panel/angajman icin."""
+    dp = drone.get_drone_location()
+    if beyin.son_xy_anlik is not None:
+        tx, ty = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1])
+    elif beyin.son_ham is not None:
+        tx, ty = float(beyin.son_ham[0]), float(beyin.son_ham[1])
+    else:
+        return None
+    return ((dp[0] - tx) ** 2 + (dp[1] - ty) ** 2) ** 0.5
+
+
+def _gorev_izle():
+    """kontrol_dongusu icinde, beyin_lock ALTINDA, her tik (~50 Hz). GUDUME DOKUNMAZ:
+    beyin'in alanlarini okuyup olay/durum turetir. Kesinti gorev pasifken de izlenir."""
+    now = time.time()
+
+    # 1) GNSS KESINTI: paket yasi (_izci["son_paket_t"] _kiyas_guncelle'de her yeni pakette yazilir)
+    spt = _izci["son_paket_t"]
+    yas = (now - spt) if spt is not None else None
+    kesinti_simdi = (yas is not None and yas > GNSS_KESINTI_S)
+    if kesinti_simdi and not _izci["kesinti"]:
+        _izci["kesinti"] = True
+        olay_ekle("uyari", "GNSS KESINTISI — hedef GPS paketi gelmiyor")
+    elif (not kesinti_simdi) and _izci["kesinti"]:
+        _izci["kesinti"] = False
+        olay_ekle("iyi", "GNSS geri geldi — kesinti bitti (%.1f s)" % (yas if yas else 0.0))
+
+    if not gorev_aktif:
+        return   # gorev pasif: FSM/takip/vurus izlenmez (sadece kesinti yukarida)
+
+    # 2) TAKIP-ID makinesi (girdi: beyin.son_tespit_t tazeligi — gudumdeki tanimla ayni)
+    stt = beyin.son_tespit_t
+    taze = (stt is not None) and ((time.perf_counter() - stt) <= Cfg.VIS_STALE_S)
+    if taze:
+        if _takip["id"] is None:                       # ACILIS
+            _takip["id"] = _takip["sonraki"]; _takip["sonraki"] += 1
+            _takip["kayip_t"] = None
+            try:
+                conf = float(beyin.son_tespit.get("conf", 0.0))
+            except Exception:
+                conf = 0.0
+            if _takip["id"] == 1:
+                olay_ekle("iyi", "ILK TESPIT — ID:1 (talon, conf=%.2f)" % conf)
+            else:
+                _takip["yeniden"] += 1
+                olay_ekle("iyi", "YENIDEN TESPIT — yeni ID:%d (conf=%.2f)" % (_takip["id"], conf))
+        elif not _takip["aktif"]:                      # blip koprulendi
+            olay_ekle("iyi", "TAKIP SURUYOR — ID:%d korundu" % _takip["id"])
+            _takip["kayip_t"] = None
+        _takip["aktif"] = True
+    else:
+        if _takip["id"] is not None:
+            if _takip["aktif"]:
+                _takip["aktif"] = False
+                _takip["kayip_t"] = now
+                olay_ekle("uyari", "TESPIT KAYBI — ID:%d (kor-devam)" % _takip["id"])
+            elif _takip["kayip_t"] is not None and (now - _takip["kayip_t"]) >= TAKIP_TAM_KAYIP_S:
+                olay_ekle("uyari", "TAKIP KAPANDI — ID:%d (%.1f s kayip)"
+                          % (_takip["id"], now - _takip["kayip_t"]))
+                _takip["id"] = None
+                _takip["kayip_t"] = None
+
+    # 3) FSM kenarlari (beyin.durum / beyin.handoff / kilit sayaci)
+    durum = beyin.durum
+    if durum != _izci["durum_prev"]:
+        if durum == "GORSEL_GUDUM":
+            olay_ekle("iyi", "GORSEL GUDUME GECILDI — GPS yonelimi KAPALI (yonelim yalniz kamera)")
+        elif durum in ("ARAMA", "KILIT") and _izci["durum_prev"] == "GORSEL_GUDUM":
+            olay_ekle("uyari", "GPS'e DONULDU — yeniden yaklasma")
+        _izci["durum_prev"] = durum
+    if beyin.handoff and not _izci["handoff_prev"]:
+        olay_ekle("bilgi", "Tespit menzilinde — KILIT")
+    _izci["handoff_prev"] = bool(beyin.handoff)
+    if (not _izci["kilit_ilan"]) and beyin._vis_pos_count >= Cfg.VIS_N_LOCK:
+        _izci["kilit_ilan"] = True
+        olay_ekle("iyi", "GORSEL KILIT hazir (%d/%d)" % (beyin._vis_pos_count, Cfg.VIS_N_LOCK))
+    elif beyin._vis_pos_count == 0:
+        _izci["kilit_ilan"] = False
+
+    # 4) GOREV FAZI + VURUS/BASARI (mesafe 50 Hz olculur -> vurus ani atlanmaz)
+    mesafe, kaynak = _mesafe_olc()
+    if mesafe is not None:
+        if _gorev["en_yakin_m"] is None or mesafe < _gorev["en_yakin_m"]:
+            _gorev["en_yakin_m"] = mesafe
+
+    angajman = (durum == "GORSEL_GUDUM" and _takip["aktif"])
+    if Cfg.GPS_TERMINAL_STRIKE:                        # test kipi: GPS ram menzilinde de angajman
+        dh = _yatay_mesafe_cm()
+        if dh is not None and dh < Cfg.STRIKE_RANGE:
+            angajman = True
+
+    if _gorev["basari"]:
+        _gorev["faz"] = "BASARI"
+    elif _gorev["vurus"]:
+        _gorev["faz"] = "VURUS"
+        if _gorev["vurus_t"] is not None and (now - _gorev["vurus_t"]) >= BASARI_GECIKME_S:
+            _gorev["basari"] = True
+            _gorev["faz"] = "BASARI"
+            olay_ekle("iyi", "GOREV BASARILI — HEDEF DUSURULDU")
+    elif angajman:
+        _gorev["faz"] = "ANGAJMAN"
+        if not _izci["angajman_ilan"]:
+            _izci["angajman_ilan"] = True
+            olay_ekle("kritik", "ANGAJMAN — gorsel yaklasma basladi")
+        if mesafe is not None and mesafe < VURUS_ESIK_M:          # VURUS latch (kalici)
+            _gorev["vurus"] = True
+            _gorev["vurus_t"] = now
+            _gorev["mesafe_kaynak"] = kaynak
+            olay_ekle("kritik", "VURUS! mesafe=%.1f m (%s kaynak)" % (mesafe, kaynak))
+        elif mesafe is not None:                                  # ISKA tespiti (angajman icinde)
+            am = _izci["angajman_min"]
+            if am is None or mesafe < am:
+                _izci["angajman_min"] = mesafe
+            elif (not _izci["iska_ilan"]) and mesafe > am + 15.0:
+                _izci["iska_ilan"] = True
+                olay_ekle("uyari", "ISKA — en yakin %.1f m; yeniden angajman" % am)
+    else:
+        _izci["angajman_ilan"] = False
+        _izci["angajman_min"] = None
+        _izci["iska_ilan"] = False
+        _gorev["faz"] = "KILIT" if durum == "KILIT" else "YAKLASMA"
+
+
 def _gps_log_yaz():
     """Biriken bozuk/gercek konum logunu diske atomik yaz."""
     if not _gps_log_kayitlar:
@@ -351,6 +545,8 @@ def _kiyas_guncelle():
     if ham == _kiyas_son_ham:
         return
     _kiyas_son_ham = ham
+    _izci["son_paket_t"] = time.time()    # YENI paket geldi -> kesinti izleyici icin yas sifirlanir
+                                          # (truth erken donusunden ONCE: gercek yarismada truth yokken de calisir)
     truth = drone.get_debug_truth()
     if not truth.get("available"):
         return
@@ -426,6 +622,12 @@ def kontrol_dongusu():
                             beyin._debug_olc()    # ham vs J hatasini olc
                     # Kiyas HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
                     _kiyas_guncelle()             # Inovasyonlu J sapma olcumu (ham vs J)
+                    try:
+                        _gorev_izle()             # olay/durum izleyici (GUDUME DOKUNMAZ)
+                    except Exception as e:
+                        if not _izci.get("_hata_bildirildi"):
+                            _izci["_hata_bildirildi"] = True
+                            print("[IZLEYICI HATA] %r" % e)
             except Exception:
                 pass
         time.sleep(0.02)   # 50 Hz
@@ -449,12 +651,20 @@ def _normalize_tespit(det):
     W = float(det.get("W", 0) or 0); H = float(det.get("H", 0) or 0)
     if W <= 1 or H <= 1:
         return None
+    cls = int(det.get("cls", -1))                  # dedektor sinif indeksi (gorsel_tespit uretir)
+    sinif = "hedef"
+    try:
+        if dedektor is not None and getattr(dedektor, "names", None):
+            sinif = dedektor.names.get(cls, "hedef")
+    except Exception:
+        pass
     return {
         "ex": (det["cx"] - W / 2.0) / (W / 2.0),   # + = hedef SAGDA
         "ey": (det["cy"] - H / 2.0) / (H / 2.0),   # + = hedef ALTTA
         "cx": det["cx"] / W, "cy": det["cy"] / H,  # normalize merkez [0..1]
         "w": det["w"] / W, "h": det["h"] / H,      # normalize bbox boyut [0..1]
         "conf": float(det.get("conf", 0.0)),
+        "cls": cls, "sinif": sinif,                # hedef ID etiketi icin (overlay)
     }
 
 
@@ -548,6 +758,19 @@ def build_telemetry():
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
+        # --- IZLEYICI/GUDUM alanlari (video isterleri) — hepsi ayni kilit altinda anlik kopya ---
+        prev_cmd = dict(beyin.prev)                    # uygulanan 4 komut (tek dogruluk kaynagi)
+        b_handoff = bool(beyin.handoff)
+        b_none = int(getattr(beyin, "none_count", 0))
+        son_xy = None if beyin.son_xy_anlik is None else (
+            float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]))
+        son_ham_full = None if beyin.son_ham is None else (
+            float(beyin.son_ham[0]), float(beyin.son_ham[1]), float(beyin.son_ham[2]))
+        son_z_anl = None if beyin.son_z_anlik is None else float(beyin.son_z_anlik)
+        takip_s = dict(_takip)
+        gorev_s = dict(_gorev)
+        izci_kesinti = bool(_izci["kesinti"])
+        izci_spt = _izci["son_paket_t"]
     j_info = {"durum": j_durum, "hazir": j_temiz is not None}
     if j_temiz is not None:
         j_info["temiz"] = {"x": j_temiz[0] * CM_TO_M,
@@ -588,9 +811,59 @@ def build_telemetry():
     except Exception:
         _cmd_thr = _cmd_pit = None
 
+    # --- IZLEYICI TELEMETRISI (video isterleri 3/6/7/8/9/10) ---
+    _now = time.time()
+    # d_h (yatay mesafe, m): temiz kestirim, yoksa ham
+    d_h_m = None
+    _txy = son_xy if son_xy is not None else (
+        (son_ham_full[0], son_ham_full[1]) if son_ham_full is not None else None)
+    if _txy is not None:
+        d_h_m = (((dpos[0] - _txy[0]) ** 2 + (dpos[1] - _txy[1]) ** 2) ** 0.5) * CM_TO_M
+    # J duzeltme buyuklugu (truth GEREKTIRMEZ): ham <-> anlik temiz fark (m)
+    j_duzeltme_m = None
+    if son_ham_full is not None and son_xy is not None and son_z_anl is not None:
+        _jd = ((son_ham_full[0] - son_xy[0]) ** 2 + (son_ham_full[1] - son_xy[1]) ** 2
+               + (son_ham_full[2] - son_z_anl) ** 2) ** 0.5
+        j_duzeltme_m = _jd * CM_TO_M
+    paket_yasi_s = (_now - izci_spt) if izci_spt is not None else None
+
+    gnss_info = {
+        "paket_yasi_s": paket_yasi_s,
+        "kesinti": izci_kesinti,
+        "bozulmalar": list(debug_info.get("corruptions", [])),
+        "ham_hata_m": debug_info.get("target_raw_error_m"),
+        "j_duzeltme_m": j_duzeltme_m,
+        "none_count": b_none,
+    }
+    gudum_info = {
+        "thr": prev_cmd.get("thr", 0.0), "pitch": prev_cmd.get("pitch", 0.0),
+        "roll": prev_cmd.get("roll", 0.0), "yaw": prev_cmd.get("yaw", 0.0),
+        "durum": j_durum, "mod": vis_mode, "kaynak": j_kaynak,
+        "handoff": b_handoff, "d_h_m": d_h_m,
+    }
+    kayip_s = 0.0
+    if takip_s.get("id") is not None and (not takip_s.get("aktif")) and takip_s.get("kayip_t"):
+        kayip_s = _now - takip_s["kayip_t"]
+    takip_info = {
+        "id": takip_s.get("id"), "aktif": bool(takip_s.get("aktif")),
+        "kayip_s": kayip_s, "yeniden": int(takip_s.get("yeniden", 0)),
+        "pos_count": vis_pos, "n_lock": Cfg.VIS_N_LOCK,
+    }
+    gorev_info = {
+        "faz": gorev_s.get("faz", "HAZIR"), "vurus": bool(gorev_s.get("vurus")),
+        "basari": bool(gorev_s.get("basari")), "en_yakin_m": gorev_s.get("en_yakin_m"),
+        "mesafe_kaynak": gorev_s.get("mesafe_kaynak"), "vurus_t": gorev_s.get("vurus_t"),
+        "t0": gorev_s.get("t0"), "esik_m": VURUS_ESIK_M,
+    }
+    with olay_lock:
+        olay_listesi = list(_olaylar)[-60:]           # son 60 olay (durumsuz; F5/iki-sekme sorunsuz)
+
     # GORSEL GUDUM durumu + son NORMALIZE tespit (overlay/rozet icin). durum
     # GORSEL_GUDUM ise GPS yonelimi MIMARI olarak kesilmistir -> index.html
     # "GPS GUDUMU: KAPALI" rozetini kirmizi yakar.
+    if vis_tespit is not None:                        # paylasilan dict'i BOZMADAN kopyala + ID iliştir
+        vis_tespit = dict(vis_tespit)
+        vis_tespit["id"] = takip_s.get("id")
     gorsel = {
         "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
         "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
@@ -598,7 +871,7 @@ def build_telemetry():
         "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
-        "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf} (normalize)
+        "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
     }
 
     return {
@@ -625,6 +898,11 @@ def build_telemetry():
         "kaynak": j_kaynak,
         "kiyas": kiyas,
         "gorsel": gorsel,
+        "olaylar": olay_listesi,                # [{id,t,sv,m}] son 60 (video: olay gunlugu)
+        "gnss": gnss_info,                      # bozuk GNSS girdisi + kesinti (ister 3)
+        "gudum": gudum_info,                    # uygulanan komutlar + karar (ister 8)
+        "takip": takip_info,                    # ID + aktif/pasif + kayip/yeniden (ister 5/6/7)
+        "gorev": gorev_info,                    # faz + vurus/basari (ister 9/10)
     }
 
 
@@ -687,11 +965,13 @@ class Handler(BaseHTTPRequestHandler):
                 kaynak = {"start": "v2", "start_v2": "v2", "start_gercek": "gercek"}[cmd]
                 with beyin_lock:
                     beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
+                    _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
                 _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
                 msg = "GOREV BASLATILDI - kaynak: %s%s" % (
                     _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
+                olay_ekle("iyi", "GOREV BASLADI — kaynak: %s" % _ad)
             elif cmd == "stop":
                 gorev_aktif = False
                 manuel_aktif = False
@@ -701,6 +981,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 msg = "GOREV DURDURULDU - drone pasif (motorlar kapali)"
+                olay_ekle("uyari", "GOREV DURDURULDU")   # basari latch'i KORUNUR (banner ekranda kalir)
             elif cmd == "manuel_on":
                 gorev_aktif = False           # gorev ve manuel ayni anda olmaz
                 # Tek kilit altinda: durumu kur + arm/hover yolla (50Hz dongu ile
@@ -718,6 +999,7 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 msg = "MANUEL MOD ACIK - klavye: W/A/S/D, Q/E (don), R/F (yuksel/alcal)"
+                olay_ekle("bilgi", "MANUEL MOD ACIK")
             elif cmd == "manuel_off":
                 # Motoru KESMEZ: drone havada sabit kalsin (hover). Tamamen
                 # durdurmak icin kullanici 'Gorev Durdur'a basar.
@@ -728,6 +1010,7 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 msg = "MANUEL MOD KAPALI - drone havada sabit (hover)"
+                olay_ekle("bilgi", "MANUEL MOD KAPALI")
             elif cmd == "vismode":
                 # GUDUM PIPELINE SWITCH (test): OTO | GPS | GORSEL
                 m = str(data.get("mode", "OTO")).upper()
@@ -737,6 +1020,8 @@ class Handler(BaseHTTPRequestHandler):
                              "GPS": "ZORLA GPS (gorsel kapali)",
                              "GORSEL": "ZORLA GORSEL (GPS kapali)"}.get(m, "")
                 msg = ("GUDUM MODU: %s - %s" % (m, _aciklama)) if ok else "GECERSIZ mod: %s" % m
+                if ok:
+                    olay_ekle("bilgi", "Guduum modu -> %s" % m)
             payload = json.dumps({"ok": True, "msg": msg,
                                   "gorev_aktif": gorev_aktif,
                                   "manuel_aktif": manuel_aktif})
