@@ -50,7 +50,10 @@ except Exception:
 # ----------------------------------------------------------
 CM_TO_M = 0.01      # Oyun santimetre verir -> metre icin 0.01 ile carp
 MS_TO_KMH = 3.6     # metre/saniye -> kilometre/saat
-WEB_PORT = 8000     # Arayuzun acilacagi yerel port
+try:
+    from config import WEB_HOST, WEB_PORT   # merkezi config (teslim kalemi)
+except Exception:
+    WEB_HOST, WEB_PORT = "127.0.0.1", 8000  # config yoksa guvenli varsayilan
 
 HERE = os.path.dirname(os.path.abspath(__file__))           # .../web (server.py + index.html)
 PROJ_ROOT = os.path.dirname(HERE)                           # depo koku
@@ -412,8 +415,12 @@ def _algi_kur():
     model_yon = ModelYonetici(baslangic_conf=Cfg.VIS_CONF_MIN)
     algi = AlgiHatti(dedektor=model_yon)
     algi.pnp_baglan(TalonPozKestirici(sema=model_yon.aktif_sema()))
-    # baslangic modeli: Cfg.VIS_MODEL_PATH adi (best) varsa onu, yoksa ilk .pt
-    tercih = os.path.splitext(os.path.basename(Cfg.VIS_MODEL_PATH))[0]
+    # baslangic modeli: once config.VIS_MODEL_ADI, yoksa Cfg.VIS_MODEL_PATH adi; o da
+    # yoksa ilk bulunan .pt (registry secer)
+    try:
+        from config import VIS_MODEL_ADI as tercih
+    except Exception:
+        tercih = os.path.splitext(os.path.basename(Cfg.VIS_MODEL_PATH))[0]
     adlar = [k["ad"] for k in model_yon.modelleri_listele()]
     baslangic = tercih if tercih in adlar else (adlar[0] if adlar else None)
     if baslangic:
@@ -848,14 +855,14 @@ def main():
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
 
     try:
-        server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
+        server = ThreadingHTTPServer((WEB_HOST, WEB_PORT), Handler)
     except OSError as e:
         print("[HATA] %d portu acilamadi (baska bir arayuz ornegi calisiyor olabilir): %s"
               % (WEB_PORT, e))
         return
     print("=" * 52)
     print("  AVCI DRONE - YER KONTROL ISTASYONU calisiyor")
-    print("  Tarayicida ac:  http://127.0.0.1:%d" % WEB_PORT)
+    print("  Tarayicida ac:  http://%s:%d" % (WEB_HOST, WEB_PORT))
     print("  Kapatmak icin:  Ctrl + C")
     print("=" * 52)
     try:

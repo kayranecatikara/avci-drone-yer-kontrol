@@ -17,7 +17,12 @@ Yarismaya gidecek kod paketi = UCUS PIPELINE'i. Bu arac:
      truth / corruption / get_debug_truth / get_active_corruption /
      telemetry_truth / dev_truth / dev-only / gercek / gerçek
      TEK eslesmede paketlemeyi REDDEDER (exit 1),
-  4) Temizse rapor verir; --zip ile teslim zip'ini (soküm uygulanmis haliyle)
+  4) ZORUNLU TESLIM ICERIGINI denetler (ZORUNLU_ICERIK): input(sim I/O),
+     hedef tespit, tracking, fuzyon/filtre, guduum/karar, ana calistirma,
+     config, requirements, README, egitilmis model(.pt). Herhangi biri
+     eksikse VEYA README asgari calistirma talimatini ("python main.py")
+     icermiyorsa paketlemeyi REDDEDER,
+  5) Temizse rapor verir; --zip ile teslim zip'ini (soküm uygulanmis haliyle)
      olusturur. GONDERILECEK VIDEO KOSUSU DA BU PAKETIN KODUNDAN YAPILIR.
 
 ISTISNA: sdk/drone_sdk.py RESMI VERILI dosyadir; truth API'sinin orada TANIMLI
@@ -30,6 +35,7 @@ KULLANIM:
 ================================================================================
 """
 import argparse
+import fnmatch
 import os
 import py_compile
 import sys
@@ -42,7 +48,7 @@ _PROJ_ROOT = os.path.dirname(_HERE)
 
 # --- Paket icerigi (teslim .zip'ine girecekler) ---
 PAKET_KOKLERI = ["detection", "guidance", "fusion", "web", "sdk", "models"]
-PAKET_DOSYALAR = ["main.py", "README.md", "requirements.txt"]
+PAKET_DOSYALAR = ["main.py", "config.py", "README.md", "requirements.txt"]
 # Dev modul: pakete HIC girmez (madde a)
 PAKET_HARIC = {os.path.join("web", "dev_truth.py")}
 # Paket koklerinde bile atlanacaklar (calisma ciktisi/cop)
@@ -64,6 +70,26 @@ ANAHTARLAR = ["truth", "corruption", "get_debug_truth", "get_active_corruption",
 
 # RESMI VERILI SDK: truth API tanimi burada; bizim kullanim sayilmaz -> tarama disi
 TARAMA_ISTISNA = {os.path.join("sdk", "drone_sdk.py")}
+
+# --- ZORUNLU TESLIM ICERIGI (sartname teslim kalemleri) ---
+# Her kalem icin KABUL EDILEN yol(lar) (goreli, "/" ayirici; glob destekli).
+# Adaylardan EN AZ BIRI pakette yoksa o kalem EKSIK -> paketleme REDDEDILIR.
+# "input.py" karari: resmi sablon input.py muadilimiz sdk/drone_sdk.py'dir
+# (sim I/O; telemetri girdisi + kontrol cikisi). Bkz. CLAUDE.md SISTEM MIMARISI.
+ZORUNLU_ICERIK = [
+    ("input (sim I/O)",        ["sdk/drone_sdk.py"]),
+    ("hedef tespit",           ["detection/algi_hatti.py", "detection/gorsel_tespit.py"]),
+    ("tracking",               ["detection/takip.py"]),
+    ("sensor fuzyonu/filtre",  ["fusion/inovasyonlu_j_v2.py"]),
+    ("guduum ve karar",        ["guidance/ana_kontrol.py"]),
+    ("ana calistirma",         ["main.py"]),
+    ("config",                 ["config.py"]),
+    ("bagimliliklar (req)",    ["requirements.txt"]),
+    ("README",                 ["README.md"]),
+    ("egitilmis model (.pt)",  ["models/*.pt"]),
+]
+# README asgari calistirma talimati icermeli (reviewer tek komutla calistirabilsin)
+README_CALISTIRMA = "python main.py"
 
 
 def paket_dosyalari():
@@ -190,6 +216,28 @@ def zip_yaz(dosyalar):
     return yol
 
 
+def zorunlu_icerik_denetimi(dosyalar):
+    """Sartname zorunlu teslim kalemleri pakette VAR mi?
+    -> (eksik_kalemler, readme_calistirma_ok). eksik_kalemler bos + readme_ok
+    True degilse paketleme REDDEDILIR (madde: eksik icerikte teslim edilmez)."""
+    havuz = set(d.replace(os.sep, "/") for d in dosyalar)
+    eksik = []
+    for etiket, adaylar in ZORUNLU_ICERIK:
+        var = any(fnmatch.fnmatch(h, a) for a in adaylar for h in havuz)
+        if not var:
+            eksik.append((etiket, adaylar))
+    # README asgari calistirma talimati ("python main.py") iceriyor mu
+    readme_ok = False
+    rp = os.path.join(_PROJ_ROOT, "README.md")
+    if os.path.isfile(rp):
+        try:
+            with open(rp, "r", encoding="utf-8", errors="replace") as f:
+                readme_ok = README_CALISTIRMA.lower() in f.read().lower()
+        except OSError:
+            readme_ok = False
+    return eksik, readme_ok
+
+
 def main():
     ap = argparse.ArgumentParser(description="Teslim paketi temizlik kontrolu")
     ap.add_argument("--zip", action="store_true",
@@ -199,6 +247,7 @@ def main():
     dosyalar = paket_dosyalari()
     bulgular, istisna, cit_bilgi = tara(dosyalar)
     derlendi, derleme_hata = sokulmus_server_derlenir_mi()
+    eksik_icerik, readme_ok = zorunlu_icerik_denetimi(dosyalar)
 
     print("=" * 68)
     print(" TESLIM PAKETI KONTROLU")
@@ -216,8 +265,11 @@ def main():
           % (", ".join(istisna) if istisna else "-"))
     print("                   bizim kullanmamiz degildir)")
     print(" anahtarlar      : %s" % ", ".join(ANAHTARLAR))
+    print(" zorunlu icerik  : %d/%d kalem var; README calistirma talimati: %s"
+          % (len(ZORUNLU_ICERIK) - len(eksik_icerik), len(ZORUNLU_ICERIK),
+             "VAR" if readme_ok else "YOK"))
 
-    if bulgular or not derlendi:
+    if bulgular or not derlendi or eksik_icerik or not readme_ok:
         if bulgular:
             print("\n [RED] %d iz bulundu — PAKETLEME REDDEDILDI:" % len(bulgular))
             for dosya, no, anahtar, ozet in bulgular[:50]:
@@ -226,10 +278,18 @@ def main():
                 print("   ... (+%d bulgu daha)" % (len(bulgular) - 50))
         if not derlendi:
             print("\n [RED] Cit sokumu server.py'yi bozuyor — cit yerlesimini duzelt.")
-        print("\n Kural: teslim paketinde dev/truth izi YASAK (CLAUDE.md).")
+        if eksik_icerik:
+            print("\n [RED] Zorunlu teslim icerigi EKSIK — PAKETLEME REDDEDILDI:")
+            for etiket, adaylar in eksik_icerik:
+                print("   '%s' yok (beklenen: %s)" % (etiket, " | ".join(adaylar)))
+        if not readme_ok:
+            print("\n [RED] README '%s' calistirma talimatini icermiyor."
+                  % README_CALISTIRMA)
+        print("\n Kural: teslim paketinde dev/truth izi YASAK ve zorunlu kalemler"
+              " TAM olmali (CLAUDE.md TESLIM PAKETI KURALI).")
         sys.exit(1)
 
-    print("\n [TEMIZ] Paket kopyasinda yasakli iz YOK; sokulmus server derleniyor.")
+    print("\n [TEMIZ] Yasakli iz YOK; zorunlu kalemler TAM; sokulmus server derleniyor.")
     if arg.zip:
         yol = zip_yaz(dosyalar)
         print(" [ZIP] Teslim paketi yazildi: %s" % yol)
