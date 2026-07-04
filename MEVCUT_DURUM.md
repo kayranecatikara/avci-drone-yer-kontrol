@@ -123,7 +123,11 @@
 >    'guvenilir' bayrağı k*'ı gate'ler. k*≈0.867'ye yakınsa FAZ 0 offset-regresyonuyla tutarlı.
 > 3. CMC ROLL fazı (FAZ 1'den) → `python arac/kosu_yonetici.py cmc-test` (roll ±8°, hedef
 >    merkezde; yaw fazı zaten GEÇTİ oran 0.27).
-> 4. Menü fare-tık otomasyonu (koordinat kalibrasyonu).
+> 4. Menü fare-tık otomasyonu (koordinat kalibrasyonu). **(2026-07-04 TEYİT: prova
+>    koşusunda menü otomasyonu yine ÇALIŞMADI; PLAY/FLY/E kullanıcı elle yaptı.**
+>    Fare-tık PLAY/FLY buton koordinatları hâlâ kalibre değil → `kosu_yonetici.
+>    _play_otomasyonu` best-effort başarısız, insan fallback devrede. İyi model/sonraki
+>    oturumda: pencere W/H yüzdesiyle PLAY+FLY koordinatlarını bir kez ölç, ekle.)
 
 > **🔔 FAZ 2 — pose modeli şema keşfi (2026-07-04, metadata):**
 > `models/yolo26m_pose_best.pt`: task=pose, **kpt_shape=[6,3]** (6 keypoint, PnP için

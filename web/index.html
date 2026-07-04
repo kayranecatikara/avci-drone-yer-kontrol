@@ -146,6 +146,7 @@
   #view{flex:1;display:flex;align-items:center;justify-content:center;
     background:#06080c;border-radius:8px;position:relative;overflow:hidden}
   #view video{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
+  #view img#camImg{max-width:100%;max-height:100%;object-fit:contain;display:none;background:#000}
   /* FPV overlay: goruntu uzerine bbox/merkez/durum/GPS rozeti cizen saydam katman */
   #view canvas#overlay{position:absolute;left:0;top:0;width:100%;height:100%;
     pointer-events:none;display:none;z-index:2}
@@ -322,12 +323,13 @@
       <div class="body" style="padding:12px">
         <div id="view">
           <video id="cam" autoplay muted playsinline></video>
+          <img id="camImg" alt="">
           <canvas id="overlay"></canvas>
           <div class="ph" id="camPh">
             <div class="big">🖥️</div>
-            <div class="sub">Oyun görüntüsünü bağlamak için butona bas,<br>
-            açılan listeden <b>oyun penceresini (Drones of War)</b> seç.</div>
-            <button id="shareBtn" class="sharebtn">📡 Görüntüyü Bağla</button>
+            <div class="sub">Oyun görüntüsü <b>otomatik</b> bağlanır (oyun açık + görev sunucusu çalışıyorsa).<br>
+            Gelmezse: oyun penceresi açık mı? Alternatif olarak ekran paylaşımı:</div>
+            <button id="shareBtn" class="sharebtn">📡 Ekran Paylaşımına Geç</button>
           </div>
         </div>
       </div>
@@ -671,14 +673,21 @@
   // ---- FPV overlay: bbox + merkez + durum + "GPS GÜDÜMÜ" rozeti (telemetriden cizilir) ----
   // Normalize koordinat (cx,cy,w,h ∈ [0,1]) kullanildigindan cozunurluk onemsiz; video
   // object-fit:contain oldugundan letterbox icerik dikdortgeni hesaplanir.
+  // Aktif FPV elemani: sunucu-kare <img> (otomatik) veya ekran-paylasimi <video>.
+  function aktifFpv(){
+    const im=$("camImg");
+    if(im && im.style.display==="block") return im;
+    return $("cam");
+  }
   function _icerikRect(el){
-    const cw=el.clientWidth, ch=el.clientHeight, vw=el.videoWidth, vh=el.videoHeight;
+    const cw=el.clientWidth, ch=el.clientHeight;
+    const vw=el.videoWidth||el.naturalWidth||0, vh=el.videoHeight||el.naturalHeight||0;
     if(!vw||!vh) return {x:0,y:0,w:cw,h:ch};
     const s=Math.min(cw/vw, ch/vh), w=vw*s, h=vh*s;
     return {x:(cw-w)/2, y:(ch-h)/2, w:w, h:h};
   }
   function drawOverlay(gs){
-    const ov=$("overlay"), camEl=$("cam");
+    const ov=$("overlay"), camEl=aktifFpv();
     if(!ov || !camEl) return;
     const cw=ov.clientWidth, ch=ov.clientHeight;
     if(ov.width!==cw)  ov.width=cw;                 // cizim tamponunu ekrana esitle (bulanikligi onler)
@@ -883,22 +892,57 @@
   // telemetriden canvas'a çizilir; normalize koordinat kullandığından çözünürlük
   // fark etmez (paylaşılan pencere = sunucunun tespit yaptığı oyun penceresi).
   const cam = $("cam"), camPh = $("camPh"), shareBtn = $("shareBtn");
+  const camImg = $("camImg");
   let stream = null;
+
+  // ---- OTOMATIK FPV: sunucu /api/frame (PrintWindow; occlusion-proof, JEST GEREKMEZ) ----
+  // Ekran-paylasimi (getDisplayMedia) yerine sunucunun yakaladigi oyun karesini <img>'e
+  // akitir -> kullanici tiklamadan FPV gelir. Overlay bbox koordinatlari da bu SUNUCU
+  // karesine gore normalize oldugundan hizalama birebir. Ekran-paylasimi acilinca durur.
+  let autoFpvAktif = false, autoFpvErr = 0;
+  function autoFpvTick(){
+    if(!autoFpvAktif) return;
+    const im = new Image();
+    im.onload = ()=>{
+      if(!autoFpvAktif) return;
+      camImg.src = im.src;
+      if(camImg.style.display!=="block"){
+        camImg.style.display="block"; $("overlay").style.display="block"; camPh.style.display="none";
+      }
+      autoFpvErr = 0;
+      setTimeout(autoFpvTick, 66);                 // ~15 fps
+    };
+    im.onerror = ()=>{
+      if(!autoFpvAktif) return;
+      autoFpvErr++;
+      if(autoFpvErr>10 && camImg.style.display==="block"){   // kaynak kesildi -> placeholder
+        camImg.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
+      }
+      setTimeout(autoFpvTick, 300);
+    };
+    im.src = "/api/frame?t=" + Date.now();
+  }
+  function autoFpvBaslat(){ if(!autoFpvAktif){ autoFpvAktif=true; autoFpvErr=0; autoFpvTick(); } }
+  function autoFpvDurdur(){ autoFpvAktif=false; camImg.style.display="none"; }
+
   async function startShare(){
     try{
+      autoFpvDurdur();                             // ekran-paylasimi devralir
       stream = await navigator.mediaDevices.getDisplayMedia({ video:{frameRate:30}, audio:false });
       cam.srcObject = stream;
       cam.style.display = "block";
-      $("overlay").style.display = "block";     // FPV overlay katmanini ac
+      $("overlay").style.display = "block";        // FPV overlay katmanini ac
       camPh.style.display = "none";
       stream.getVideoTracks()[0].addEventListener("ended", stopShare);
-    }catch(e){ console.log("Görüntü paylaşımı iptal/hata:", e); }
+    }catch(e){ console.log("Görüntü paylaşımı iptal/hata:", e); autoFpvBaslat(); }
   }
   function stopShare(){
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
     cam.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
+    autoFpvBaslat();                               // sunucu-kare FPV'ye geri don
   }
   shareBtn.onclick = startShare;
+  autoFpvBaslat();                                 // sayfa acilinca sunucu-kare FPV otomatik dener
 </script>
 
 <!-- >>> DEV-ONLY >>> -->
