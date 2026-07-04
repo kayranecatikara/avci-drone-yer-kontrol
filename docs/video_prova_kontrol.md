@@ -36,9 +36,40 @@ güdülür — amaç görsel hattı/FSM'i filtreden bağımsız doğrulamak). So
   GNSS'i temizler) doğrulanır — asıl "bozuk GNSS girdi + filtre" kanıtı orada.
 - Diğer 9 kalem (tespit/tracking/kilit/FSM/başarı) bu koşuda geçerli ve işaretlenir.
 
-## Prova protokolü (FSM provası koşusunda)
-1. `python main.py` → tarayıcı → **Görev Başlat**.
-2. Yukarıdaki 10 kalemi sırayla işaretle; her biri **aynı ekran görüntüsünde** okunuyor mu?
-3. Zayıf model kilidi tamamlayamazsa: kalem 4-6 (tespit/bbox/tracker) yine görünür,
-   kalem 9-10 (angajman/başarı) İYİ MODEL geldiğinde tamamlanır (runbook MEVCUT_DURUM'da).
-4. Eksik/okunmaz kalem varsa arayüz düzenlemesi (panel konumu/boyutu) not al.
+## Prova protokolü — OTOMATİK (kullanıcı kalem işaretlemez)
+Marking artık otomatik: **yakalama + "üretildi" denetimi + "okunuyor" değerlendirmesi
++ doküman doldurma** araç ve asistan tarafından yapılır. Kullanıcının rolü yalnız
+**"hazır" + (gerekirse) PLAY/FLY/E ve raporu okumak**.
+
+1. **Yakalama (canlı):** `python arac/prova_kaydedici.py` FSM provası boyunca arka
+   planda koşar. `/api/telemetry`'yi ~8 Hz yoklar; olay tetikli TAM ARAYÜZ (tarayıcı
+   penceresi, PrintWindow) karesi + her 10 sn GENEL kare → `veri/prova_kareleri/`
+   (`<olay>_<ts>.png` + `_50.png` %50 kopya). Olaylar: İLK_TESPİT, COAST_BAŞLADI,
+   YENİDEN_TESPİT, FSM_GEÇİŞ_*, GÖREV_SONU. `olaylar.json`'a yazılır.
+2. **"Üretildi mi" [CSV] otomatik:** `python arac/prova_kaydedici.py --rapor` uçuş
+   CSV'sinden (ilk bbox, track_durumu geçişleri, tespit_mi coast blokları, güdüm
+   komut sütunları, fsm_durum zinciri) kalem başına üretildi tablosu çıkarır.
+3. **"Okunuyor mu" [kare] asistan:** koşu sonrası `prova_kareleri/` görüntüleri
+   okunur (tam + %50 vekil = YouTube sıkıştırma proxy'si). Küçükte okunmayan kalem
+   → arayüz düzeltmesi yapılır, "yapılan düzeltmeler" listesine yazılır.
+4. **Sonuç:** aşağıdaki tablo otomatik doldurulur. Zayıf model kilidi tamamlayamazsa
+   kalem 4-8 yine üretilir; kalem 9-10 İYİ MODEL geldiğinde (runbook MEVCUT_DURUM'da).
+
+## Otomatik sonuç (koşu sonrası doldurulur)
+> Aşağıdaki tablo son FSM provası koşusunun `--rapor` çıktısı + kare okumasıyla
+> asistan tarafından doldurulur. (Henüz koşu yapılmadıysa boştur.)
+
+| # | Kalem | Üretildi [CSV] | Okunuyor [kare] | Kanıt dosyası | Not |
+|---|---|---|---|---|---|
+| 1 | Sim ekranı | (kare) | — | — | — |
+| 2 | Drone+hedef konum | (kare) | — | — | — |
+| 3 | Bozuk GNSS | DEV-atlandı | — | — | DEV kaynak — kanıt teslim koşusunda |
+| 4 | Tespit anı | — | — | — | — |
+| 5 | bbox+ID+durum | — | — | — | — |
+| 6 | Tracker aktif/pasif | — | — | — | — |
+| 7 | Kayıp/yeniden-tespit | — | — | — | — |
+| 8 | Güdüm komutu | — | — | — | — |
+| 9 | Angajman/vuruş | — | — | — | — |
+| 10 | Görev sonu başarı | — | — | — | — |
+
+**Yapılan arayüz düzeltmeleri:** _(koşu sonrası; okunmaz kalem için)_ —

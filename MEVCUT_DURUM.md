@@ -49,6 +49,13 @@
 > **Kalem 3 (bozuk GNSS) bu koşuda İŞARETLENMEZ** → teslim-videosu koşusunda (kaynak=FİLTRE)
 > doğrulanır (`docs/video_prova_kontrol.md` DEV notu).
 >
+> **OTOMATİK İŞARETLEME (kullanıcı kalem işaretlemez):** prova boyunca arka planda
+> `python arac/prova_kaydedici.py` koşar — olay tetikli (İLK_TESPİT/COAST/YENİDEN/
+> FSM_GEÇİŞ/GÖREV_SONU) + 10 sn'de bir TAM ARAYÜZ karesi (`veri/prova_kareleri/`,
+> tam + %50 vekil). Koşu sonrası `--rapor` uçuş CSV'sinden "üretildi" tablosunu çıkarır;
+> asistan kareleri okuyup "okunuyor mu"yu değerlendirir ve `docs/video_prova_kontrol.md`
+> sonuç tablosunu doldurur. **Kullanıcı rolü: yalnız "hazır" + (gerekirse) PLAY/FLY/E.**
+>
 > 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
 >    İzle: FSM durumu ARAMA→TAKIP ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
 >    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).
