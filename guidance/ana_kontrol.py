@@ -92,7 +92,7 @@ _LOG_COLS = [
     "vis_ex", "vis_ey", "vis_gordu", "vis_conf", "vis_area",
     # FAZ 3/4: takip + kilit sayaci + PnP + APN/OIPN + FSM
     "track_id", "track_durumu", "tespit_mi", "kumulatif_kilit_sn", "surekli_kilit_sn",
-    "kaplama_yatay", "kaplama_dikey", "kilit_engel",
+    "kaplama_yatay", "kaplama_dikey", "kilit_engel", "dortgen_kadraj",
     "pnp_gecerli", "reproj_err", "phi_T", "a_PN", "a_APN_terim", "a_OIPN_terim",
     "beta", "fsm_durum",
 ]
@@ -691,6 +691,9 @@ class AvciKontrol:
             d["kaplama_yatay"] = kb.get("kaplama_yatay")
             d["kaplama_dikey"] = kb.get("kaplama_dikey")
             d["kilit_engel"] = kb.get("engel")
+        if tespit is not None:
+            d["dortgen_kadraj"] = self.kilit.dortgen_kadraj_orani(
+                tespit, tespit.get("W"), tespit.get("H"))
         pnp = self._algi_pnp
         if pnp:
             d["pnp_gecerli"] = (1 if pnp.get("gecerli") else 0)

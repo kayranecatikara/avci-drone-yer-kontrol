@@ -44,6 +44,15 @@ class KilitCfg:
     # iken) ve SON karesinde (kopru acikken angajman verilmez) KOPRULEME YOK
     # ("baslangic/bitiste gecersiz").
     KACAK_TOLERANS_SN = 0.2
+    # KILIT DORTGENI (tespit kurali — her asamada gecerli): video/kilit paketine
+    # giden dortgen (= bbox) kurallari. Cizgi kalinligi <=3 px (video kaydedici
+    # sabiti). "Dortgen hedefin >=%90'ini icermeli" + "merkez farki yatayda w/2,
+    # dikeyde h/2'yi asamaz" REFERANS hedef sinirini gerektirir -> UCUS pipeline'inda
+    # YAPILAMAZ (SERT AYRIM: pipeline referans kanalina erisemez). Pipeline PROXY:
+    # dortgen KADRAJ icinde (>=%90'i ekranda), makul boyut. Referans-tam dogrulama
+    # arac/kilit_dortgeni.py'de (gelistirme araci).
+    CIZGI_PX = 3                # video kilit dortgeni cizgi kalinligi (max)
+    DORTGEN_KADRAJ_MIN = 0.90  # bbox'in en az bu orani KADRAJ ICINDE olmali
 
 
 class KilitDurumu:
@@ -82,6 +91,22 @@ class KilitDurumu:
         return dict(sorted(self._engel_sayac.items(), key=lambda kv: -kv[1]))
 
     @staticmethod
+    def dortgen_kadraj_orani(hedef, W, H):
+        """Kilit dortgeninin (bbox) KADRAJ ICINDE kalan alan orani [0..1].
+        Referans-bagimsiz PROXY: dortgen ekrandan tasarsa hedefi guvenilir
+        gosteremez (tam '%90 icerme' referansla arac/'ta). 1.0 = tamamen ekranda."""
+        if not hedef or W <= 1 or H <= 1:
+            return 0.0
+        w, h = float(hedef["w"]), float(hedef["h"])
+        if w <= 0 or h <= 0:
+            return 0.0
+        x1, y1 = hedef["cx"] - w / 2.0, hedef["cy"] - h / 2.0
+        x2, y2 = hedef["cx"] + w / 2.0, hedef["cy"] + h / 2.0
+        gx = max(0.0, min(x2, W) - max(x1, 0.0))     # gorunur genislik
+        gy = max(0.0, min(y2, H) - max(y1, 0.0))     # gorunur yukseklik
+        return (gx * gy) / (w * h)
+
+    @staticmethod
     def kaplama_eksen(hedef, W, H):
         """EKSEN-bazli kaplama (sartname): hedefin ekranin yatay VE dikey eksenini
         ne kadar kapladigi -> (yatay=w/W, dikey=h/H). Sartname 'en az BIRINDE >=%5'
@@ -105,6 +130,9 @@ class KilitDurumu:
         if float(hedef.get("conf", 0.0)) < conf_esik:
             return False, "dusuk_conf"
         c = self.cfg
+        # KILIT DORTGENI: kadraj-ici proxy (dortgen ekrandan >%10 tasarsa gecersiz)
+        if self.dortgen_kadraj_orani(hedef, W, H) < c.DORTGEN_KADRAJ_MIN:
+            return False, "dortgen_tasma"        # bbox kadraj disina cok tasti
         # KAPLAMA (eksen-bazli) merkezden ONCE: en az bir eksende >=%5
         kap_y, kap_d = self.kaplama_eksen(hedef, W, H)
         if max(kap_y, kap_d) < c.KAPLAMA_ESIK:
