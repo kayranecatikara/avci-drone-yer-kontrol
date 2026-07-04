@@ -452,7 +452,7 @@ def dedektor_dongusu():
         # beyin.set_gorsel_tespit geriye uyumlu (FSM tracker sorgusu FAZ 3'te).
         hedef = cikti.hedef if cikti else None
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
-            beyin.set_gorsel_tespit(hedef)
+            beyin.set_algi(cikti)                     # AlgiCiktisi snapshot (hedef + PnP + turevler)
             _son_tespit_ui = _normalize_tespit(hedef)
             _son_pnp_ui = (cikti.pnp if cikti else None)
         if bgr is None:

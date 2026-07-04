@@ -59,6 +59,9 @@ import time
 import numpy as np
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
 from guidance.ibvs_guidance import AvciGorselGuduum             # gorsel faz: bbox -> angle-mode (bagimsiz)
+from guidance.kilit_kurali import KilitDurumu                   # FAZ 3: sartname 6.1.4 kilit sayaci
+from guidance.gudum_yasasi import apn_oipn, GudumCfg            # FAZ 3: APN+OIPN (pose'suz pasif)
+from iletisim.hakem_istemci import HakemIstemci                 # FAZ 3: kilit paketi + telemetri (stub)
 from detection import kamera_model                              # TILT/HFOV TEK KAYNAK (FAZ 0)
 
 # --- UCUS LOGU: dosya dizini + sabit kolon sirasi (arac/analiz_ucus.py isimle okur) ---
@@ -292,6 +295,10 @@ def lead_kelepce(anlik, lead, maks_cm):
 KAMERA_FOV_YARIM = math.radians(kamera_model.HFOV_DEG / 2.0)   # YATAY yarim aci (TEK KAYNAK)
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
+# FAZ 3 FSM: gorsel guduum ailesi (hepsinde IBVS/gorsel yonelim aktif; GPS kesik).
+# Durumlar: ARAMA -> TAKIP -> GORSEL_GUDUM -> KILIT_BILDIR -> ANGAJMAN.
+_GORSEL_AILE = ("GORSEL_GUDUM", "KILIT_BILDIR", "ANGAJMAN")
+
 
 class AvciKontrol:
     def __init__(self, drone, kaynak="v2"):
@@ -340,6 +347,17 @@ class AvciKontrol:
         self.ibvs = AvciGorselGuduum()  # bbox -> angle-mode komut (bagimsiz modul, canli-tune)
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
 
+        # --- FAZ 3: kilit sayaci + hakem + APN/OIPN algi snapshot'i ---
+        self.kilit = KilitDurumu()      # sartname 6.1.4 sayaci (GORSEL_GUDUM'da isler)
+        self.hakem = HakemIstemci()     # kilit paketi + telemetri (stub; jsonl log)
+        self.oipn_acik = True           # OIPN anahtari (arayuz; pose gecersizken zaten pasif)
+        # Algi snapshot (server AlgiCiktisi'ndan yazar): PnP + turevler. FAZ 3 guduum
+        # bunlari tuketir; yoksa (pose'suz) OIPN pasif -> IBVS fallback (regresyon yok).
+        self._algi_pnp = None           # {gecerli, phi_T, mesafe, rel_konum_dunya, ...} | None
+        self._algi_lam_dot = 0.0        # LOS acisal hizi (rad/s; algi timestamp'iyle)
+        self._algi_Vc = 0.0             # kapanma vekili (1/s)
+        self._son_kilit_bilgi = {}      # arayuz/log icin son kilit sayac ciktisi
+
     # ----------------------------------------------------------------
     #  Gorev durumunu TAZE baslat (yeni filtre + FAZ-1 sifirlama; soft-start).
     #  Tek kaynak: "v2" (Inovasyonlu J). Ayni kaynak tekrar secilirse dokunmaz.
@@ -376,6 +394,11 @@ class AvciKontrol:
         self._vis_lost_count = 0
         self._vis_ilan = False
         self.ibvs.sifirla()
+        self.kilit.sifirla()             # FAZ 3: yeni gorev -> kilit sayaci + hakem taze
+        self.hakem.sifirla()
+        self._algi_pnp = None
+        self._algi_lam_dot = 0.0
+        self._algi_Vc = 0.0
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
         # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
         # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
@@ -594,6 +617,8 @@ class AvciKontrol:
         self._vis_lost_count = 0
         self._vis_ilan = False
         self.ibvs.sifirla()
+        self.kilit.sifirla()             # FAZ 3: kilit sayaci + hakem de temiz
+        self.hakem.sifirla()
         return True
 
     def set_gorsel_tespit(self, det):
@@ -602,6 +627,18 @@ class AvciKontrol:
             self.son_tespit_t = det.get("t", time.perf_counter())
         # det None ise ESKI tespiti SILME: tek bos kare kilidi dusurmesin. Bayatlik
         # (VIS_STALE_S) _oku'da elenir; kayip histerezisini _vis_lost_count yonetir.
+
+    def set_algi(self, cikti):
+        """AlgiCiktisi snapshot arayuzu (server dedektor_dongusu yazar). set_gorsel_tespit'i
+        SARAR (geriye uyum) + PnP/turevleri tasir. cikti: AlgiCiktisi | None.
+        Master prompt: 'mevcut arayuz korunarak sarilabilir'."""
+        if cikti is None:
+            self.set_gorsel_tespit(None)
+            return
+        self.set_gorsel_tespit(cikti.hedef)          # hedef track ciktisi (eski yol)
+        self._algi_pnp = cikti.pnp                    # {gecerli, phi_T, mesafe, ...} | None
+        self._algi_lam_dot = float(getattr(cikti, "lam_dot", 0.0) or 0.0)
+        self._algi_Vc = float(getattr(cikti, "Vc", 0.0) or 0.0)
 
     def _gorsel_tespit_oku(self):
         """Bayat-olmayan son tespiti dondur; yoksa/bayatsa None (kayip mantigi devreye girer)."""
@@ -647,6 +684,74 @@ class AvciKontrol:
     #  -> durumu ARAMA yap, gorsel kilidi sifirla, None dondur (adim() GPS yoluna duser).
     #  return: (throttle,pitch,roll,yaw) | None (=GPS'e don). _send rate-limit'ler.
     # ----------------------------------------------------------------
+    # ----------------------------------------------------------------
+    #  FAZ 3 yardimcilari: CONFIRMED sorgusu, kilit FSM, OIPN harmanlama
+    # ----------------------------------------------------------------
+    def _confirmed_track(self, tespit):
+        """Gorsel-kilit esigi: tracker CONFIRMED (min_hits=5 devraldi). track_durumu
+        YOKSA (eski format/test) -> 5-kare ham fallback (_vis_pos_count; regresyon)."""
+        if tespit is None or float(tespit.get("conf", 0.0)) < Cfg.VIS_CONF_MIN:
+            self._vis_pos_count = 0
+            return False
+        if "track_durumu" in tespit:                 # yeni pipeline: tracker karari
+            return tespit["track_durumu"] == "CONFIRMED"
+        self._vis_pos_count += 1                      # eski format: 5-kare histerezisi
+        return self._vis_pos_count >= Cfg.VIS_N_LOCK
+
+    def _faz3_kilit_fsm(self, tespit, t, drone_pos):
+        """GORSEL ailesinde kilit sayaci (6.1.4) + hakem paketi + durum ilerlemesi.
+        Guduum DAVRANISINI DEGISTIRMEZ (IBVS akar); yalniz kilit/bildir/angajman
+        SIRALAMASINI somutlastirir. tespit None (kayip) -> sayac saymaz (coast/yok)."""
+        W = tespit.get("W") if tespit else None
+        H = tespit.get("H") if tespit else None
+        kb = self.kilit.adim(tespit, W, H, t, Cfg.VIS_CONF_MIN)
+        self._son_kilit_bilgi = kb
+        # 1) GORSEL_GUDUM -> KILIT_BILDIR: kilit_tamam ilk kez -> hakem paketi (+400 garanti)
+        if kb["yeni_kilit"]:
+            self.hakem.kilit_paketi_gonder(t, tuple(float(x) for x in drone_pos), kb)
+            self.durum = "KILIT_BILDIR"
+            print("[FSM] KILIT TAMAM (kumulatif %.1fs) -> hakem paketi gonderildi (+400)."
+                  % kb["kumulatif_kilit_sn"])
+        # periyodik telemetri (hakem stub; 1-5 Hz)
+        self.hakem.telemetri_gonder(t, tuple(float(x) for x in drone_pos), self.durum,
+                                    {"surekli": kb["surekli_kilit_sn"]})
+        # 2) KILIT_BILDIR -> ANGAJMAN: paket gonderildi VE kesintisiz >=3 sn (ERKEN
+        #    ANGAJMAN YASAK: once +400 garanti, sonra +500 denenir).
+        if self.durum == "KILIT_BILDIR" and self.kilit.angajman_hazir():
+            self.durum = "ANGAJMAN"
+            print("[FSM] KILIT BILDIRILDI + %.1fs surekli -> ANGAJMAN (terminal vurus)."
+                  % kb["surekli_kilit_sn"])
+
+    def _oipn_harmanla(self, sonuc, drone_pos, drone_yaw):
+        """IBVS (throttle,pitch,roll,yaw) komutuna APN+OIPN katkisini harmanla.
+        PnP GECERSIZ veya OIPN kapali -> sonuc AYNEN doner (REGRESYON YOK: pose'suz
+        koma mevcut IBVS ile birebir). PnP gecerli -> yatay (yaw) bilesenine
+        gudum_yasasi acisal-hiz katkisi eklenir (orta-safha kilit-tutma iyilestirmesi;
+        terminal vurus mantigina DOKUNULMAZ)."""
+        pnp = self._algi_pnp
+        if not (self.oipn_acik and pnp and pnp.get("gecerli")):
+            return sonuc
+        thr, pitch, roll, yaw = sonuc
+        # LOS yonu: PnP relatif konumdan (dunya yatay). rel_konum_dunya cm.
+        rel = pnp.get("rel_konum_dunya")
+        if not rel:
+            return sonuc
+        d = math.hypot(rel[0], rel[1])
+        if d < 1e-6:
+            return sonuc
+        los_yon = (rel[0] / d, rel[1] / d)
+        r = apn_oipn(self._algi_lam_dot, self._algi_Vc, los_yon,
+                     phi_T=pnp.get("phi_T"), V_T=(self.son_hiz[0] if self.son_hiz is not None else None),
+                     oipn_acik=self.oipn_acik)
+        # APN+OIPN yatay ivmesini govde-yaw duzeltmesine cevir (kucuk katki; ivmeyi
+        # A_MAX'a normalize edip yaw komutuna BETA agirlikli ekle). Isaret guduumde
+        # kalibre; simdilik konservatif (yalniz yaw ince ayari, dikey/ileri IBVS'de).
+        ax, ay = r["a_cmd"]
+        a_perp = -math.sin(drone_yaw) * ax + math.cos(drone_yaw) * ay   # govde-sag ivme
+        yaw_katki = clamp(a_perp / GudumCfg.A_MAX, -1.0, 1.0) * 0.2     # konservatif olcek
+        yaw = clamp(yaw + Cfg.YAW_SIGN * yaw_katki, -1.0, 1.0)
+        return thr, pitch, roll, yaw
+
     def _gorsel_guduum(self, tespit, t, revert_izin=True):
         # revert_izin=False (manuel GORSEL switch): kayipta GPS'e DONME, hover'da kal.
         if tespit is not None:
@@ -669,6 +774,8 @@ class AvciKontrol:
         self._vis_lost_count = 0
         self._vis_ilan = False
         self.ibvs.sifirla()
+        self.kilit.sifirla()                     # FAZ 3: gorsel kilit sayaci da resetlensin
+        self.hakem.sifirla()                     # yeni kilit paketi gonderilebilsin
         return None                              # -> adim() GPS yoluna DUSER (bu tik)
 
     # ----------------------------------------------------------------
@@ -704,32 +811,36 @@ class AvciKontrol:
         tespit = self._gorsel_tespit_oku()
         mod = getattr(self, "vis_mode", "OTO")
         if mod == "GPS":
-            if self.durum == "GORSEL_GUDUM":              # manuel: gorselden GPS'e don
+            if self.durum in _GORSEL_AILE:                # manuel: gorselden GPS'e don
                 self.durum = "ARAMA"; self._vis_ilan = False
+                self.kilit.sifirla(); self.hakem.sifirla()
             self._vis_pos_count = 0
         elif mod == "GORSEL":
-            if self.durum != "GORSEL_GUDUM":              # manuel: hemen gorsel (kilit sayaci yok)
+            if self.durum not in _GORSEL_AILE:            # manuel: hemen gorsel (kilit sayaci yok)
                 self.durum = "GORSEL_GUDUM"; self._vis_lost_count = 0
                 if not self._vis_ilan:
                     print("[GORSEL] Manuel switch -> GORSEL GUDUM (GPS yonelimi kapali).")
                     self._vis_ilan = True
         else:  # OTO — otomatik kilit histerezisi
-            if self.durum != "GORSEL_GUDUM":
-                if tespit is not None and float(tespit.get("conf", 0.0)) >= Cfg.VIS_CONF_MIN:
-                    self._vis_pos_count += 1
-                else:
-                    self._vis_pos_count = 0
-                if self._vis_pos_count >= Cfg.VIS_N_LOCK:
+            # GORSEL_GUDUM ailesi disindaysak (ARAMA/TAKIP) gorsel-kilit ara: eski
+            # "5 kare ham sayaci" KALKTI -> tracker CONFIRMED sorgusu (min_hits=5 ayni
+            # esigi devraldi). track_durumu yoksa (eski format / test) 5-kare fallback.
+            if self.durum not in _GORSEL_AILE:
+                # CONFIRMED track -> gorsel kilit. Degilse durum (ARAMA/TAKIP) asagidaki
+                # handoff blogunda belirlenir (bu blok ARAMA/TAKIP'e DOKUNMAZ; cakisma yok).
+                if self._confirmed_track(tespit):
                     self.durum = "GORSEL_GUDUM"
                     if not self._vis_ilan:
-                        print("[GORSEL] Gorsel temas KILITLENDI -> GPS GUDUMU KESILDI "
-                              "(yonelim yalnizca kamera).")
+                        print("[GORSEL] Gorsel temas KILITLENDI (CONFIRMED track) -> "
+                              "GPS GUDUMU KESILDI (yonelim yalnizca kamera).")
                         self._vis_ilan = True
 
-        if self.durum == "GORSEL_GUDUM":
+        if self.durum in _GORSEL_AILE:
+            # FAZ 3: kilit sayaci (6.1.4) + hakem paketi + KILIT_BILDIR/ANGAJMAN
+            self._faz3_kilit_fsm(tespit, t, drone_pos)
             sonuc = self._gorsel_guduum(tespit, t, revert_izin=(mod == "OTO"))
             if sonuc is not None:
-                thr, pitch, roll, yaw = sonuc
+                thr, pitch, roll, yaw = self._oipn_harmanla(sonuc, drone_pos, drone_yaw)
                 self._send(thr, pitch, roll, yaw)
                 self._log_gorsel(t, drone_pos, yaw_m, drone_yaw, v_own, tespit)
                 return
@@ -768,13 +879,15 @@ class AvciKontrol:
         ex_s = ey_s = d_s = ux = uy = v_close = vdx = vdy = ax = ay = a_fwd = a_right = None
         alc_oncelik = None
 
-        # 4) HANDOFF (histerezisli) -> durum: ARAMA / KILIT
+        # 4) HANDOFF (histerezisli) -> durum: ARAMA / TAKIP (gorus devralabilir menzili).
+        #    FAZ 3: eski "KILIT" -> "TAKIP" (master prompt FSM: ARAMA->TAKIP->GORSEL_GUDUM).
+        #    GPS guduumu ARAMA/TAKIP'te aynen kalir (regresyon yok; yalniz etiket).
         if not self.handoff and d_h < Cfg.HANDOFF_RANGE:
             self.handoff = True
         elif self.handoff and d_h > Cfg.HANDOFF_EXIT:
             self.handoff = False
             self.handoff_announced = False
-        self.durum = "KILIT" if self.handoff else "ARAMA"
+        self.durum = "TAKIP" if self.handoff else "ARAMA"
 
         # 5) turev (EMA)
         de = self._derivative((ex, ey, ez), t)
