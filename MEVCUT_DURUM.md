@@ -5,6 +5,29 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
+> `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
+> veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose
+> modeli (`yolo26m_pose_best`, task=pose kpt_shape=[6,3] sema=kuyruk_ucu) hedefi hiç
+> göremedi (hedef uzaktı + model "detection gibi kalitesiz"). **Bu başarısızlık DEĞİL
+> ÖLÇÜMDÜR** — yeni modelin hedefini sayıyla koyar (>%0). **STATÜ: KOD TAMAM + ZİNCİR
+> DOĞRULANDI**; hassas k* + keypoint-sırası görsel teyidi iyi modele/yakın hedefe devredildi.
+>
+> **🔧 MENÜ AKIŞI (saha bilgisi 2026-07-04):** PLAY (FARE tık) → FLY (FARE tık) → E (KLAVYE).
+> Salt-klavye otomasyonu bu yüzden tutmaz; koşu yöneticisi menü otomasyonu best-effort +
+> insan fallback (çalışıyor). Fare-tık otomasyonu koordinat kalibrasyonu gerektirir (borç).
+>
+> **📋 BORÇ LİSTESİ (iyi model / uygun sahne gelince; koşu komutları hazır):**
+> 1. Keypoint-sırası GÖRSEL TEYİT (şema kuyruk_ucu mu doğru?) → pose modeli hedefi görünce
+>    (yeni model VEYA yakın geçiş). `python arac/kosu_yonetici.py pnp-test --oyun-hazir
+>    --oyunu-acik-birak` (hedef YAKIN olmalı; veri/pnp_teyit_*.png keypoints çizili).
+> 2. HASSAS k* (HFOV=125 kesin teyit; FAZ 0'dan devir) → PnP-uygun frame + perspektif yeterli
+>    (terminal faz, hedef ~5-20 m). Aynı pnp-test komutu; talon_pose_estimator.k_taramasi
+>    'guvenilir' bayrağı k*'ı gate'ler. k*≈0.867'ye yakınsa FAZ 0 offset-regresyonuyla tutarlı.
+> 3. CMC ROLL fazı (FAZ 1'den) → `python arac/kosu_yonetici.py cmc-test` (roll ±8°, hedef
+>    merkezde; yaw fazı zaten GEÇTİ oran 0.27).
+> 4. Menü fare-tık otomasyonu (koordinat kalibrasyonu).
+
 > **🔔 FAZ 2 — pose modeli şema keşfi (2026-07-04, metadata):**
 > `models/yolo26m_pose_best.pt`: task=pose, **kpt_shape=[6,3]** (6 keypoint, PnP için
 > ideal), tek sınıf 'talon', dataset `talon_v10` (Colab `/content/datasets/`; repoda

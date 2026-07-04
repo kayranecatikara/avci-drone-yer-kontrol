@@ -135,11 +135,15 @@ def oyunu_kapat():
 
 
 # ----------------------------------------------------------------------------
-#  MENU OTOMASYONU — START -> FLY -> E klavye simulasyonu (ctypes SendInput,
-#  scancode; oyunlar DirectInput'ta keybd_event'i bazen gormez). Menu akisi
-#  bilinmedigi icin BEST-EFFORT: E sonrasi telemetri akarsa BASARI; akmazsa net
-#  konsol istemi ("PLAY/FLY'a bas") + otomatik algilamaya devam. Tus dizisi
-#  PLAY_TUSLARI'ndan; oyun menusu netlestikce ayarlanir.
+#  MENU OTOMASYONU — BORC/YAPILACAK (2026-07-04 saha bilgisi):
+#  Oyunun gercek menu akisi: PLAY (FARE tik) -> FLY (FARE tik) -> E (KLAVYE).
+#  Yani START/FLY FARE gerektiriyor; salt-klavye (asagidaki _play_otomasyonu)
+#  bu yuzden TUTMADI. Dogru cozum: pencere one getir + PLAY/FLY buton
+#  KOORDINATLARINA SendInput MOUSE tik + sonra E. Buton koordinatlari cozunurluk/
+#  pencere-konumuna bagli -> ya sabit oran (pencere W/H yuzdesi) ile ya da
+#  bir kez elle kalibre edilip kaydedilerek. Simdilik BEST-EFFORT klavye + insan
+#  fallback (calisiyor: insan PLAY/FLY/E yapar, arac telemetriyi otomatik algilar).
+#  Fare-tik otomasyonu bir sonraki iterasyonda (koordinat kalibrasyonuyla).
 # ----------------------------------------------------------------------------
 # scancode (set 1): enter=0x1C, space=0x39, e=0x12, w=0x11, f=0x21
 _SCANCODE = {"enter": 0x1C, "space": 0x39, "e": 0x12, "w": 0x11, "f": 0x21, "s": 0x1F}
@@ -207,36 +211,35 @@ def _play_otomasyonu():
 #  Baglanti + PLAY (telemetri) bekleme
 # ----------------------------------------------------------------------------
 def baglan_ve_bekle(play_bekle_s=120.0, oto_play=True):
-    """Tek TCP baglantisi ac; telemetri (PLAY) baslayana kadar bekle.
-    oto_play=True -> menu otomasyonunu bir kez dene. drone modulu | None doner."""
+    """PLAY'e gecir + tek TCP baglanti + telemetri bekle. drone modulu | None.
+    ONEMLI SIRALAMA: oyun MENUDE iken TCP dinleyici KAPALI (yalniz PLAY/oyunda
+    acilir). O yuzden ONCE menu otomasyonu (klavye; TCP GEREKMEZ) denenir, SONRA
+    TCP surekli yeniden denenir (otomasyon/insan PLAY'e gecince dinleyici acilir)."""
     from sdk import drone_sdk as drone
-    if not drone.connect():
-        # oyun yeni acildiysa TCP dinleyici birkac sn sonra hazir olur -> birkac dene
-        for _ in range(15):
-            time.sleep(2.0)
-            if drone.connect():
-                break
-        else:
-            print("[BAGLANTI] Oyuna baglanilamadi (TCP dinleyici yok).")
-            return None
-    print("[BAGLANTI] TCP kuruldu. Menu otomasyonu denenecek (E sonrasi telemetri=basari)...")
-    # BEST-EFFORT PLAY otomasyonu (bir kez); telemetri gelmezse insan istemine duser
+    # 1) MENU OTOMASYONU (TCP'siz; pencere + START->FLY->E) — oyun PLAY'e gecsin
     if oto_play:
+        print("[BAGLANTI] Menu otomasyonu (START->FLY->E) deneniyor (TCP'siz)...")
         _play_otomasyonu()
+    else:
+        print("           >>> OYUNDA PLAY / FLY'a BAS <<<  (arac otomatik algilar)")
+    # 2) TCP + telemetri: PLAY'e gecince dinleyici acilir -> surekli dene
     _istem_basildi = False
     t0 = time.perf_counter()
     while time.perf_counter() - t0 < play_bekle_s:
-        try:
-            if any(abs(v) > 1e-6 for v in drone.get_drone_location()):
-                print("[BAGLANTI] Telemetri basladi (+%.0f sn)." % (time.perf_counter() - t0))
-                return drone
-        except Exception:
-            pass
-        if not _istem_basildi and time.perf_counter() - t0 > 4.0:
-            _istem_basildi = True     # otomasyon tutmadi -> net insan istemi
-            print("           >>> OYUNDA PLAY / FLY'a BAS <<<  (otomasyon tutmadi; arac "
-                  "telemetriyi otomatik algilar, 'hazir' yazma)")
-        time.sleep(0.25)
+        if not drone.is_connected():
+            drone.connect()                # menu/PLAY gecisinde dinleyici acilana dek dene
+        if drone.is_connected():
+            try:
+                if any(abs(v) > 1e-6 for v in drone.get_drone_location()):
+                    print("[BAGLANTI] Telemetri basladi (+%.0f sn)." % (time.perf_counter() - t0))
+                    return drone
+            except Exception:
+                pass
+        if not _istem_basildi and time.perf_counter() - t0 > 8.0:
+            _istem_basildi = True           # otomasyon tutmadi -> net insan istemi
+            print("           >>> OTOMASYON TUTMADI: OYUNDA PLAY / FLY'a BAS <<<  "
+                  "(arac telemetriyi otomatik algilar, 'hazir' yazma)")
+        time.sleep(0.5)
     print("[BAGLANTI] Telemetri gelmedi (PLAY'e gecilmedi?).")
     try:
         drone.disconnect()
