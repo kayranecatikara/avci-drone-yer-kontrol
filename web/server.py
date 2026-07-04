@@ -656,6 +656,24 @@ poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
 _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
 _son_poz_ui = None         # UI icin son NORMALIZE poz (beyin_lock ile korunur)
 
+# --- SAHTE TESPIT (mouse ile hedef isaretleme) — YZ modeli hazir DEGILKEN guduum testi ---
+# Arayuzde FPV uzerinde mouse BASILI tutulunca normalize (cx,cy) buraya akar ve
+# dedektor dongusunde gercek model ciktisinin YERINE gecer (ayni det sozlugu, ayni
+# beyin.set_gorsel_tespit yolu) -> gorsel guduum algoritmasi "model bu noktayi verdi"
+# senaryosuyla test edilir. Mouse mesaji SAHTE_TAZE_S icinde yenilenmezse otomatik
+# kapanir (failsafe: tarayici kapanirsa/donarsa drone eski noktaya kilitli KALMAZ).
+SAHTE_TAZE_S = 0.6
+_sahte = {"aktif": False, "cx": 0.5, "cy": 0.5, "t": 0.0}   # beyin_lock ile korunur
+
+
+def _sahte_oku():
+    """Taze sahte-tespit verisi varsa kopyasini dondur, yoksa None."""
+    with beyin_lock:
+        s = dict(_sahte)
+    if s["aktif"] and (time.time() - s["t"]) <= SAHTE_TAZE_S:
+        return s
+    return None
+
 
 def _normalize_tespit(det):
     """Dedektor px ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz)."""
@@ -666,12 +684,16 @@ def _normalize_tespit(det):
         return None
     cls = int(det.get("cls", -1))                  # dedektor sinif indeksi (gorsel_tespit uretir)
     sinif = "hedef"
-    try:
-        if dedektor is not None and getattr(dedektor, "names", None):
-            sinif = dedektor.names.get(cls, "hedef")
-    except Exception:
-        pass
+    if det.get("sahte"):
+        sinif = "manuel"                           # mouse ile isaretlendi (sahte tespit modu)
+    else:
+        try:
+            if dedektor is not None and getattr(dedektor, "names", None):
+                sinif = dedektor.names.get(cls, "hedef")
+        except Exception:
+            pass
     return {
+        "sahte": bool(det.get("sahte", False)),    # UI rozeti: tespit mouse'tan mi geldi?
         "ex": (det["cx"] - W / 2.0) / (W / 2.0),   # + = hedef SAGDA
         "ey": (det["cy"] - H / 2.0) / (H / 2.0),   # + = hedef ALTTA
         "cx": det["cx"] / W, "cy": det["cy"] / H,  # normalize merkez [0..1]
@@ -747,16 +769,19 @@ def dedektor_dongusu():
                           "(best.pt/GPS normal calisir)." % poz_dedektor.hata)
             else:
                 print("[POZ] %s yok -> poz kestirimi kapali." % POSE_MODEL_PATH)
-        if not dedektor.hazir:
+        sahte = _sahte_oku()                          # mouse ile isaretlenen hedef (taze ise)
+        if not dedektor.hazir and sahte is None:
             time.sleep(1.0)                           # kurulum yok -> CPU yakma
             continue
-        try:
-            dedektor.conf = float(Cfg.VIS_CONF_MIN)   # canli-tune: predict esigi slider'i izler
-            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
-            # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
-            det = dedektor.tespit_et(bgr) if bgr is not None else None
-        except Exception:
-            bgr, det = None, None
+        bgr, det = None, None
+        if dedektor.hazir:
+            try:
+                dedektor.conf = float(Cfg.VIS_CONF_MIN)   # canli-tune: predict esigi slider'i izler
+                bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
+                # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
+                det = dedektor.tespit_et(bgr) if bgr is not None else None
+            except Exception:
+                bgr, det = None, None
         # POZ kestirimi: AYNI kare uzerinde ILAVE inference + PnP (kilit DISINDA).
         # Her turlu hata poz'u None yapar; best.pt/gudum akisini ETKILEYEMEZ.
         poz_ui = None
@@ -776,6 +801,19 @@ def dedektor_dongusu():
                     poz_ui = _normalize_poz(pdet, poz, yp)
             except Exception:
                 poz_ui = None
+        # SAHTE TESPIT: mouse verisi tazeyken model ciktisinin YERINE gecer (o karede
+        # gercek dedektor sonucu YOK SAYILIR — kullanici "modelin verdigi nokta bu"
+        # senaryosunu oynatiyor). Sozluk HedefDedektor.tespit_et semasiyla birebir ->
+        # beyin/guduum icin gercek tespitten AYIRT EDILEMEZ (amac da bu).
+        if sahte is not None:
+            if bgr is not None:
+                H_, W_ = bgr.shape[:2]
+            else:                                     # kare yok -> nominal cozunurluk
+                W_, H_ = 1920.0, 1080.0               # (her sey W/H'ye normalize edildigi icin sonuc ayni)
+            det = {"cx": sahte["cx"] * W_, "cy": sahte["cy"] * H_,
+                   "w": 0.06 * W_, "h": 0.05 * H_,    # nominal bbox (guduum ex/ey merkezi kullanir)
+                   "conf": 1.0, "cls": -1, "sahte": True,
+                   "W": W_, "H": H_, "t": time.perf_counter()}
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det)
             _son_tespit_ui = _normalize_tespit(det)
@@ -1145,6 +1183,30 @@ class Handler(BaseHTTPRequestHandler):
                     manuel_kontrol["roll"] = _eksen(data.get("roll", 0.0))
                     manuel_kontrol["yaw"] = _eksen(data.get("yaw", 0.0))
                     manuel_son_giris = time.time()
+            self._send(200, b'{"ok":true}', "application/json")
+        elif self.path == "/api/sahte":
+            # SAHTE TESPIT akisi (mouse -> normalize hedef merkezi). /api/manuel ile
+            # ayni desen: yuksek frekansli, status yazisini kirletmez. aktif=false
+            # gelirse veya mesaj SAHTE_TAZE_S boyunca kesilirse enjeksiyon durur ->
+            # gercek dedektor ciktisina kendiliginden geri donulur.
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+
+            def _n01(x):
+                try:
+                    return max(0.0, min(1.0, float(x)))
+                except Exception:
+                    return 0.5
+
+            with beyin_lock:
+                _sahte["aktif"] = bool(data.get("aktif"))
+                _sahte["cx"] = _n01(data.get("cx", _sahte["cx"]))
+                _sahte["cy"] = _n01(data.get("cy", _sahte["cy"]))
+                _sahte["t"] = time.time()
             self._send(200, b'{"ok":true}', "application/json")
         elif self.path == "/api/tune":
             # CANLI TUNE: {param, value} -> Cfg.<param> = float(value) (allowlist'te ise).

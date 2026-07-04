@@ -76,6 +76,15 @@ bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod t
   15 m+ mesafe şişer; %27 kare tespitsiz → **yalnız terminal faz (≈4-12 m) aracı**.
   Güdüme besleme (dalış zamanlaması / lead) modeli kullanıcı onaylarsa SONRAKİ adım.
 
+## SAHTE TESPİT MODU (2026-07-04 — güdüm geliştirme aracı)
+YZ modeli hazır olmadan görsel güdüm algoritması geliştirmek için: arayüzdeki
+**"🖱️ Sahte Tespit (Mouse)"** butonu açıkken, görev sırasında FPV'de mouse BASILI
+TUTULAN nokta `/api/sahte` üzerinden server'a akar ve `dedektor_dongusu`'nde gerçek
+model çıktısının YERİNE geçer (aynı det sözlüğü → `beyin.set_gorsel_tespit`; güdüm
+için gerçek tespitten ayırt edilemez). Failsafe: mesaj 0.6 s kesilirse otomatik düşer.
+Overlay'de MACENTA bbox + "[SAHTE/MOUSE]" etiketi (yeşil = gerçek model). Yeni model
+gelince hiçbir şey sökülmez — buton kapalıyken sistem tamamen eskisi gibi.
+
 ## BEKLEYEN İŞ
 - **Görsel güdüm fazı — YZ modelleri / ekstra özellikler:** görsel güdüm algoritmasına yapay
   zeka modelleri ve ek yetenekler eklenecek (ör. daha güçlü tespit/tracking, hedef sınıf/ID

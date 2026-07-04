@@ -213,6 +213,10 @@
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
         <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
+        <!-- SAHTE TESPİT: YZ modeli hazır değilken güdüm testi. Açıkken görev sırasında
+             FPV'de mouse BASILI TUTULAN nokta, sanki modelin verdiği tespitmiş gibi
+             güdüme akar (server dedektör döngüsünde gerçek çıktının yerine geçer). -->
+        <button id="sahteBtn" class="btn" onclick="sahteTogle()"><span class="ic">🖱️</span> Sahte Tespit (Mouse)</button>
 
         <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
         <div class="gudum-switch">
@@ -431,6 +435,61 @@
   }
 
   // =====================================================================
+  //  SAHTE TESPİT — YZ modeli hazır olmadan güdüm testi:
+  //  Buton AÇIK iken FPV üzerinde mouse BASILI TUTULAN nokta /api/sahte'ye
+  //  akıtılır; server dedektör döngüsünde model çıktısının YERİNE koyar.
+  //  Mouse bırakılınca / pencere odağı gidince aktif=false gider; ayrıca
+  //  server tarafında 0.6 s tazelik failsafe'i var (mesaj kesilirse düşer).
+  // =====================================================================
+  let sahteAcik = false;      // buton durumu (mod silahlı mı?)
+  let sahteBasili = false;    // mouse şu an basılı mı?
+  let sahteSonXY = null;      // [cx,cy] normalize — hem gönderim hem yerel imleç çizimi
+  let sahteTimer = null;      // basılıyken ~12 Hz tazeleme (failsafe + sürükleme takibi)
+
+  function sahteTogle(){
+    sahteAcik = !sahteAcik;
+    $("sahteBtn").classList.toggle("active", sahteAcik);
+    $("overlay").style.cursor = sahteAcik ? "crosshair" : "default";
+    $("leftStatus").textContent = sahteAcik
+      ? "SAHTE TESPİT AÇIK — görev sırasında FPV'de hedefin üstüne mouse ile BASILI TUT."
+      : "Sahte tespit kapalı — güdüm gerçek dedektör çıktısını kullanır.";
+    if(!sahteAcik) sahteBirak();
+  }
+  function sahteGonder(aktif){
+    const b = {aktif: aktif};
+    if(aktif && sahteSonXY){ b.cx = sahteSonXY[0]; b.cy = sahteSonXY[1]; }
+    fetch("/api/sahte",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(b)}).catch(()=>{});
+  }
+  function sahteXY(ev){
+    // Mouse konumu -> video İÇERİK dikdörtgeninde normalize [0..1] (letterbox payı düşülür)
+    const rc = _icerikRect($("cam"));
+    const r = $("overlay").getBoundingClientRect();
+    const x = (ev.clientX - r.left - rc.x) / rc.w;
+    const y = (ev.clientY - r.top  - rc.y) / rc.h;
+    return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
+  }
+  function sahteBirak(){
+    if(sahteTimer){ clearInterval(sahteTimer); sahteTimer = null; }
+    if(sahteBasili){ sahteBasili = false; sahteGonder(false); }
+    sahteSonXY = null;
+  }
+  window.addEventListener("DOMContentLoaded", ()=>{
+    const ov = $("overlay");
+    ov.addEventListener("mousedown", ev=>{
+      if(!sahteAcik || ev.button !== 0) return;
+      sahteBasili = true; sahteSonXY = sahteXY(ev); sahteGonder(true);
+      if(!sahteTimer) sahteTimer = setInterval(()=>{ if(sahteBasili) sahteGonder(true); }, 80);
+      ev.preventDefault();
+    });
+    window.addEventListener("mousemove", ev=>{     // sürükleme: hedef hareket ederse takip et
+      if(sahteBasili) sahteSonXY = sahteXY(ev);
+    });
+    window.addEventListener("mouseup", sahteBirak);
+    window.addEventListener("blur", sahteBirak);   // sekme/pencere odağı gitti -> güvenli bırak
+  });
+
+  // =====================================================================
   //  MANUEL MOD — klavyeyle drone kontrolü + hız slideri
   //  Tuş haritası (e.code ile fiziksel tuş; klavye dili fark etmez):
   //    W/S = ileri/geri (pitch),  A/D = sola/sağa kay (roll),
@@ -643,18 +702,22 @@
     ctx.fillText("REF", mcx+33, refY+4);
     const det=gs.tespit;
     if(det){
+      // SAHTE tespit (mouse) MACENTA çizilir — gerçek model çıktısıyla karışmasın
+      const bbClr = det.sahte ? "#ff52ff" : "#25e0a0";
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
-      ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2.5;                // bbox
+      ctx.strokeStyle=bbClr; ctx.lineWidth=2.5;                    // bbox
       ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
-      ctx.fillStyle="#25e0a0"; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
-      ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // REFERANS -> hedef sapma cizgisi (gudum hatasi)
+      ctx.fillStyle=bbClr; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
+      ctx.strokeStyle=det.sahte?"rgba(255,82,255,.5)":"rgba(37,224,160,.5)";
+      ctx.lineWidth=1.5;                                           // REFERANS -> hedef sapma cizgisi (gudum hatasi)
       ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();
-      // HEDEF ID ETİKETİ (ister 5): "ID:1 talon 0.87" — bbox üst kenarında, yeşil zemin
+      // HEDEF ID ETİKETİ (ister 5): "ID:1 talon 0.87" — bbox üst kenarında
       const idTxt = (det.id!=null ? "ID:"+det.id+" " : "") + (det.sinif||"hedef")
-                    + " " + Number(det.conf).toFixed(2);
+                    + " " + Number(det.conf).toFixed(2) + (det.sahte ? " [SAHTE/MOUSE]" : "");
       ctx.font="bold 12px monospace";
       const itw=ctx.measureText(idTxt).width;
-      ctx.fillStyle="rgba(20,140,90,.9)"; ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 16);
+      ctx.fillStyle=det.sahte?"rgba(140,25,140,.9)":"rgba(20,140,90,.9)";
+      ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 16);
       ctx.fillStyle="#fff"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-6);
       ctx.font="11px monospace"; ctx.fillStyle="#cfe";             // ex/ey (alt küçük satır)
       ctx.fillText("ex="+Number(det.ex).toFixed(2)+" ey="+Number(det.ey).toFixed(2),
@@ -686,6 +749,17 @@
           ctx.fillText(s2, rc.x+10, rc.y+76);
         }
       }
+    }
+    // SAHTE TESPİT yerel imleç: mouse basılıyken ANINDA çizilir (telemetri gecikmesini
+    // beklemez); server'dan dönen macenta bbox ile üst üste oturması = akış doğru çalışıyor.
+    if(sahteBasili && sahteSonXY){
+      const px=rc.x+sahteSonXY[0]*rc.w, py=rc.y+sahteSonXY[1]*rc.h;
+      ctx.strokeStyle="#ff52ff"; ctx.lineWidth=2;
+      ctx.beginPath(); ctx.arc(px,py,10,0,6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px-16,py); ctx.lineTo(px+16,py);
+      ctx.moveTo(px,py-16); ctx.lineTo(px,py+16); ctx.stroke();
+      ctx.font="bold 11px monospace"; ctx.fillStyle="#ff52ff";
+      ctx.fillText("SAHTE HEDEF", px+14, py-14);
     }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
