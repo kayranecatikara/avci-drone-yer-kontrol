@@ -232,11 +232,14 @@
 > | roll_cmd RMS | 0.369 | **0.319** (↓%14) |
 > | \|yaw_err\| ort | 42.0° | **33.5°** (↓8°) |
 > | tepe yaw-rate p95 | — | **131°/s** |
+> | **yaw-gain taraması** (2026-07-05) | baz KP_YAW 1.0/YAW_MAX 0.30 → **23.8°** en iyi | gain↑ **KÖTÜLEŞTİRDİ** (1.5→79.9°, 3.0→127.6°) |
 >
-> → DÜZELTME-1 **iyileştirdi ama modest**; yaw_err hâlâ 33.5° (<10° değil). **yaw ZAYIF
-> DEĞİL** (131°/s, bearing-tabanlı → konvansiyondan bağımsız güvenilir). Kalan: yaw-servo
-> **kazancı** (KP_YAW/YAW_MAX) veya turn-gate agresifliği artırılmalı (DÜZELTME-2 iii;
-> yaw_err bearing-tabanlı olduğundan konvansiyondan bağımsız güvenle tune edilebilir).
+> → DÜZELTME-1 **iyileştirdi ama modest**; yaw_err hâlâ 33.5°. **yaw ZAYIF DEĞİL**
+> (131°/s). **YAW-GAIN TARAMASI (5 aday, sağlık-bayraklı, gecerli=3): gain ARTIRMAK
+> yaw_err'i DÜŞÜRMEDİ, kötüleştirdi → baz en iyi (23.8°, ama <10° tutmadı); FOV %40.**
+> UYARI: tek-uçuş taraması geometri-confounded (her aday farklı pencere/geometri; hedef
+> hareketli). SONUÇ: **yaw-gain LEVER DEĞİL** — residual yaw_err dinamiği (hareketli hedef
+> + faz döngüsü + ileri-kapı) ve MODEL, gain değil. Gain baz'da bırakıldı (değişiklik yok).
 >
 > **D — TP/FP (Blokör A KAPALI: truth artık tespit karesinde, `truth_yok=0`):**
 > - GORSEL_TAKIP 1315 kare, ölçülen 98 (%7.5); **TP=0, FP=66, kamera-arkası 32 → PRECISION %0**.
