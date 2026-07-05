@@ -3,10 +3,13 @@
 **Dosyalar:** `guidance/gudum_yasasi.py` (saf yasa), `guidance/ana_kontrol.py`
 (harmanlama + terminal)
 
-- **Ne yapar:** GORSEL_GUDUM'da orta-safha kilit-tutma ivmesini üretir:
+- **Ne yapar:** GÖRSEL TAKİP fazında orta-safha kilit-tutma ivmesini üretir:
   `a_cmd = N·Vc·λ̇ + (N/2)·a_T + β·a_ff`. **APN** orantılı seyrüsefer +
   hedef-ivme telafisi; **OIPN** ileri-besleme `a_ff = g·tan(φ_T)` (hedef roll'undan
   erken manevra sinyali). Terminal vuruşa (çarpışma-rotası) dokunmaz.
+- **§6.1.2 "yönelim üretimi" kanıtı:** bu yasa GÖRSEL TAKİP'in yönelim çıktısıdır;
+  kanıt = 🎮 GÜDÜM KOMUTU paneli (throttle/pitch/roll/yaw) + CSV `a_PN /
+  a_APN_terim / a_OIPN_terim` sütunları (üç takip şartından ilki — bkz. kart 7).
 - **Neden bu tasarım:** Saf takip hedefin kuyruğunu kovalar; APN λ̇'yı sıfırlayarak
   kesişime gider, OIPN roll'u görünce **dönüşten önce** öne nişan alır. `gudum_yasasi`
   saf/sim-bağımsız → sentetik girdiyle unit-test.

@@ -214,12 +214,12 @@ class Cfg:
     LOG_ENABLE = True
 
     # --- GORSEL GUDUM (DUZ IBVS) — gorsel temas SONRASI yonelim (YALNIZCA kamera) ---
-    # Kilit: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec
+    # Kilit: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_TAKIP'a gec
     # ve BIR DAHA GPS'e donme (yarisma kurali). Isaret/gain'ler CANLI tune ile
     # kalibre edilir (once tek eksen: yaw<-ex, sonra throttle<-ey, en son ileri).
     VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "best.pt")
     VIS_CONF_MIN     = 0.45     # kilit/komut icin asgari guven
-    VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
+    VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_TAKIP (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
     VIS_DEADRECKON_S = 0.5      # kayipta son EMA yonuyle KISA kor-devam, sonra hover
     VIS_LOST_TO_GPS_S = 1.0     # kayip bu sureyi asarsa GPS guduumune GERI DON (yeniden yaklas +
@@ -300,9 +300,16 @@ def lead_kelepce(anlik, lead, maks_cm):
 KAMERA_FOV_YARIM = math.radians(kamera_model.HFOV_DEG / 2.0)   # YATAY yarim aci (TEK KAYNAK)
 KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
-# FAZ 3 FSM: gorsel guduum ailesi (hepsinde IBVS/gorsel yonelim aktif; GPS kesik).
-# Durumlar: ARAMA -> TAKIP -> GORSEL_GUDUM -> KILIT_BILDIR -> ANGAJMAN.
-_GORSEL_AILE = ("GORSEL_GUDUM", "KILIT_BILDIR", "ANGAJMAN")
+# FAZ 3 FSM: gorsel takip ailesi (hepsinde IBVS/gorsel yonelim aktif; GPS kesik).
+# Durumlar: ARAMA -> YAKLASMA -> GORSEL_TAKIP -> KILIT_BILDIR -> ANGAJMAN.
+#
+# ADLANDIRMA GEREKCESI (sartname §6.1.2): "takip" = GORSEL yonelim uretimidir.
+# GNSS'li yaklasma fazina "takip" demek video degerlendirmesinde yanlis-algi
+# riskiydi -> o faz YAKLASMA (GNSS ile kapanis); gorsel yonelim fazi GORSEL_TAKIP
+# (§6.1.2 takip tanimi). YAKLASMA kilit/angajman zincirine DAHIL DEGILDIR; yalniz
+# gorsel temasa dek GNSS'li kapanistir. (Onceki adlar koddan kalkti; onceki tarihli
+# ucus CSV'leri eski etiketlerle kayitli -> araclarda esleme sozlugu: arac/fsm_adlari.py.)
+_GORSEL_AILE = ("GORSEL_TAKIP", "KILIT_BILDIR", "ANGAJMAN")
 
 
 class AvciKontrol:
@@ -314,7 +321,7 @@ class AvciKontrol:
         # gelir (uretim yolu). Gelistirme/test bir fn takabilir (set_hedef_kaynagi).
         self._hedef_kaynak_fn = None
         self.hedef_kaynak_ad = "filtre"     # ucus CSV'sindeki hedef_kaynak etiketi
-        self.durum = "ARAMA"            # ARAMA(yaklasma) -> KILIT(handoff/gorus)
+        self.durum = "ARAMA"            # ARAMA -> YAKLASMA -> GORSEL_TAKIP -> KILIT_BILDIR -> ANGAJMAN
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
         self.son_z_anlik = None         # J'nin ANLIK (lead'siz) irtifa kestirimi (cm) - DIKEY icin
@@ -353,7 +360,7 @@ class AvciKontrol:
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
 
         # --- FAZ 3: kilit sayaci + hakem + APN/OIPN algi snapshot'i ---
-        self.kilit = KilitDurumu()      # sartname 6.1.4 sayaci (GORSEL_GUDUM'da isler)
+        self.kilit = KilitDurumu()      # sartname 6.1.4 sayaci (GORSEL_TAKIP'da isler)
         self.hakem = HakemIstemci()     # kilit paketi + telemetri (stub; jsonl log)
         self.oipn_acik = True           # OIPN anahtari (arayuz; pose gecersizken zaten pasif)
         self.oipn_beta = GudumCfg.BETA  # OIPN feedforward katsayisi (canli slider)
@@ -420,7 +427,7 @@ class AvciKontrol:
     #  fn=None -> filtre kaynagina don (filtre TAZE kurulur; bayat kestirim
     #  tasinmasin). ad: ucus CSV'sindeki hedef_kaynak etiketi. Bu bir GUDUM
     #  modu degil KAYNAK secicidir: yalnizca midcourse (GPS yaklasma)
-    #  beslemesini degistirir; vis_mode anahtarina ve GORSEL_GUDUM sonrasina
+    #  beslemesini degistirir; vis_mode anahtarina ve GORSEL_TAKIP sonrasina
     #  dokunmaz (o fazlarda hedef GNSS'i zaten kullanilmiyor).
     # ----------------------------------------------------------------
     def set_hedef_kaynagi(self, fn=None, ad="filtre"):
@@ -657,7 +664,7 @@ class AvciKontrol:
         return det
 
     # ----------------------------------------------------------------
-    #  GORSEL_GUDUM logu (phase="VISUAL"): meta+drone+uygulanan komut + normalize
+    #  GORSEL_TAKIP logu (phase="VISUAL"): meta+drone+uygulanan komut + normalize
     #  gorsel hata (vis_ex/ey), gordu/conf/area. _LOG_COLS'daki vis_* kolonlarini
     #  doldurur; digerleri bos kalir (sema-guvenli; analiz_ucus.py etkilenmez).
     # ----------------------------------------------------------------
@@ -676,7 +683,7 @@ class AvciKontrol:
             "vis_gordu": 1 if tespit is not None else 0,
             "fsm_durum": self.durum, "beta": self.oipn_beta,
         }
-        # Hedef durum beslemesini (son_temiz) GORSEL_GUDUM'da da logla -> gelistirme/
+        # Hedef durum beslemesini (son_temiz) GORSEL_TAKIP'da da logla -> gelistirme/
         # dogrulama analizinde (arac/) tespit aninda hedef konumunu reprojekte edebilmek
         # icin. Bu, kaynak seciciye gore AKTIF beslemenin kendisidir (uretim yolunda
         # filtre kestirimi); yeni/harici bir kaynak CAGIRMAZ, ek erisim yok.
@@ -748,7 +755,7 @@ class AvciKontrol:
         # handoff (_confirmed_track) ayri ve gevsek (Cfg.VIS_CONF_MIN=0.45) kalir.
         kb = self.kilit.adim(tespit, W, H, t)
         self._son_kilit_bilgi = kb
-        # 1) GORSEL_GUDUM -> KILIT_BILDIR: kilit_tamam ilk kez -> hakem paketi (+400 garanti)
+        # 1) GORSEL_TAKIP -> KILIT_BILDIR: kilit_tamam ilk kez -> hakem paketi (+400 garanti)
         if kb["yeni_kilit"]:
             self.hakem.kilit_paketi_gonder(t, tuple(float(x) for x in drone_pos), kb)
             self.durum = "KILIT_BILDIR"
@@ -860,19 +867,19 @@ class AvciKontrol:
             self._vis_pos_count = 0
         elif mod == "GORSEL":
             if self.durum not in _GORSEL_AILE:            # manuel: hemen gorsel (kilit sayaci yok)
-                self.durum = "GORSEL_GUDUM"; self._vis_lost_count = 0
+                self.durum = "GORSEL_TAKIP"; self._vis_lost_count = 0
                 if not self._vis_ilan:
                     print("[GORSEL] Manuel switch -> GORSEL GUDUM (GPS yonelimi kapali).")
                     self._vis_ilan = True
         else:  # OTO — otomatik kilit histerezisi
-            # GORSEL_GUDUM ailesi disindaysak (ARAMA/TAKIP) gorsel-kilit ara: eski
+            # GORSEL_TAKIP ailesi disindaysak (ARAMA/YAKLASMA) gorsel-kilit ara: eski
             # "5 kare ham sayaci" KALKTI -> tracker CONFIRMED sorgusu (min_hits=5 ayni
             # esigi devraldi). track_durumu yoksa (eski format / test) 5-kare fallback.
             if self.durum not in _GORSEL_AILE:
-                # CONFIRMED track -> gorsel kilit. Degilse durum (ARAMA/TAKIP) asagidaki
-                # handoff blogunda belirlenir (bu blok ARAMA/TAKIP'e DOKUNMAZ; cakisma yok).
+                # CONFIRMED track -> gorsel kilit. Degilse durum (ARAMA/YAKLASMA) asagidaki
+                # handoff blogunda belirlenir (bu blok ARAMA/YAKLASMA'e DOKUNMAZ; cakisma yok).
                 if self._confirmed_track(tespit):
-                    self.durum = "GORSEL_GUDUM"
+                    self.durum = "GORSEL_TAKIP"
                     if not self._vis_ilan:
                         print("[GORSEL] Gorsel temas KILITLENDI (CONFIRMED track) -> "
                               "GPS GUDUMU KESILDI (yonelim yalnizca kamera).")
@@ -922,15 +929,15 @@ class AvciKontrol:
         ex_s = ey_s = d_s = ux = uy = v_close = vdx = vdy = ax = ay = a_fwd = a_right = None
         alc_oncelik = None
 
-        # 4) HANDOFF (histerezisli) -> durum: ARAMA / TAKIP (gorus devralabilir menzili).
-        #    FAZ 3: eski "KILIT" -> "TAKIP" (master prompt FSM: ARAMA->TAKIP->GORSEL_GUDUM).
-        #    GPS guduumu ARAMA/TAKIP'te aynen kalir (regresyon yok; yalniz etiket).
+        # 4) HANDOFF (histerezisli) -> durum: ARAMA / YAKLASMA (gorus devralabilir menzili).
+        #    FAZ 3: eski "KILIT" -> "YAKLASMA" (master prompt FSM: ARAMA->YAKLASMA->GORSEL_TAKIP).
+        #    GPS guduumu ARAMA/YAKLASMA'te aynen kalir (regresyon yok; yalniz etiket).
         if not self.handoff and d_h < Cfg.HANDOFF_RANGE:
             self.handoff = True
         elif self.handoff and d_h > Cfg.HANDOFF_EXIT:
             self.handoff = False
             self.handoff_announced = False
-        self.durum = "TAKIP" if self.handoff else "ARAMA"
+        self.durum = "YAKLASMA" if self.handoff else "ARAMA"
 
         # 5) turev (EMA)
         de = self._derivative((ex, ey, ez), t)

@@ -3,7 +3,7 @@
 ================================================================================
 GUDUM YASASI — APN + OIPN (YARISMA PIPELINE FAZ 3)
 ================================================================================
-GORSEL_GUDUM birincil hatti. Orta-safha kilit-tutma/takip iyilestirmesi;
+GORSEL_TAKIP birincil hatti. Orta-safha kilit-tutma/takip iyilestirmesi;
 TERMINAL vurus mantigina (ana_kontrol carpisma-rotasi) DOKUNMAZ.
 
   a_cmd = N·Vc·λ̇  +  (N/2)·a_T  +  β·a_ff

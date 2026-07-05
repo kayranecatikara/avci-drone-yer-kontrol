@@ -18,7 +18,7 @@
 | 10 | Görev sonu başarı çıktısı | Tam ekran **🎯 GÖREV BAŞARILI** overlay (min mesafe + "insan müdahalesi yok") | ☐ |
 
 ## Ek video kanıt panelleri (şartname videosu vurguları)
-- **GNSS bağımlılığının azalması:** GORSEL_GUDUM'a geçince HEDEF GNSS rozeti YEŞİL
+- **GNSS bağımlılığının azalması:** GÖRSEL TAKİP'e geçince HEDEF GNSS rozeti YEŞİL
   "KULLANILMIYOR ✓" olur (kalem 3'ün güçlü hali) — kilit panelinde FSM durumu da izlenir.
 - **Kilit süreci (§6.1.4):** 🔒 KİLİT SAYACI paneli (kümülatif/5 + pencere doluluk çubuğu +
   eksen kaplama + AV çerçevesi FPV overlay'de). Kilit tamamlanamazsa `engel` alanı hangi
@@ -57,7 +57,7 @@ Marking artık otomatik: **yakalama + "üretildi" denetimi + "okunuyor" değerle
 
 ## Otomatik sonuç — FSM provası 2026-07-04 20:34 (DEV kaynak)
 > Koşu: `ucus_log_20260704_203553.csv` + `olaylar.json` (159 olay/kare, ~4 dk).
-> FSM tam çalıştı: ARAMA→TAKIP→GORSEL_GUDUM döngüsü, kilit sayacı + engel teşhisi
+> FSM tam çalıştı: ARAMA→YAKLAŞMA→GÖRSEL TAKİP döngüsü, kilit sayacı + engel teşhisi
 > canlı. Zayıf detection modeli (best.pt) kilidi **tutamadı** (hedef sürekli
 > coast/LOST → kümülatif 5 sn'ye ulaşmadı), bu yüzden kalem 9-10 üretilmedi
 > (İYİ MODEL runbook — beklenen). Kalem 1-8 üretildi ve **%50 vekilde de okunur**.
@@ -75,7 +75,7 @@ Marking artık otomatik: **yakalama + "üretildi" denetimi + "okunuyor" değerle
 | 9 | Angajman/vuruş | YOK | — | — | Zayıf model kilidi tamamlayamadı → ANGAJMAN 0 kare (İYİ MODEL runbook) |
 | 10 | Görev sonu başarı | YOK | — | — | Angajman olmadı → başarı ekranı tetiklenmedi |
 
-**Ek gözlem (kalem 3'ün güçlü hali):** GORSEL_GUDUM'da FPV'de **HEDEF GNSS:
+**Ek gözlem (kalem 3'ün güçlü hali):** GÖRSEL TAKİP'te FPV'de **HEDEF GNSS:
 KULLANILMIYOR ✓** yeşil rozeti okundu — GNSS bağımlılığının azaldığı an görünür
 (kalem 3'ün "kullanım" kanıtı yine teslim/filtre koşusuna bırakıldı).
 

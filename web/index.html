@@ -599,7 +599,7 @@
       ["V_CAP_NEAR","Terminale giriş hız tavanı (cm/s)   (savruluyorsan düşür)",200,1500,50],
       ["BRAKE_DIST","Frenleme başlangıç mesafesi (cm)   (yanından geçip savruluyorsa artır)",3000,12000,500],
     ]],
-    ["GÖRSEL GÜDÜM AYARLARI (görsel temas sonrası — yalnızca kamera)", [
+    ["GÖRSEL TAKİP AYARLARI (görsel temas sonrası — yalnızca kamera)", [
       ["VIS_SIGN_YAW","Yön: burun sağ/sol   (hedef ters yöne kaçıyorsa −1/+1 çevir)",-1,1,2],
       ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
       ["VIS_SIGN_VZ","Yön: irtifa yukarı/aşağı   (ters ortalıyorsa çevir)",-1,1,2],
@@ -680,6 +680,17 @@
     if(im && im.style.display==="block") return im;
     return $("cam");
   }
+  // FSM durum -> arayuz etiketi (sartname §6.1.2: GNSS'li YAKLASMA, gorsel GORSEL_TAKIP).
+  // Panel TAM etiket; FPV overlay KISA (yaninda ayrica HEDEF GNSS rozeti var).
+  function _fsmEtiket(d){
+    const m = {"YAKLASMA":"YAKLAŞMA (GNSS)",
+               "GORSEL_TAKIP":"GÖRSEL TAKİP — GNSS KULLANILMIYOR",
+               "KILIT_BILDIR":"KİLİT BİLDİR","ANGAJMAN":"ANGAJMAN","ARAMA":"ARAMA"};
+    return m[d] || d || "—";
+  }
+  function _fsmKisa(d){
+    return d==="GORSEL_TAKIP" ? "GÖRSEL TAKİP" : d==="YAKLASMA" ? "YAKLAŞMA" : (d||"—");
+  }
   function _icerikRect(el){
     const cw=el.clientWidth, ch=el.clientHeight;
     const vw=el.videoWidth||el.naturalWidth||0, vh=el.videoHeight||el.naturalHeight||0;
@@ -743,10 +754,10 @@
                    "  conf="+Number(det.conf).toFixed(2), bx-bw/2, by-bh/2-6);
     }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
-    const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
+    const dur = _fsmKisa(gs.durum);
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
     ctx.fillText("DURUM: "+dur+modTxt, rc.x+10, rc.y+22);
-    if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
+    if(gs.durum!=="GORSEL_TAKIP" && gs.n_lock){                     // kilit ilerlemesi
       ctx.fillStyle="#8aa"; ctx.fillText("KİLİT: "+(gs.pos_count||0)+"/"+gs.n_lock, rc.x+10, rc.y+40);
     }
     // HEDEF GNSS rozeti (sag-ust): GORSEL fazında yeşil "KULLANILMIYOR" (yarışma
@@ -791,7 +802,7 @@
       $("gorevDurum").innerHTML = t.manuel_aktif
         ? '🎮 MANUEL MOD — klavye kontrol'
         : t.gorev_aktif
-          ? "🟢 Görev: AKTİF — " + kad + (t.j && t.j.durum ? " · " + t.j.durum : "")
+          ? "🟢 Görev: AKTİF — " + kad + (t.j && t.j.durum ? " · " + _fsmKisa(t.j.durum) : "")
           : "⚪ Görev: Pasif";
       // Aktif güdüm kaynağına göre buton vurgusu
       kaynakVurgula(t.gorev_aktif ? t.kaynak : null);
@@ -854,7 +865,7 @@
             (100*kl.kaplama_yatay).toFixed(0)+'% / '+(100*kl.kaplama_dikey).toFixed(0)+'% <small>(yat/dik, ≥%5)</small></span>';
         }
       }
-      $("fsmDurum").textContent = gs.durum || "—";
+      $("fsmDurum").textContent = _fsmEtiket(gs.durum);
       // 🎮 Güdüm komutu (kalem 8)
       const cf=(x)=> (x==null?"—":(x>=0?"+":"")+Number(x).toFixed(2));
       $("cmdThr").textContent=cf(d.cmd_throttle); $("cmdPit").textContent=cf(d.cmd_pitch);

@@ -12,7 +12,7 @@ midcourse yaklasmayi (ARAMA/TAKIP) hedefin BOZULMAMIS konumuyla kosturmak
 
 Bu bir GUDUM modu degil KAYNAK secicisidir:
   * OTO/GPS/GORSEL anahtarina dokunmaz.
-  * GORSEL_GUDUM ve sonrasi ETKILENMEZ (o fazlarda hedef GNSS'i kullanilmiyor).
+  * GORSEL_TAKIP ve sonrasi ETKILENMEZ (o fazlarda hedef GNSS'i kullanilmiyor).
   * Ucus CSV'sine hedef_kaynak etiketi "gercek" yazilir (kayit ayirt edilir).
 
 Truth'a dokunan TUM kod bu dosyadadir; ucus pipeline'inin geri kalani

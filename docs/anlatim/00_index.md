@@ -19,5 +19,5 @@
 **Akış (video anlatım sırası):** bozuk GNSS girdi (1) → füzyon temizler + hız
 kestirir (3) → GPS ile bölgeye yönelme → YOLO tespit (1) → tracking ID
 sürekliliği (2) → görsel güdüm + PnP/OIPN (4,5) → kilit sayacı §6.1.4 (6) →
-FSM ANGAJMAN (7). **GNSS bağımlılığının azaldığı** an: FSM GORSEL_GUDUM'a
+FSM ANGAJMAN (7). **GNSS bağımlılığının azaldığı** an: FSM GÖRSEL TAKİP'e
 geçince hedef konumu artık YALNIZCA görsel (bbox/PnP).

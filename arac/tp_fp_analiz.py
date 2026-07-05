@@ -42,6 +42,8 @@ import numpy as np
 from detection import kamera_model as km
 from guidance.ana_kontrol import Cfg
 from guidance.kilit_kurali import KilitCfg
+sys.path.insert(0, _HERE)
+from fsm_adlari import normalize        # FSM ad eslemesi (eski CSV = GORSEL_GUDUM -> GORSEL_TAKIP)
 
 TP_K = 0.75            # esik = TP_K * bbox_kosegeni (normalize)
 TRUTH_TOL_SN = 0.15    # tespit->truth zaman farki bu ustundeyse truth "yok" say
@@ -220,8 +222,12 @@ def main():
     print("    kapi + dataset negatif/background kalici savunma).")
 
     a = anatomi(rows)
+    from collections import Counter
+    faz = Counter(normalize(r.get("fsm_durum")) for r in rows
+                  if r.get("vis_gordu") in ("1", "1.0"))
     print("\n --- CSV ANATOMISI (truth gerekmez) ---")
-    print(" GORSEL_GUDUM tespit karesi (vis): %d ; OLCULEN (coast degil): %d ; tespit orani: %.1f%%"
+    print(" tespit faz dagilimi (ad-normalize): %s" % dict(faz))
+    print(" GORSEL_TAKIP tespit karesi (vis): %d ; OLCULEN (coast degil): %d ; tespit orani: %.1f%%"
           % (a["vis"], a["olculen"], 100 * a["tespit_orani"]))
     print(" conf medyan (olculen): %s" % (round(a["conf_medyan"], 3) if a["conf_medyan"] else "-"))
     print(" conf dagilimi: <0.45=%d  0.45-0.72=%d  >=0.72=%d"

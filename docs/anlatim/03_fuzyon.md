@@ -17,4 +17,4 @@
   (`guidance/ana_kontrol.py::Cfg`). **SERT AYRIM:** filtre yalnız bozuk GNSS'i
   girdi alır; truth kanalına erişmez (doğrulama `arac/` altında, uçuş dışı).
 - **Video ipucu:** "GNSS bağımlılığının azalması" → FPV **HEDEF GNSS** rozeti
-  GORSEL_GUDUM'da yeşil "KULLANILMIYOR ✓"; GNSS hata/sıçramada rota bozulmaz.
+  GÖRSEL TAKİP'te yeşil "KULLANILMIYOR ✓"; GNSS hata/sıçramada rota bozulmaz.

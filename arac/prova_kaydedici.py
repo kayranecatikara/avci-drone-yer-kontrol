@@ -42,6 +42,8 @@ import urllib.request
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJ_ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _PROJ_ROOT)
+sys.path.insert(0, _HERE)
+from fsm_adlari import normalize        # FSM ad eslemesi (eski/yeni; tek kaynak)
 
 _VERI = os.path.join(_PROJ_ROOT, "veri")
 _KARE_DIR = os.path.join(_VERI, "prova_kareleri")
@@ -184,7 +186,7 @@ def _olaylari_bul(prev, cur):
         olaylar.append("YENIDEN_TESPIT")
     d, dp = g.get("durum"), gp.get("durum")
     if d != dp and dp is not None:
-        olaylar.append("FSM_GECIS_%s" % d)
+        olaylar.append("FSM_GECIS_%s" % normalize(d))   # eski/yeni ad -> yeni
     gs = (g.get("gorev_sonu") or {}).get("basarili")
     gsp = (gp.get("gorev_sonu") or {}).get("basarili")
     if gs and not gsp:

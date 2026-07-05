@@ -341,7 +341,7 @@ TUNE_ALLOW = {
     "V_CAP_FAR", "V_CAP_NEAR", "BRAKE_DIST",
     # dikey (irtifa) PID
     "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
-    # GORSEL GUDUM (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)
+    # GORSEL TAKIP (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)
     "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH",
     "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
     "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
@@ -532,7 +532,7 @@ def _gorev_sonu_degerlendir(fsm_durum, mesafe_m):
             st["min_mesafe_m"] = mesafe_m
         # ANGAJMAN + mesafe esigi -> BASARILI (bir kez kilitle)
         if not st["basarili"] and mesafe_m <= VURUS_ESIK_M and fsm_durum in (
-                "ANGAJMAN", "KILIT_BILDIR", "GORSEL_GUDUM"):
+                "ANGAJMAN", "KILIT_BILDIR", "GORSEL_TAKIP"):
             st["basarili"] = True
             print("[GOREV] BASARILI — hedefe %.1f m'de vurus (FSM=%s)." % (mesafe_m, fsm_durum))
     return {"basarili": st["basarili"],
@@ -595,14 +595,14 @@ def build_telemetry():
     except Exception:
         _cmd_thr = _cmd_pit = _cmd_rol = _cmd_yaw = None
 
-    # GORSEL GUDUM durumu + son NORMALIZE tespit (overlay/rozet icin). durum
-    # GORSEL_GUDUM ise GPS yonelimi MIMARI olarak kesilmistir -> index.html
+    # GORSEL TAKIP durumu + son NORMALIZE tespit (overlay/rozet icin). durum
+    # GORSEL_TAKIP ise GPS yonelimi MIMARI olarak kesilmistir -> index.html
     # "GPS GUDUMU: KAPALI" rozetini kirmizi yakar.
     gorsel = {
-        "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
+        "durum": j_durum,                          # ARAMA | GORSEL_TAKIP
         "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
         "ey_ref": float(getattr(Cfg, "VIS_EY_REF", 0.0)),   # dikey referans (tilt telafisi; overlay cizer)
-        "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
+        "gps_kesildi": (j_durum == "GORSEL_TAKIP"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
         "dedektor_hazir": bool(model_yon is not None and model_yon.hazir),
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf} (normalize)
@@ -624,8 +624,8 @@ def build_telemetry():
             "av_yatay": [0.25, 0.75], "av_dikey": [0.10, 0.90], "kaplama_esik": 0.06,
         },
         "oipn": {"acik": oipn_acik, "beta": oipn_beta},
-        # HEDEF GNSS: GORSEL ailesinde (GORSEL_GUDUM/KILIT_BILDIR/ANGAJMAN) KULLANILMIYOR
-        "gnss_kullaniliyor": (j_durum in ("ARAMA", "TAKIP")),
+        # HEDEF GNSS: GORSEL ailesinde (GORSEL_TAKIP/KILIT_BILDIR/ANGAJMAN) KULLANILMIYOR
+        "gnss_kullaniliyor": (j_durum in ("ARAMA", "YAKLASMA")),
         # GOREV SONU / VURUS (video kalem 9-10): ANGAJMAN + hedefe cok yakin -> vurus.
         # Sim'de vurus = ham GPS mesafe VURUS_ESIK alti (model/terminal vurus hedefe girer).
         "gorev_sonu": _gorev_sonu_degerlendir(j_durum, distance_m),
