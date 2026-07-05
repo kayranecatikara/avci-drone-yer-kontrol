@@ -59,7 +59,7 @@ import time
 import numpy as np
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
 from guidance.ibvs_guidance import AvciGorselGuduum             # gorsel faz: bbox -> angle-mode (bagimsiz)
-from guidance.kilit_kurali import KilitDurumu                   # FAZ 3: sartname 6.1.4 kilit sayaci
+from guidance.kilit_kurali import KilitDurumu, KilitCfg         # FAZ 3: sartname 6.1.4 kilit sayaci
 from guidance.gudum_yasasi import apn_oipn, GudumCfg            # FAZ 3: APN+OIPN (pose'suz pasif)
 from iletisim.hakem_istemci import HakemIstemci                 # FAZ 3: kilit paketi + telemetri (stub)
 from detection import kamera_model                              # TILT/HFOV TEK KAYNAK (FAZ 0)
@@ -751,6 +751,20 @@ class AvciKontrol:
         SIRALAMASINI somutlastirir. tespit None (kayip) -> sayac saymaz (coast/yok)."""
         W = tespit.get("W") if tespit else None
         H = tespit.get("H") if tespit else None
+        # GEOMETRIK DIKEY KAPISI (kilit zinciri FP kalkani; handoff'a GIRMEZ): ham-GPS
+        # geometrisinden hedefin OLABILECEGI dikey ekran konumunu kestir; bbox merkezi
+        # banttan cok uzaksa geometrik imkansiz isaretle (_sayar_mi saymaz -> track surer).
+        # son_ham (ham GPS, bozuk) + drone_pos + kamera tilt; poz/ham yoksa PASIF.
+        if tespit is not None and self.son_ham is not None and H:
+            try:
+                dh = math.hypot(float(self.son_ham[0]) - drone_pos[0],
+                                float(self.son_ham[1]) - drone_pos[1])
+                v_pred, _elev = kamera_model.dikey_ekran_tahmini(
+                    self.son_ham[2], drone_pos[2], dh, tespit.get("W"), H)
+                cy_n = float(tespit["cy"]) / float(H)
+                tespit["geometrik_uygun"] = abs(cy_n - v_pred) <= KilitCfg.GEOMETRIK_DIKEY_BAND
+            except Exception:
+                pass                                     # geometri kestirilemezse kapi pasif
         # Kilit sayaci KENDI sikli esigini kullanir (KilitCfg.KILIT_CONF_MIN=0.72);
         # handoff (_confirmed_track) ayri ve gevsek (Cfg.VIS_CONF_MIN=0.45) kalir.
         kb = self.kilit.adim(tespit, W, H, t)

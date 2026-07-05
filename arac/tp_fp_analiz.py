@@ -202,6 +202,46 @@ def anatomi(rows):
     }
 
 
+def coast_gudum(rows):
+    """COAST'ta 'hicliğe gudum' teyidi: tespit_mi=0 bloklarinda komut hala uretiliyor
+    mu (stale bbox'a steer) ve dead-reckon/GPS-donus esikleri asilmis mi?
+    -> {blok, sure_p50/p90/maks, steer_p50/p90/maks, deadreckon_asan, lost_asan}."""
+    vis = [r for r in rows if r.get("vis_gordu") in ("1", "1.0")]
+    bloklar, blk = [], None
+    for r in vis:
+        t = _num(r.get("t_perf"))
+        if t is None:
+            continue
+        coast = r.get("tespit_mi") in ("0", "0.0", "", None)
+        # STEER = hedefe yonelik eksen (pitch=yaklas, yaw=ortala); throttle HARIC
+        # (irtifa-tutma, hover'da da sifir-disi -> steer sayilmaz).
+        cmd = max(abs(_num(r.get(c)) or 0.0) for c in ("pitch_cmd", "yaw_cmd"))
+        if coast:
+            if blk is None:
+                blk = {"t0": t, "tlast": t, "steer_last": None}
+            blk["tlast"] = t
+            if cmd > 0.02:                       # anlamli komut = steer (hover degil)
+                blk["steer_last"] = t
+        elif blk is not None:
+            bloklar.append(blk); blk = None
+    if blk is not None:
+        bloklar.append(blk)
+    sure = [b["tlast"] - b["t0"] for b in bloklar if b["tlast"] > b["t0"]]
+    steer = [(b["steer_last"] - b["t0"]) for b in bloklar if b.get("steer_last")]
+    dr = getattr(Cfg, "VIS_DEADRECKON_S", 0.5)
+    lg = getattr(Cfg, "VIS_LOST_TO_GPS_S", 1.0)
+    return {
+        "blok": len(bloklar),
+        "sure_p50": (_p(sure, 0.5) or 0), "sure_p90": (_p(sure, 0.9) or 0),
+        "sure_maks": (max(sure) if sure else 0),
+        "steer_p50": (_p(steer, 0.5) or 0), "steer_p90": (_p(steer, 0.9) or 0),
+        "steer_maks": (max(steer) if steer else 0),
+        "deadreckon_s": dr, "lost_gps_s": lg,
+        "steer_deadreckon_asan": sum(1 for s in steer if s > dr),
+        "sure_lost_asan": sum(1 for s in sure if s > lg),
+    }
+
+
 def main():
     yol = sys.argv[1] if len(sys.argv) > 1 else None
     if not yol:
@@ -239,6 +279,18 @@ def main():
           % (a["coast_blok"], a["coast_medyan_ms"], a["coast_p90_ms"], a["coast_maks_ms"]))
     print(" CONFIRMED kesintisiz: medyan=%s sn maks=%.1f sn"
           % (round(a["confirmed_medyan_sn"], 2) if a["confirmed_medyan_sn"] else "-", a["confirmed_maks_sn"]))
+
+    cg = coast_gudum(rows)
+    print("\n --- COAST GUDUM TEYIDI ('hicliğe gudum' penceresi) ---")
+    print(" coast blok: %d ; sure p50=%.2f p90=%.2f maks=%.2f sn"
+          % (cg["blok"], cg["sure_p50"], cg["sure_p90"], cg["sure_maks"]))
+    print(" STEER (anlamli komut) suresi p50=%.2f p90=%.2f maks=%.2f sn"
+          % (cg["steer_p50"], cg["steer_p90"], cg["steer_maks"]))
+    print(" dead-reckon esigi %.2fs asan steer blok: %d ; VIS_LOST_TO_GPS %.2fs asan"
+          % (cg["deadreckon_s"], cg["steer_deadreckon_asan"], cg["lost_gps_s"]))
+    print("   coast blok: %d  -> bu bloklarda gorsel-kayip->YAKLASMA dususu ateslenmis"
+          % cg["sure_lost_asan"])
+    print("   olmali; steer>dead-reckon olan bloklar 'stale bbox'a gudum' suphesidir.")
 
     print("\n --- TP/FP (truth-reprojeksiyon) ---")
     s = tp_fp(rows)

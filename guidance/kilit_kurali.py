@@ -60,6 +60,14 @@ class KilitCfg:
     # arac/kilit_dortgeni.py'de (gelistirme araci).
     CIZGI_PX = 3                # video kilit dortgeni cizgi kalinligi (max)
     DORTGEN_KADRAJ_MIN = 0.90  # bbox'in en az bu orani KADRAJ ICINDE olmali
+    # GEOMETRIK DIKEY KAPISI (ucuz FP kalkani, YALNIZ kilit zinciri — handoff'a girmez):
+    # hedefin ham-GPS irtifasi+drone irtifasi+tilt'ten kestirilen dikey ekran konumu
+    # (kamera_model.dikey_ekran_tahmini) ile bbox merkezi bu banttan COK uzaksa
+    # tespit geometrik imkansiz -> kilit SAYMAZ (track surer). Band GENIS: ham GPS
+    # bozuk + pitch attitude-bagimsiz varsayildi (gross imkansizlari eler, orn.
+    # "228 m asagidaki hedef ekran merkezinde"). geometrik_uygun None ise (poz/ham
+    # yok, test) KAPI PASIF (geriye-uyumlu).
+    GEOMETRIK_DIKEY_BAND = 0.45  # normalize |cy - v_pred| bu ustundeyse imkansiz
 
 
 class KilitDurumu:
@@ -138,6 +146,11 @@ class KilitDurumu:
             return False, "track_onaysiz"        # TENTATIVE/LOST
         if float(hedef.get("conf", 0.0)) < self.cfg.KILIT_CONF_MIN:
             return False, "dusuk_conf"           # handoff'u gecmis olabilir ama kilit SIKI
+        # GEOMETRIK DIKEY KAPISI: ham-GPS geometrisiyle tutarsiz (gross imkansiz) tespit
+        # kilit saymaz. geometrik_uygun ana_kontrol'de hesaplanip hedef'e yazilir; None
+        # ise (test/poz yok) PASIF. handoff'a GIRMEZ (yalniz burada, kilit zinciri).
+        if hedef.get("geometrik_uygun") is False:
+            return False, "geometrik_imkansiz"
         c = self.cfg
         # KILIT DORTGENI: kadraj-ici proxy (dortgen ekrandan >%10 tasarsa gecersiz)
         if self.dortgen_kadraj_orani(hedef, W, H) < c.DORTGEN_KADRAJ_MIN:

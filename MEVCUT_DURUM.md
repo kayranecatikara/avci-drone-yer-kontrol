@@ -142,6 +142,9 @@
 > - conf: ölçülenlerin **≥`KilitCfg.KILIT_CONF_MIN`(0.72) oranı %56 → hedef ≥%80**
 >   (bu kalem `KILIT_CONF_MIN` sabitine bağlı; eşik değişirse hedef de yeniden okunur).
 > - FP/dk: **ölçülemedi** (blokör A+B) → düzeltme sonrası koşuda hesaplanacak (hedef ≤ birkaç/dk).
+> - **FP conf dağılımı (p95):** düzeltilmiş koşuda raporlanacak — `KILIT_CONF_MIN=0.72`
+>   eşiği FP'lerin ne kadarını eliyor, p95 ne (0.72 üstü FP kaç)? Eşik yeter değilse
+>   (p95 ≥ 0.72) dataset negatif/background ağırlığı artırılır.
 >
 > **4) DATASET ALIŞVERİŞ LİSTESİ (kaçırma + yanılma):**
 > - **Kaçırma** (blokör B nedeniyle "hedef görünürken kaçırma" anları kesinleştirilemedi):
@@ -151,6 +154,30 @@
 >   bunlardan **etiketsiz negatif/background** kareleri ekle (model "bu Talon değil"i öğrensin).
 > - **Kompozisyon önerisi (rafine edilecek):** ~%40 küçük-uzak Talon (blur/glare dahil),
 >   ~%30 orta mesafe net Talon, ~%30 negatif/background (ufuk+arazi+glare).
+>
+> ### Madde 4 — yüksek-conf FP savunması + coast (eklemeler)
+> - **Eşik yeter değil:** `KILIT_CONF_MIN=0.72` gerekli AMA yetersiz (model FP'ye 0.90
+>   verebiliyor — çöl arazisinde conf=0.90 gözlendi). Kalıcı savunma = dataset
+>   negatif/background. **Hedef kartına eklendi:** düzeltilmiş koşuda **FP conf dağılımı
+>   (p95)** raporlanacak (eşiğin neyi eleyip neyi eleyemediği sayıyla).
+> - **GEOMETRİK DİKEY KAPISI (ucuz FP kalkanı — EKLENDİ, `KilitCfg.GEOMETRIK_DIKEY_BAND=0.45`):**
+>   ham-GPS irtifa + drone irtifa + kamera tilt'ten hedefin OLABİLECEĞİ dikey ekran
+>   bandı kestirilir (`kamera_model.dikey_ekran_tahmini`, pitch-BAĞIMSIZ → blokör B'den
+>   etkilenmez); bandın çok dışındaki tespit kilit sayacına SOKULMAZ (`engel=geometrik_imkansiz`;
+>   track sürer, handoff'a girmez). "228 m aşağıdaki hedef ekran merkezinde" → v_pred=1.16,
+>   |0.5−1.16|=0.66>0.45 → reddedilir (doğrulandı). Blokör B kapanınca reprojeksiyon-tabanlı
+>   SIKI kapıya çevrilir.
+> - **Coast overlay ayrıştı (EKLENDİ):** coast karesinde bbox **kesikli + turuncu +
+>   "TAHMİN (coast)"**, conf → "son conf". Video kalem-7 görselleştirmesi netleşti.
+> - **Coast'ta güdüm — "HİÇLİĞE GÜDÜM" bulgusu (`arac/tp_fp_analiz.py` COAST GUDUM):**
+>   coast blok 52; süre p50 **2.51 s** / p90 4.01 / maks 4.38. **STEER (pitch/yaw)
+>   süresi = coast süresi** → drone stale/coast bbox'a ~2.5 s boyunca AKTİF yöneliyor.
+>   49/52 blok dead-reckon (0.5 s) eşiğini, **43/52 blok VIS_LOST_TO_GPS (1.0 s) eşiğini**
+>   aşıyor. Kök neden: tracker coast bbox üretmeye devam edince güdümün bayatlık-sayacı
+>   sıfırlanıyor → dead-reckon-hover ve GPS-dönüş fallback'i ~2.5 s GEÇ ateşliyor
+>   (FSM yine de oscile ediyor ama geç). **Somut dağa-güdüm penceresi ~2.5 s.**
+>   → ÖNERİ (davranış değişikliği, ayrı onay): coast'ta güdümü daha erken hover'a al /
+>   VIS_LOST_TO_GPS'i ölçülen-tespit (tespit_mi) zamanına bağla (coast bbox sayacı sıfırlamasın).
 
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek

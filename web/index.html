@@ -733,12 +733,18 @@
     ctx.fillText("REF", mcx+33, refY+4);
     const det=gs.tespit;
     if(det){
+      // COAST AYRIMI (olcumsuz tahmin): KESIKLI kenar + turuncu + "TAHMİN (coast)";
+      // conf gosterilmez, "son conf" olarak isaretlenir (video kalem-7 gorsellestirmesi).
+      const coast = !!(gs.track && gs.track.tespit_mi===false);
+      const renk = coast ? "#ffb454" : "#25e0a0";                 // coast turuncu / olcum yesil
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
-      ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2.5;                // bbox
+      ctx.strokeStyle=renk; ctx.lineWidth=coast?2:2.5;             // bbox
+      if(coast) ctx.setLineDash([7,5]);                           // coast: KESIKLI
       ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
-      ctx.fillStyle="#25e0a0"; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
-      // POSE keypoints (görsel teyit: sıra doğru mu? renk = index sırası + numara)
-      if(det.keypoints){
+      ctx.setLineDash([]);
+      ctx.fillStyle=renk; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();  // bbox merkezi
+      // POSE keypoints (görsel teyit) — yalnız ÖLÇÜLEN karede (coast'ta taze PnP yok)
+      if(det.keypoints && !coast){
         const kpRenk=["#ff5d5d","#ffb454","#ffe14a","#4aff7a","#33a0ff","#c46bff"];
         det.keypoints.forEach((kp,i)=>{
           if(kp[2]<0.3) return;                    // düşük conf kp çizme
@@ -747,11 +753,13 @@
           ctx.fillStyle="#fff"; ctx.font="10px monospace"; ctx.fillText(i, kx+5, ky-3);
         });
       }
-      ctx.strokeStyle="rgba(37,224,160,.5)"; ctx.lineWidth=1.5;    // REFERANS -> hedef sapma cizgisi (gudum hatasi)
-      ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();
-      ctx.font="12px monospace"; ctx.fillStyle="#cfe";
-      ctx.fillText("ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+
-                   "  conf="+Number(det.conf).toFixed(2), bx-bw/2, by-bh/2-6);
+      ctx.strokeStyle=coast?"rgba(255,180,84,.4)":"rgba(37,224,160,.5)"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();   // REF -> hedef sapma
+      ctx.font="12px monospace"; ctx.fillStyle=coast?"#ffd9a0":"#cfe";
+      ctx.fillText(coast
+        ? "TAHMİN (coast)  son conf="+Number(det.conf).toFixed(2)
+        : "ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+"  conf="+Number(det.conf).toFixed(2),
+        bx-bw/2, by-bh/2-6);
     }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = _fsmKisa(gs.durum);

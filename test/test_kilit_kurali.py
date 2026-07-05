@@ -201,6 +201,27 @@ def test_kumulatif_toleransa_guvenmez():
     assert kd.kilit_tamam is True, "sayan kareler 5.0 sn'yi doldurur (kacak eklenmez)"
 
 
+def test_geometrik_imkansiz_saymaz():
+    # GEOMETRIK DIKEY KAPISI: konum/kaplama/conf/AV ideal AMA geometrik_uygun=False
+    # (ham-GPS geometrisiyle tutarsiz; orn. 228m asagidaki hedef ekran merkezinde)
+    # -> kilit SAYMAZ, engel=geometrik_imkansiz. Kapi PASIF (flag yok) ise sayar.
+    kd = KilitDurumu()
+    h = _hedef()
+    h["geometrik_uygun"] = False
+    out, _ = _besle(kd, h, 6.0)
+    assert out["sayan"] is False and out["engel"] == "geometrik_imkansiz"
+    assert out["kumulatif_kilit_sn"] == 0.0
+    # geometrik_uygun=True -> sayar
+    kd2 = KilitDurumu()
+    h2 = _hedef(); h2["geometrik_uygun"] = True
+    out2, _ = _besle(kd2, h2, 5.5)
+    assert out2["kilit_tamam"] is True
+    # flag ABSENT (kapi pasif, geriye-uyum) -> sayar
+    kd3 = KilitDurumu()
+    out3, _ = _besle(kd3, _hedef(), 5.5)
+    assert out3["kilit_tamam"] is True
+
+
 def test_engel_teshisi():
     # Kilit tamamlanamazsa hangi kosulun engel oldugu sayilir (teshis).
     kd = KilitDurumu()

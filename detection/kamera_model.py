@@ -200,3 +200,21 @@ def piksel_yon(u, v, K):
                   (float(v) - K[1, 2]) / K[1, 1],
                   1.0])
     return d / np.linalg.norm(d)
+
+
+def dikey_ekran_tahmini(hedef_z, drone_z, d_h_yatay, W=16.0, H=9.0):
+    """KABA dikey-ekran kestirimi: hedefin ham-GPS irtifasi + drone irtifasi +
+    yatay mesafe + KAMERA TILT'inden, hedefin OLABILECEGI normalize dikey ekran
+    konumu (v_pred, 0=ust .. 1=alt) + elevasyon acisi (derece).
+
+    ATTITUDE-BAGIMSIZ (drone pitch/roll KATILMAZ): optik eksen ~TILT_DEG dikey
+    acisinda varsayilir. Amac gross imkansizlari elemek (bkz. kilit geometrik
+    kapisi); band GENIS tutuldugundan pitch degiskenligi + ham-GPS gurultusu
+    yutulur. Kucuk-aci lineer yaklasim (VFOV'a orani). >>> Blokor B (attitude
+    konvansiyon dogrulamasi) kapaninca reprojeksiyon-tabanli SIKI kapiya cevrilir. """
+    dz = float(hedef_z) - float(drone_z)
+    elev_t = math.degrees(math.atan2(dz, max(float(d_h_yatay), 1.0)))
+    cam_elev = TILT_DEG                                   # optik eksen ~tilt (pitch YOK)
+    vfov = math.degrees(vfov_rad(W or 16.0, H or 9.0))
+    v_pred = 0.5 - (elev_t - cam_elev) / max(vfov, 1e-6)   # 0=ust,1=alt
+    return v_pred, elev_t
