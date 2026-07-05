@@ -221,6 +221,37 @@
 > **(D) 2-3 dk mini FSM segmenti:** Blokör A kapalı → `tp_fp_analiz` **ilk kez gerçek TP/FP**
 > + FP conf p95 (eski referans CSV retroaktif vermez → segment ŞART).
 
+> ### 🔬 C+D SONUÇLARI (2026-07-05, DEV kaynak; oyun otomatik kapatıldı)
+> Koşu: C-önce `_C_once.csv` (flag OFF), C-sonra/D `_C_sonra.csv` (flag ON) — tek oyun
+> log'u (163540) 179 s boşlukla ikiye bölündü (NOT: uçuş log'u görev arası dosya
+> AÇMIYOR, aynı dosyaya ekliyor — küçük bug, [[log-reset]]). Zombileşme ~76-90 s.
+>
+> **C — DÜZELTME-1 önce/sonra (yaw-servo/turn-then-advance):**
+> | metrik | ÖNCE (flag 0) | SONRA (flag 1) |
+> |---|---|---|
+> | roll_cmd RMS | 0.369 | **0.319** (↓%14) |
+> | \|yaw_err\| ort | 42.0° | **33.5°** (↓8°) |
+> | tepe yaw-rate p95 | — | **131°/s** |
+>
+> → DÜZELTME-1 **iyileştirdi ama modest**; yaw_err hâlâ 33.5° (<10° değil). **yaw ZAYIF
+> DEĞİL** (131°/s, bearing-tabanlı → konvansiyondan bağımsız güvenilir). Kalan: yaw-servo
+> **kazancı** (KP_YAW/YAW_MAX) veya turn-gate agresifliği artırılmalı (DÜZELTME-2 iii;
+> yaw_err bearing-tabanlı olduğundan konvansiyondan bağımsız güvenle tune edilebilir).
+>
+> **D — TP/FP (Blokör A KAPALI: truth artık tespit karesinde, `truth_yok=0`):**
+> - GORSEL_TAKIP 1315 kare, ölçülen 98 (%7.5); **TP=0, FP=66, kamera-arkası 32 → PRECISION %0**.
+> - **FP conf: medyan 0.74, p95 0.95; %59'u ≥0.72 → eşik YETERSİZ** (model FP'ye 0.95 veriyor).
+> - Ölçülen tespitlerde hedef reproj **kadraj-içi yalnız %19** (arka 32, off 47) → box'ların
+>   %81'i hedef görüş alanında DEĞİLKEN çizilmiş = **kesin FP** (terrain/gök/güneş).
+> - **Geometrik dikey kapı 26 kareyi reddetti** (çalışıyor); coast p90 çok yüksek (stale-güdüm sürüyor).
+> - **Ofset-vs-attitude regresyon: 0 TP → çıkarılamadı** → telemetri→kamera konvansiyon
+>   kapanışı **iyi modele devredildi** (PnP-vs-truth süper seti; A'nın ayrı sweep'i orada).
+> - Hedef-z profili bu koşuda 85-95 m (salınım 11 m; ±200 m başka manevralarda).
+>
+> **SONUÇ:** Kullanıcının ilk gözlemi **rigorous doğrulandı** — tespitler Talon'da DEĞİL
+> (PRECISION %0, yüksek-conf FP). Kök: (a) model kalitesiz (dataset işi), (b) drone hedefi
+> yeterince FRAME'lemiyor (%19 kadraj-içi; yaw-servo kazancı + turn-then-advance güçlendirme).
+
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
 > veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose
