@@ -195,7 +195,7 @@ def oneri_metni(analiz):
 # ----------------------------------------------------------------------------
 #  CANLI SWEEP (sim gerekir; kullanici "hazir" deyince)
 # ----------------------------------------------------------------------------
-def canli_sweep(csv_yol, tirman_m=30.0, tur=2):
+def canli_sweep(csv_yol, tirman_m=30.0, tur=1):
     """STANDALONE (main.py CALISMAMALI — cift kontrol dongusu catisir). Araç dronu
     KENDI armlar, tirmanir, irtifayi P-tutucuyla tutar (k_sanity deseni; kullanici
     ucurmaz) ve attitude sweep uygular; hedef FOV'dan periyodik gecerken uygun
@@ -275,10 +275,18 @@ def canli_sweep(csv_yol, tirman_m=30.0, tur=2):
     kayit = []
     t0 = time.perf_counter()
     onceki = {"t": None, "pos": None}
+    zombi = False
     for ad, pcmd, rcmd, sure in PERTURB * max(1, tur):
+        if zombi:
+            break
         t_adim = time.perf_counter()
         while time.perf_counter() - t_adim < sure:
             thr, _dz = _thr_hold()
+            if abs(_dz) > 60.0:      # z_ref'ten 60 m saptik -> zombilesme (z kacisi); DUR
+                print("[HATA] Sweep sirasinda irtifa z_ref'ten %+.0f m kacti -> ZOMBILESME." % _dz)
+                print("       (uctan ~100 sn sonra z kontrolden cikar). Oyun YENIDEN BASLAT.")
+                zombi = True
+                break
             ycmd = _yaw_hold()                                    # burnu hedefte tut
             drone.set_control_surfaces(thr, pcmd, rcmd, ycmd, True)
             dbg = drone.get_debug_truth()
