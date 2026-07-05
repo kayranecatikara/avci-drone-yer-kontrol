@@ -139,7 +139,8 @@
 > - Tespit oranı (GORSEL_GUDUM ölçülen/toplam): **%7.9 → hedef ≥%70**.
 > - Coast p90: **6054 ms → hedef ≤200 ms** (köprü kapsar).
 > - CONFIRMED kesintisiz maks: **0.4 s → hedef ≥3 s** (angajman ön şartı).
-> - conf: ölçülenlerin **%56'sı ≥0.72 → hedef ≥%80**.
+> - conf: ölçülenlerin **≥`KilitCfg.KILIT_CONF_MIN`(0.72) oranı %56 → hedef ≥%80**
+>   (bu kalem `KILIT_CONF_MIN` sabitine bağlı; eşik değişirse hedef de yeniden okunur).
 > - FP/dk: **ölçülemedi** (blokör A+B) → düzeltme sonrası koşuda hesaplanacak (hedef ≤ birkaç/dk).
 >
 > **4) DATASET ALIŞVERİŞ LİSTESİ (kaçırma + yanılma):**

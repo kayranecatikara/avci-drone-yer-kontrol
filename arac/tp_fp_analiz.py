@@ -41,10 +41,11 @@ sys.path.insert(0, _PROJ)
 import numpy as np
 from detection import kamera_model as km
 from guidance.ana_kontrol import Cfg
+from guidance.kilit_kurali import KilitCfg
 
 TP_K = 0.75            # esik = TP_K * bbox_kosegeni (normalize)
 TRUTH_TOL_SN = 0.15    # tespit->truth zaman farki bu ustundeyse truth "yok" say
-KILIT_HEDEF_CONF = 0.72   # kullanicinin sordugu hipotetik siki esik (kiyas icin)
+KILIT_HEDEF_CONF = KilitCfg.KILIT_CONF_MIN   # kilit siki esigi (0.72) — TEK KAYNAK
 
 
 def _num(x):
@@ -210,11 +211,13 @@ def main():
     print("=" * 70)
     print(" TP/FP + KILIT ENGELI ANATOMISI — %s" % os.path.basename(yol))
     print("=" * 70)
-    print(" handoff/kilit conf esigi (kod): VIS_CONF_MIN = %.2f, VIS_N_LOCK = %d"
-          % (Cfg.VIS_CONF_MIN, Cfg.VIS_N_LOCK))
-    print(" -> faz gecisi VE kilit AYNI esikle (0.72 kodda YOK). FP-track %.2f-0.72"
-          % Cfg.VIS_CONF_MIN)
-    print("    arasi hem GORSEL_GUDUM'u tetikler hem kilit sayar (daga-gudum riski).")
+    print(" conf esikleri (kod): handoff VIS_CONF_MIN = %.2f ; kilit KILIT_CONF_MIN = %.2f"
+          % (Cfg.VIS_CONF_MIN, KilitCfg.KILIT_CONF_MIN))
+    print(" -> AYRISTIRILDI: handoff gevsek (ucuz-geri-donuslu), kilit siki (-30 riskli).")
+    print("    FP-track %.2f-%.2f arasi GORSEL_TAKIP'i tetikler AMA kilit SAYMAZ."
+          % (Cfg.VIS_CONF_MIN, KilitCfg.KILIT_CONF_MIN))
+    print("    NOT: 0.72 gerekli ama YETERSIZ (model FP'ye 0.90 verebiliyor -> geometrik")
+    print("    kapi + dataset negatif/background kalici savunma).")
 
     a = anatomi(rows)
     print("\n --- CSV ANATOMISI (truth gerekmez) ---")

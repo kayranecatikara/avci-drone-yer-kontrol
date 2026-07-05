@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from guidance.kilit_kurali import KilitDurumu, KilitCfg
 
 W, H = 1920, 1080
-CONF = 0.45
+# NOT: kilit conf esigi artik KilitCfg.KILIT_CONF_MIN=0.72 (adim'a DISARIDAN
+# gecilmez). _hedef varsayilan conf=0.9 -> kilit gecer; ara-bant testi 0.60 kullanir.
 
 
 def _hedef(cx_n=0.5, cy_n=0.5, kap=0.20, conf=0.9, tespit_mi=True,
@@ -30,7 +31,7 @@ def _besle(kd, hedef, sn, dt=0.033, t0=0.0):
     t = t0
     for _ in range(n):
         t += dt
-        out = kd.adim(hedef, W, H, t, CONF)
+        out = kd.adim(hedef, W, H, t)
     return out, t
 
 
@@ -48,7 +49,7 @@ def test_kenar_tetik_bir_kez():
     t = 0.0
     for _ in range(int(7.0 / 0.033)):
         t += 0.033
-        o = kd.adim(_hedef(), W, H, t, CONF)
+        o = kd.adim(_hedef(), W, H, t)
         if o["yeni_kilit"]:
             yeni_sayisi += 1
     assert yeni_sayisi == 1, "kilit_tamam KENAR tetikli (bir kez)"
@@ -83,7 +84,7 @@ def test_kaplama_eksen_bir_eksende_yeter():
     t = 0.0
     for _ in range(20):
         t += 0.05
-        out = kd.adim(h, W2, H2, t, CONF)
+        out = kd.adim(h, W2, H2, t)
     assert out["sayan"] is True, "bir eksende %5 yeter (alan orani DEGIL)"
     assert abs(out["kaplama_dikey"] - 0.10) < 1e-6 and abs(out["kaplama_yatay"] - 0.02) < 1e-6
 
@@ -102,8 +103,23 @@ def test_tentative_saymaz():
 
 def test_dusuk_conf_saymaz():
     kd = KilitDurumu()
-    out, _ = _besle(kd, _hedef(conf=0.30), 6.0)      # uretim esigi 0.45 alti
+    out, _ = _besle(kd, _hedef(conf=0.30), 6.0)      # kilit esigi 0.72 alti
     assert out["sayan"] is False
+
+
+def test_conf_ara_bant_kilit_saymaz_track_gecerli():
+    # 0.45-0.72 ARA BANT: handoff (VIS_CONF_MIN=0.45) gecer, track CONFIRMED olur;
+    # AMA kilit sayaci SIKI esik (KILIT_CONF_MIN=0.72) -> SAYMAZ. engel=dusuk_conf
+    # (track_onaysiz DEGIL: track gecerli, yalniz kilit conf'u sIKI). Esik AYRISMASI.
+    kd = KilitDurumu()
+    out, _ = _besle(kd, _hedef(conf=0.60), 6.0)      # 0.45<0.60<0.72
+    assert out["sayan"] is False
+    assert out["engel"] == "dusuk_conf"
+    assert out["kumulatif_kilit_sn"] == 0.0
+    # AYNI track 0.72 ustunde -> kilit ILERLER (esik farkinin kaniti)
+    kd2 = KilitDurumu()
+    out2, _ = _besle(kd2, _hedef(conf=0.75), 5.5)
+    assert out2["kilit_tamam"] is True
 
 
 def test_kesintili_kumulatif_pencere():
@@ -134,7 +150,7 @@ def test_angajman_hazir_surekli():
     _besle(kd, _hedef(), 5.5)
     assert kd.angajman_hazir() is True
     # kesinti -> surekli sifirlanir -> angajman DEGIL (kilit_tamam kalir ama surekli<3)
-    kd.adim(_hedef(cx_n=0.9), W, H, 100.0, CONF)
+    kd.adim(_hedef(cx_n=0.9), W, H, 100.0)
     assert kd.kilit_tamam is True and kd.angajman_hazir() is False
 
 
@@ -205,7 +221,7 @@ def test_sifirla():
     _besle(kd, _hedef(), 5.5)
     kd.sifirla()
     assert kd.kilit_tamam is False and kd.surekli_kilit_sn == 0.0
-    assert kd.adim(_hedef(), W, H, 0.0, CONF)["kumulatif_kilit_sn"] == 0.0
+    assert kd.adim(_hedef(), W, H, 0.0)["kumulatif_kilit_sn"] == 0.0
 
 
 if __name__ == "__main__":

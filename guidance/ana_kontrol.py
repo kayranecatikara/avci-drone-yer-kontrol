@@ -744,7 +744,9 @@ class AvciKontrol:
         SIRALAMASINI somutlastirir. tespit None (kayip) -> sayac saymaz (coast/yok)."""
         W = tespit.get("W") if tespit else None
         H = tespit.get("H") if tespit else None
-        kb = self.kilit.adim(tespit, W, H, t, Cfg.VIS_CONF_MIN)
+        # Kilit sayaci KENDI sikli esigini kullanir (KilitCfg.KILIT_CONF_MIN=0.72);
+        # handoff (_confirmed_track) ayri ve gevsek (Cfg.VIS_CONF_MIN=0.45) kalir.
+        kb = self.kilit.adim(tespit, W, H, t)
         self._son_kilit_bilgi = kb
         # 1) GORSEL_GUDUM -> KILIT_BILDIR: kilit_tamam ilk kez -> hakem paketi (+400 garanti)
         if kb["yeni_kilit"]:

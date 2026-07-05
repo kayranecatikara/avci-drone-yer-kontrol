@@ -36,7 +36,7 @@ def test_kadraj_proxy_engel():
     # cx=W-20, w=200 -> sag 120px disarda / 200 = %60 disarda -> orani 0.4
     h = {"cx": W - 20, "cy": 540, "w": 200, "h": 150, "conf": 0.9,
          "tespit_mi": True, "track_durumu": "CONFIRMED"}
-    out = dur.adim(h, W, H, 0.1, 0.45)
+    out = dur.adim(h, W, H, 0.1)
     assert out["sayan"] is False and out["engel"] == "dortgen_tasma"
 
 

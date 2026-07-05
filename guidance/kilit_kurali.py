@@ -28,6 +28,13 @@ from collections import deque
 
 
 class KilitCfg:
+    # KILIT CONF ESIGI (handoff'tan AYRI, DAHA SIKI). Handoff (GORSEL_TAKIP'e gecis)
+    # UCUZ-GERI-DONUSLU: yanlis gecis olursa VIS_LOST_TO_GPS ile YAKLASMA'ya (GPS)
+    # geri donulur -> dusuk esik (VIS_CONF_MIN=0.45) tolere edilir. Kilit PAKETI ise
+    # -30 puan riskli (yanlis kilit); geri donusu yok. Bu yuzden kilit sayaci ve
+    # ANGAJMAN on sarti AYRI, DAHA YUKSEK esik ister. NOT: 0.72 gerekli ama YETERSIZ
+    # (model FP'ye 0.90 verebiliyor; kalici savunma dataset negatif/background).
+    KILIT_CONF_MIN = 0.72       # kilit sayaci + angajman icin asgari guven (handoff DEGIL)
     AV_YATAY = (0.25, 0.75)     # merkez cx/W bu bantta (Hedef Vurus Alani yatay)
     AV_DIKEY = (0.10, 0.90)     # merkez cy/H bu bantta
     KAPLAMA_ESIK = 0.06         # EKSEN-bazli: max(w/W, h/H) >= bu (sartname %5 + pay).
@@ -57,8 +64,8 @@ class KilitCfg:
 
 class KilitDurumu:
     """Her algi frame'inde adim() cagrilir; kilit sayaclarini gunceller.
-    Uretim conf esigi DISARIDAN verilir (Cfg.VIS_CONF_MIN; kilit zincirine
-    yalniz bu girer — gorsel/model conf DEGIL)."""
+    Kilit conf esigi KENDI sabitidir (KilitCfg.KILIT_CONF_MIN=0.72); handoff
+    esiginden (Cfg.VIS_CONF_MIN=0.45) AYRI ve daha sikidir (bkz. KilitCfg)."""
 
     def __init__(self, cfg=None):
         self.cfg = cfg or KilitCfg()
@@ -115,20 +122,22 @@ class KilitDurumu:
             return 0.0, 0.0
         return float(hedef["w"]) / W, float(hedef["h"]) / H
 
-    def _sayar_mi(self, hedef, W, H, conf_esik):
+    def _sayar_mi(self, hedef, W, H):
         """Bu frame kilit sayacinda sayilir mi? (sayan, engel). engel: sayilmadiysa
         HANGI kosulun engel oldugu (kilit tamamlanamazsa teshis).
         SIRA (sartname): conf/track/olcum -> KAPLAMA (eksen; AV'ye girmenin on
         sarti) -> MERKEZ (AV bandi). Kaplama merkezden ONCE: eksen kaplamasi
-        %5 altindaysa hedef AV'ye GIRMEMIS sayilir."""
+        %5 altindaysa hedef AV'ye GIRMEMIS sayilir.
+        CONF esigi = KilitCfg.KILIT_CONF_MIN (handoff'tan AYRI, sikidir): 0.45-0.72
+        arasi tespit sayaci ILERLETMEZ (dusuk_conf) ama track/handoff'u besler."""
         if hedef is None or W is None or H is None or W <= 1 or H <= 1:
             return False, "hedef_yok"
         if not hedef.get("tespit_mi"):
             return False, "coast"                # olcum yok (bbox tahmini)
         if hedef.get("track_durumu") != "CONFIRMED":
             return False, "track_onaysiz"        # TENTATIVE/LOST
-        if float(hedef.get("conf", 0.0)) < conf_esik:
-            return False, "dusuk_conf"
+        if float(hedef.get("conf", 0.0)) < self.cfg.KILIT_CONF_MIN:
+            return False, "dusuk_conf"           # handoff'u gecmis olabilir ama kilit SIKI
         c = self.cfg
         # KILIT DORTGENI: kadraj-ici proxy (dortgen ekrandan >%10 tasarsa gecersiz)
         if self.dortgen_kadraj_orani(hedef, W, H) < c.DORTGEN_KADRAJ_MIN:
@@ -145,16 +154,17 @@ class KilitDurumu:
             return False, "AV_disi_dikey"
         return True, None
 
-    def adim(self, hedef, W, H, t, conf_esik):
+    def adim(self, hedef, W, H, t):
         """Bir algi frame'i isle. hedef: AlgiCiktisi.hedef | None. t: sn (algi
-        timestamp). -> {sayan, kumulatif_kilit_sn, surekli_kilit_sn, kilit_tamam,
-        yeni_kilit}. yeni_kilit: bu frame'de kilit_tamam ilk kez True oldu mu."""
+        timestamp). Kilit conf esigi KilitCfg.KILIT_CONF_MIN'dir (handoff'tan AYRI).
+        -> {sayan, kumulatif_kilit_sn, surekli_kilit_sn, kilit_tamam, yeni_kilit}.
+        yeni_kilit: bu frame'de kilit_tamam ilk kez True oldu mu."""
         c = self.cfg
         dt = (t - self._son_t) if self._son_t is not None else 0.0
         if dt < 0:
             dt = 0.0
         self._son_t = t
-        sayan, engel = self._sayar_mi(hedef, W, H, conf_esik)
+        sayan, engel = self._sayar_mi(hedef, W, H)
         if engel is not None:
             self._engel_sayac[engel] = self._engel_sayac.get(engel, 0) + 1
 
