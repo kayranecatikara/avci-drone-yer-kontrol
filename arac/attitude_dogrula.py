@@ -195,8 +195,11 @@ def oneri_metni(analiz):
 # ----------------------------------------------------------------------------
 #  CANLI SWEEP (sim gerekir; kullanici "hazir" deyince)
 # ----------------------------------------------------------------------------
-def canli_sweep(csv_yol):
-    """Manuel-mod attitude sweep + kare/siluet + truth reproj -> kayit + analiz."""
+def canli_sweep(csv_yol, tirman_m=30.0, tur=2):
+    """STANDALONE (main.py CALISMAMALI — cift kontrol dongusu catisir). Araç dronu
+    KENDI armlar, tirmanir, irtifayi P-tutucuyla tutar (k_sanity deseni; kullanici
+    ucurmaz) ve attitude sweep uygular; hedef FOV'dan periyodik gecerken uygun
+    (siluetli) kareleri toplar. Zombilesme sezilirse durur ve nedenini soyler."""
     from sdk import drone_sdk as drone
     try:
         import cv2
@@ -207,30 +210,84 @@ def canli_sweep(csv_yol):
 
     if not drone.is_connected():
         drone.connect()
+    for _ in range(25):                       # truth akisini bekle (recv thread ilk paketi parse)
+        if drone.is_connected() and drone.get_debug_truth().get("available"):
+            break
+        time.sleep(0.2)
     if not drone.get_debug_truth().get("available"):
-        print("[HATA] DEBUG TRUTH AKMIYOR — bu arac truth-tabanli. Sim'de truth'u ac.")
+        print("[HATA] DEBUG TRUTH AKMIYOR. Truth kod tarafindan (dev_truth hatti) gelir;")
+        print("       oyun menusunde ayar YOK. Araci DURDURUYORUM — truth akisini kod")
+        print("       tarafinda kontrol et (SDK get_debug_truth available=False).")
         return 1
+    # ARM + z_ref = HEDEF TRUTH IRTIFASI (MUTLAK -> tekrar kosuda da hedefe iner,
+    # +tirman birikmesi olmaz; hedef irtifasinda ufuk kadraj ortasina yakin durur).
+    drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)             # arm
+    _zs = []
+    _t0 = time.perf_counter()
+    while time.perf_counter() - _t0 < 1.0:
+        _zs.append(float(drone.get_debug_truth()["target"]["position"][2]))
+        time.sleep(0.05)
+    z_ref = float(np.median(_zs))
+
+    def _thr_hold():
+        dz_m = (float(drone.get_drone_location()[2]) - z_ref) / 100.0
+        return max(-0.40, min(0.55, -0.10 * dz_m)), dz_m
+
+    def _bearing_err():
+        d = drone.get_drone_location(); t = drone.get_debug_truth()["target"]["position"]
+        br = math.degrees(math.atan2(t[1] - d[1], t[0] - d[0]))
+        return (br - drone.get_drone_rotation()[2] + 180.0) % 360.0 - 180.0
+
+    def _yaw_hold():
+        return max(-0.30, min(0.30, 0.02 * _bearing_err()))         # burnu hedefte tut
+
+    print("[UCUS] hedef irtifasina (%.0f m) git + irtifa-tut (P; en cok 90 sn)..." % (z_ref / 100.0))
+    t0 = time.perf_counter(); dz_m = 99.0
+    while time.perf_counter() - t0 < 90.0:
+        thr, dz_m = _thr_hold()
+        drone.set_control_surfaces(thr, 0.0, 0.0, _yaw_hold(), True)
+        if abs(dz_m) < 4.0:
+            break
+        time.sleep(0.1)
+    if abs(dz_m) > 25.0:
+        print("[HATA] Irtifaya OTURULAMADI (sapma %+.1f m) — OYUN OTURUMU BOZUK olabilir" % dz_m)
+        print("       (zombilesme). Oyunu YENIDEN BASLAT (PLAY/FLY/E) ve tekrar kos.")
+        return 1
+    print("[UCUS] irtifa OK (sapma %+.1f m); burun hedefe donuyor (max 20 sn)..." % dz_m)
+    t0 = time.perf_counter()
+    while time.perf_counter() - t0 < 20.0:
+        thr, _dz = _thr_hold()
+        drone.set_control_surfaces(thr, 0.0, 0.0, _yaw_hold(), True)
+        if abs(_bearing_err()) < 12.0:
+            break
+        time.sleep(0.1)
+    print("[UCUS] burun hedefte (bearing hata %.0f deg); perturbasyon sweep basliyor." % _bearing_err())
     _oyun_one_getir()
-    # Manuel mod + arm + hover (irtifa-tutma kullaniciya/otomatiga birakilir; burada
-    # basit sabit throttle ile hover denenir — drift olursa adim sureleri kisadir).
-    drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)   # arm + hover
-    print("[OK] truth akiyor; attitude sweep basliyor (%d adim)." % len(ADIM_DIZISI))
+    # Siluet ROI: tilt-tabanli UFUK konumu (W/2, ey_ref) — kirik reprojeksiyondan
+    # BAGIMSIZ (yalniz bilinen 25 tilt). Yaw SUREKLI hedefte -> hedef bu ROI'de kalir.
+    _vref = 0.5 + km.ey_ref(16.0, 9.0) / 2.0
+    PERTURB = [("hold", 0.0, 0.0, 3.0),
+               ("pitch+", +0.15, 0.0, 2.5), ("hold", 0.0, 0.0, 1.5),
+               ("pitch-", -0.15, 0.0, 2.5), ("hold", 0.0, 0.0, 1.5),
+               ("roll+", 0.0, +0.15, 2.5), ("hold", 0.0, 0.0, 1.5),
+               ("roll-", 0.0, -0.15, 2.5), ("hold", 0.0, 0.0, 1.5)]
     sct = mss.mss()
     kayit = []
     t0 = time.perf_counter()
     onceki = {"t": None, "pos": None}
-    for ad, pcmd, rcmd, ycmd, sure in ADIM_DIZISI:
+    for ad, pcmd, rcmd, sure in PERTURB * max(1, tur):
         t_adim = time.perf_counter()
         while time.perf_counter() - t_adim < sure:
-            drone.set_control_surfaces(0.55, pcmd, rcmd, ycmd, True)   # hover throttle + adim
+            thr, _dz = _thr_hold()
+            ycmd = _yaw_hold()                                    # burnu hedefte tut
+            drone.set_control_surfaces(thr, pcmd, rcmd, ycmd, True)
             dbg = drone.get_debug_truth()
             if not dbg.get("available"):
                 continue
             tnow = time.perf_counter()
             tpos = np.array(dbg["target"]["position"], float)
-            dpos = np.array(drone.get_drone_gps(), float)
+            dpos = np.array(drone.get_drone_location(), float)
             roll, pitch, yaw = drone.get_drone_rotation()          # derece
-            # dunya yatay hiz (konum farki)
             vx = vy = 0.0
             if onceki["pos"] is not None and onceki["t"] is not None:
                 dt = tnow - onceki["t"]
@@ -240,20 +297,24 @@ def canli_sweep(csv_yol):
             onceki = {"t": tnow, "pos": dpos}
             fr, _kaynak = kare_al(sct, cv2)
             H, W = fr.shape[:2]
-            uvn = reproj_norm(tpos, dpos, roll, pitch, yaw, W, H)
             det = None
-            if uvn is not None and cv2 is not None:
-                det, _neden = _siluet_tespit(fr, (uvn[0] * W, uvn[1] * H), cv2)
+            if cv2 is not None:                                  # siluet: TILT-UFUK ROI (reproj'dan bagimsiz)
+                det, _neden = _siluet_tespit(fr, (W / 2.0, _vref * H), cv2)
+            uvn = reproj_norm(tpos, dpos, roll, pitch, yaw, W, H)
             k = {"t": round(tnow - t0, 2), "adim": ad, "roll": roll, "pitch": pitch,
-                 "yaw": yaw, "W": W, "H": H, "vx": vx, "vy": vy,      # yaw derece
+                 "yaw": yaw, "W": W, "H": H, "vx": vx, "vy": vy,
                  "pitch_cmd": pcmd, "roll_cmd": rcmd, "yaw_cmd": ycmd}
-            if uvn is not None and det:                # reproj sweep verisi (siluet varsa)
+            if det:                                              # gercek hedef pikseli (siluet)
                 ug, vg = det["cx"] / W, det["cy"] / H
-                k.update({"u_reproj": uvn[0], "v_reproj": uvn[1], "u_gercek": ug, "v_gercek": vg,
-                          "du_norm": ug - uvn[0], "dv_norm": vg - uvn[1]})
+                k["u_gercek"] = ug; k["v_gercek"] = vg
+                if uvn is not None:                              # reproj varsa ofset
+                    k.update({"u_reproj": uvn[0], "v_reproj": uvn[1],
+                              "du_norm": ug - uvn[0], "dv_norm": vg - uvn[1]})
             kayit.append(k)
             time.sleep(0.05)
-    drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)     # hover birak
+    drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)     # hover birak (arm kalir)
+    siluetli = sum(1 for k in kayit if k.get("du_norm") not in (None, ""))
+    print("[SWEEP] %d ornek (siluetli %d)." % (len(kayit), siluetli))
     if csv_yol and kayit:
         with open(csv_yol, "w", newline="", encoding="utf-8") as f:
             w = csv.DictWriter(f, fieldnames=KAYIT_KOLON, restval="", extrasaction="ignore")
