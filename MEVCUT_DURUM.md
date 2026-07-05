@@ -252,6 +252,17 @@
 > (PRECISION %0, yüksek-conf FP). Kök: (a) model kalitesiz (dataset işi), (b) drone hedefi
 > yeterince FRAME'lemiyor (%19 kadraj-içi; yaw-servo kazancı + turn-then-advance güçlendirme).
 
+> ### 🗂️ DATASET ÜRETİMİ — PLANLANDI (ayrı branch: `dataset-uretim`; bu branch'te KOD YOK)
+> - **Projeksiyon zinciri (tek cümle):** truth hedef konumu + drone attitude +
+>   `kamera_model` (K + 25° tilt) + Talon 3D nokta tablosu → keypoint pikselleri →
+>   bbox = keypointlerin min/max'ı + pay; hedef kadraj-dışı olan kareler
+>   **negatif/background** (etiketsiz) olarak toplanır.
+> - **Aşama-0 doğrulama kapısı (tek cümle):** projeksiyon-bbox ile hareket-farkı hakemi
+>   (silüet/motion-diff) IoU tutarlılığı + TP ofset-vs-attitude regresyonu (eğim~0)
+>   GEÇMEDEN dataset üretimi açılmaz (yanlış-etiketli set üretmemek için).
+> - **Depolama:** dataset dosyaları (images/labels) **git DIŞINDA** (Drive/yerel;
+>   `.gitignore` + ayrı branch). Bu branch'te yalnız SPEC durur, uygulama yok.
+
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
 > veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose

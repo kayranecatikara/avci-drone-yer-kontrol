@@ -394,8 +394,10 @@ class AvciKontrol:
     #  Tek kaynak: "v2" (Inovasyonlu J). Ayni kaynak tekrar secilirse dokunmaz.
     # ----------------------------------------------------------------
     def set_kaynak(self, kaynak):
-        if kaynak == self.kaynak and self.filtre is not None:
-            return                          # zaten o kaynak -> dokunma
+        # YENI GOREV: her 'start'ta kaynak/filtre + durum/gorsel/kilit + UCUS LOGU
+        # (yeni dosya) taze baslar. Ayni kaynak ust uste secilse bile YENI gorev
+        # sayilir -> GOREV BASINA AYRI CSV. (Eskiden ayni kaynakta erken donuyordu ->
+        # iki gorev ayni dosyaya ekleniyordu; bug.) set_kaynak yalniz 'start'ta cagrilir.
         self.kaynak = kaynak
         self.filtre = V2Filtre()
         self.son_ham = None                 # yeni filtre taze beslensin
@@ -431,8 +433,6 @@ class AvciKontrol:
         self._algi_lam_dot = 0.0
         self._algi_Vc = 0.0
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
-        # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
-        # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
         if self._log_f is not None:
             try: self._log_f.close()
             except Exception: pass
