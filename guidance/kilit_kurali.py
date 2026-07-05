@@ -67,7 +67,8 @@ class KilitCfg:
     # bozuk + pitch attitude-bagimsiz varsayildi (gross imkansizlari eler, orn.
     # "228 m asagidaki hedef ekran merkezinde"). geometrik_uygun None ise (poz/ham
     # yok, test) KAPI PASIF (geriye-uyumlu).
-    GEOMETRIK_DIKEY_BAND = 0.45  # normalize |cy - v_pred| bu ustundeyse imkansiz
+    GEOMETRIK_DIKEY_BAND = 0.45  # GIRIS (siki): normalize |cy - v_pred| bu ustundeyse imkansiz
+    GEOMETRIK_DIKEY_CIKIS = 0.60  # CIKIS (gevsek): histerezis; uygunken bu asilinca duser
 
 
 class KilitDurumu:

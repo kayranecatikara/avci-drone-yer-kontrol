@@ -346,6 +346,10 @@ TUNE_ALLOW = {
     "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
     "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
     "VIS_EY_REF",   # kamera 25 derece tilt telafisi (dikey referans; sim'de kalibre)
+    # DUZELTME-1 (YAKLASMA burun-hedefe) — C segmenti ONCE/SONRA icin canli toggle
+    # (0.0=kapali eski omnidirek, 1.0=acik turn-then-advance) + kisma/EMA tau.
+    "YAKLASMA_BURUN_HEDEFE", "YAKLASMA_ROLL_KIS", "YAKLASMA_DIKEY_KIS",
+    "HEDEF_Z_EMA_TAU_SN",
 }
 
 # ----------------------------------------------------------

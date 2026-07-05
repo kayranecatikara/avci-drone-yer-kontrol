@@ -118,7 +118,8 @@ def tp_fp(rows):
     ts, pts = _truth_zaman_serisi(rows)
     vis = [r for r in rows if r.get("vis_gordu") in ("1", "1.0")]
     olcules = [r for r in vis if r.get("tespit_mi") in ("1", "1.0")]   # OLCULEN (coast degil)
-    sonuc = {"tp": 0, "fp": 0, "truth_yok": 0, "arka": 0, "toplam_olculen": len(olcules)}
+    sonuc = {"tp": 0, "fp": 0, "truth_yok": 0, "arka": 0, "toplam_olculen": len(olcules),
+             "tp_ofset": [], "fp_conf": []}   # tp_ofset: (du,dv,pitch,roll); fp_conf: [conf]
     gaps = []
     for r in olcules:
         t = _num(r.get("t_perf"))
@@ -145,10 +146,38 @@ def tp_fp(rows):
         d = math.hypot(mc[0] - uv[0], mc[1] - uv[1])
         if d <= TP_K * max(kos, 1e-6):
             sonuc["tp"] += 1
+            sonuc["tp_ofset"].append((mc[0] - uv[0], mc[1] - uv[1], pitch, roll))
         else:
             sonuc["fp"] += 1
+            c = _num(r.get("vis_conf"))
+            if c is not None:
+                sonuc["fp_conf"].append(c)
     sonuc["gap_medyan"] = sorted(gaps)[len(gaps) // 2] if gaps else None
     return sonuc
+
+
+def _egim(x, y):
+    """Basit en-kucuk-kareler egimi (y ~ a*x + b)."""
+    if len(x) < 4 or float(np.std(x)) < 1e-6:
+        return 0.0
+    a, _b = np.polyfit(np.asarray(x, float), np.asarray(y, float), 1)
+    return float(a)
+
+
+def ofset_attitude_regresyon(tp_ofset):
+    """ADDITION-1: TP eslesmelerinde reproj-bbox ofsetini pitch/roll'a regrese et.
+    Egimler ~0 -> telemetri->kamera zinciri UCUS REJIMINDE dogrulanmis (A'nin
+    sorusu kapanir). Belirgin egim -> TP/FP'ye serh + egim raporlanir."""
+    if len(tp_ofset) < 4:
+        return None
+    du = [o[0] for o in tp_ofset]; dv = [o[1] for o in tp_ofset]
+    pit = [o[2] for o in tp_ofset]; rol = [o[3] for o in tp_ofset]
+    egim = {"du~pitch": _egim(pit, du), "dv~pitch": _egim(pit, dv),
+            "du~roll": _egim(rol, du), "dv~roll": _egim(rol, dv)}
+    ofset_med = float(np.median([math.hypot(a, b) for a, b in zip(du, dv)]))
+    suphe = [k for k, v in egim.items() if abs(v) > 0.003]   # >der basina %0.3 W
+    return {"n": len(tp_ofset), "egim": egim, "ofset_medyan_norm": ofset_med,
+            "suphe": suphe, "zincir_dogru": (not suphe and ofset_med < 0.05)}
 
 
 # ---------------------------------------------------------------------------
@@ -306,6 +335,32 @@ def main():
         print(" olculen tespit: %d ; TP=%d FP=%d (truth_yok=%d, arka=%d)"
               % (s["toplam_olculen"], tp, fp, s["truth_yok"], s["arka"]))
         print(" PRECISION (cizilen kutunun hedefte olma orani): %.1f%%" % (100 * prec))
+        # ADDITION-5: FP conf dagilimi (p95) — esik neyi eleyip neyi eleyemedi
+        fc = s["fp_conf"]
+        if fc:
+            fc.sort()
+            p95 = fc[min(len(fc) - 1, int(len(fc) * 0.95))]
+            ustu = sum(1 for c in fc if c >= KilitCfg.KILIT_CONF_MIN)
+            print(" FP conf: medyan=%.2f p95=%.2f ; FP'lerin %%%.0f'i >=%.2f (kilit esigi)"
+                  " -> esik %s" % (fc[len(fc) // 2], p95, 100 * ustu / len(fc),
+                  KilitCfg.KILIT_CONF_MIN, "YETERSIZ (yuksek-conf FP var)" if p95 >= KilitCfg.KILIT_CONF_MIN else "FP'leri eliyor"))
+        # ADDITION-1: TP ofset-vs-attitude regresyon (A'nin ucus-rejimi karsiligi)
+        reg = ofset_attitude_regresyon(s["tp_ofset"])
+        if reg:
+            print("\n --- TP OFSET-vs-ATTITUDE REGRESYON (telemetri->kamera ucus rejiminde) ---")
+            print(" TP kare: %d ; ofset medyan=%.3f norm ; egimler (|.|>0.003 = suphe):"
+                  % (reg["n"], reg["ofset_medyan_norm"]))
+            for k, v in reg["egim"].items():
+                print("    %-9s %+.4f%s" % (k, v, "  <== SUPHE" if abs(v) > 0.003 else ""))
+            if reg["zincir_dogru"]:
+                print(" -> EGIMLER ~0 + ofset kucuk: telemetri->kamera zinciri UCUS REJIMINDE")
+                print("    DOGRULANDI (A'nin sorusu kapandi; ayri sweep 'iyi model runbook'una).")
+            else:
+                print(" -> BELIRGIN egim (%s): TP/FP sayilarina SERH; attitude konvansiyonu"
+                      % ", ".join(reg["suphe"]))
+                print("    ucus rejiminde tam oturmamis (A sweep'i / PnP-vs-truth ile kapat).")
+        else:
+            print(" (TP ofset-attitude regresyon: yeterli TP yok)")
     return 0
 
 

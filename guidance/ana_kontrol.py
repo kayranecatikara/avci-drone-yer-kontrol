@@ -188,6 +188,9 @@ class Cfg:
     YAKLASMA_BURUN_HEDEFE = True   # False -> eski omnidirek strafe (regresyon karsilastirma)
     YAKLASMA_ROLL_KIS = 0.30       # yan strafe (roll) kisma carpani (osilasyonu soner)
     YAKLASMA_DIKEY_KIS = 0.30      # hedef dikey FOV disindayken yatay yaklasma kisma carpani
+    # HEDEF-Z SALINIMI: dikey referans hedef z'nin KISA-EMA'si (hedef irtifasi +-200 m
+    # salindiginda drone anlik z'yi kovalayip osile etmesin). tau buyudukce daha yumusak.
+    HEDEF_Z_EMA_TAU_SN = 2.0
 
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
@@ -337,6 +340,8 @@ class AvciKontrol:
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
         self.son_z_anlik = None         # J'nin ANLIK (lead'siz) irtifa kestirimi (cm) - DIKEY icin
+        self._hedef_z_ema = None        # hedef z kisa-EMA'si (dikey referans; salinim yumusatma)
+        self._geom_uygun_prev = False   # geometrik dikey kapi histerezis durumu
         self.son_xy_anlik = None        # J'nin ANLIK (lead'siz) yatay konumu (cm) - terminal vurus LOS'u
         self.son_hiz = None             # J'nin kestirdigi hedef hizi (cm/s, 3B) - olcum/ileri kullanim
         self._fresh = False             # bu tik J'den YENI gecerli kestirim geldi mi?
@@ -774,7 +779,16 @@ class AvciKontrol:
                 v_pred, _elev = kamera_model.dikey_ekran_tahmini(
                     self.son_ham[2], drone_pos[2], dh, tespit.get("W"), H)
                 cy_n = float(tespit["cy"]) / float(H)
-                tespit["geometrik_uygun"] = abs(cy_n - v_pred) <= KilitCfg.GEOMETRIK_DIKEY_BAND
+                d_geom = abs(cy_n - v_pred)
+                # HISTEREZIS: hedef bant kenarindayken kapi titresip tespit penceresini
+                # kesmesin -> giris (siki) ve cikis (gevsek) esikleri AYRI. Ham GPS
+                # gurultulu; bant salinim payiyla calisir.
+                if self._geom_uygun_prev:
+                    uygun = d_geom <= KilitCfg.GEOMETRIK_DIKEY_CIKIS     # gevsek cikis
+                else:
+                    uygun = d_geom <= KilitCfg.GEOMETRIK_DIKEY_BAND      # siki giris
+                self._geom_uygun_prev = uygun
+                tespit["geometrik_uygun"] = uygun
             except Exception:
                 pass                                     # geometri kestirilemezse kapi pasif
         # Kilit sayaci KENDI sikli esigini kullanir (KilitCfg.KILIT_CONF_MIN=0.72);
@@ -943,7 +957,16 @@ class AvciKontrol:
 
         # YATAY: 2sn lead'li kestirim (intercept). DIKEY: lead'siz anlik irtifa
         # (lead dikeyde irtifa asimina/yukari kacmaya yol aciyor).
-        z_ref = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
+        # HEDEF-Z SALINIMI (saha: hedef irtifasi +-200 m salindiginda drone anlik z'yi
+        # kovalayip dikeyde osile ediyor). Dikey referans = hedef z'nin KISA-EMA'si
+        # (tau=Cfg.HEDEF_Z_EMA_TAU_SN); salinim yumusar, drone bant ortasinda kalir.
+        z_anlik = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
+        a_z = Cfg.DT / max(Cfg.HEDEF_Z_EMA_TAU_SN, 1e-6)
+        if self._hedef_z_ema is None:
+            self._hedef_z_ema = z_anlik
+        else:
+            self._hedef_z_ema = (1.0 - a_z) * self._hedef_z_ema + a_z * z_anlik
+        z_ref = self._hedef_z_ema
         ex = float(est[0] - drone_pos[0])
         ey = float(est[1] - drone_pos[1])
         ez = float(z_ref - drone_pos[2])

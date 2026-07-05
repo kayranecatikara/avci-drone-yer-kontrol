@@ -127,7 +127,56 @@ def teshis(rows):
     }
 
 
+def metrikler(rows):
+    """C ONCE/SONRA + TEPE YAW-RATE ozet: roll RMS, |yaw_err| ort (deg), yaw-rate
+    p95/maks (deg/s, wrap-aware). YAKLASMA/ARAMA (est dolu) satirlar uzerinden."""
+    appr = [r for r in rows if _num(r.get("est_x")) is not None]
+    rc = [_num(r.get("roll_cmd")) for r in appr if _num(r.get("roll_cmd")) is not None]
+    ye = [_num(r.get("yaw_err")) for r in appr if _num(r.get("yaw_err")) is not None]
+    roll_rms = (sum(v * v for v in rc) / len(rc)) ** 0.5 if rc else 0.0
+    ye_ort = math.degrees(sum(abs(v) for v in ye) / len(ye)) if ye else 0.0
+    yr, prev = [], None
+    for r in appr:
+        y, t = _num(r.get("drone_yaw_deg")), _num(r.get("t_perf"))
+        if y is None or t is None:
+            continue
+        if prev is not None:
+            dt = t - prev[1]
+            if 1e-3 < dt < 0.5:
+                dyaw = (y - prev[0] + 180.0) % 360.0 - 180.0     # wrap
+                yr.append(abs(dyaw / dt))
+        prev = (y, t)
+    yr.sort()
+    return {"n": len(appr), "roll_rms": roll_rms, "yaw_err_ort_deg": ye_ort,
+            "yaw_rate_p95": (yr[min(len(yr) - 1, int(len(yr) * 0.95))] if yr else 0.0),
+            "yaw_rate_maks": (max(yr) if yr else 0.0)}
+
+
+def kiyasla(yol_once, yol_sonra):
+    """C: ONCE/SONRA tek tablo (roll RMS + |yaw_err| + tepe yaw-rate)."""
+    def _yukle(y):
+        with open(y, encoding="utf-8", errors="replace", newline="") as f:
+            return metrikler(list(csv.DictReader(f)))
+    o, s = _yukle(yol_once), _yukle(yol_sonra)
+    print("=" * 70)
+    print(" C — DUZELTME-1 ONCE/SONRA (yaw-servo/turn-then-advance)")
+    print("=" * 70)
+    print(" %-22s %12s %12s   %s" % ("metrik", "ONCE", "SONRA", "yorum"))
+    print(" %-22s %12.3f %12.3f   %s" % ("roll_cmd RMS", o["roll_rms"], s["roll_rms"],
+          "dusmeli (osilasyon soner)" if s["roll_rms"] < o["roll_rms"] else "DUSMEDI!"))
+    print(" %-22s %12.1f %12.1f   %s" % ("|yaw_err| ort (deg)", o["yaw_err_ort_deg"],
+          s["yaw_err_ort_deg"], "dusmeli (<10 kabul)" if s["yaw_err_ort_deg"] < o["yaw_err_ort_deg"] else "DUSMEDI!"))
+    yr = s["yaw_rate_p95"]
+    yorum = ("<15 -> SIM yaw otoritesi kisitli; donus fazi suresi/esigi Cfg'de ayarla"
+             if yr < 15.0 else ">=15 -> yaw calisiyor; onceki zayif olcum kisa step'tendi")
+    print(" %-22s %12s %12.1f   %s" % ("TEPE yaw-rate p95 (deg/s)", "-", yr, yorum))
+    print(" %-22s %12s %12.1f" % ("  yaw-rate maks (deg/s)", "-", s["yaw_rate_maks"]))
+    return 0
+
+
 def main():
+    if len(sys.argv) >= 4 and sys.argv[1] == "--kiyasla":
+        return kiyasla(sys.argv[2], sys.argv[3])
     yol = sys.argv[1] if len(sys.argv) > 1 else None
     if not yol:
         lst = [f for f in glob.glob(os.path.join(_PROJ, "veri", "ucus_log_*.csv"))
