@@ -214,8 +214,9 @@
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
         <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
         <!-- SAHTE TESPİT: YZ modeli hazır değilken güdüm testi. Açıkken görev sırasında
-             FPV'de mouse BASILI TUTULAN nokta, sanki modelin verdiği tespitmiş gibi
-             güdüme akar (server dedektör döngüsünde gerçek çıktının yerine geçer). -->
+             SOL TIK ile işaretlenen nokta (bırakınca da KALIR; sürüklersen izler),
+             sanki modelin verdiği tespitmiş gibi güdüme akar (server dedektör
+             döngüsünde gerçek çıktının yerine geçer). SAĞ TIK / ESC işareti siler. -->
         <button id="sahteBtn" class="btn" onclick="sahteTogle()"><span class="ic">🖱️</span> Sahte Tespit (Mouse)</button>
 
         <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
@@ -339,6 +340,13 @@
           <div class="row"><span class="k">Kilit ilerleme</span><span class="v mono" id="tkKilit">—</span></div>
           <div class="row"><span class="k">Kayıp süresi</span><span class="v mono" id="tkKayip">—</span></div>
           <div class="row"><span class="k">Yeniden tespit</span><span class="v mono" id="tkYeniden">—</span></div>
+          <!-- KİLİTLENME (şartname): bbox ≥ %6 + Hedef Vuruş Alanı içinde, 5 sn kesintisiz
+               (200 ms eksik-kare bütçesi; başlangıç/bitişte tolerans yok). Sayaç güdümde
+               (beyin.kilit); burada yalnız gösterim. -->
+          <div class="row"><span class="k">Kilitlenme (şartname)</span><span class="v" id="tkKilitlenme">—</span></div>
+          <div class="row"><span class="k">Kilitlenme süresi</span><span class="v mono" id="tkKilitSure">—</span></div>
+          <!-- Kilitlenme tazelik bütçesi dedektör kadansına bağlı (≥~5 Hz şart) -->
+          <div class="row"><span class="k">Dedektör kadansı</span><span class="v mono" id="tkDetHz">—</span></div>
         </div>
 
         <!-- POZ KESTİRİMİ: talon_pose.pt 6-nokta + PnP → KAMERADAN mesafe/yönelim.
@@ -365,6 +373,7 @@
           <div class="row" style="margin-top:6px"><span class="k">Durum / Mod</span><span class="v mono" id="gdDurum">—</span></div>
           <div class="row"><span class="k">Yatay mesafe d_h</span><span class="v mono" id="gdDh">—</span></div>
           <div class="row"><span class="k">Handoff</span><span class="v mono" id="gdHandoff">—</span></div>
+          <div class="row"><span class="k">İniş isteği / vz</span><span class="v mono" id="gdVz">—</span></div>
         </div>
 
         <div class="card drone">
@@ -436,28 +445,44 @@
 
   // =====================================================================
   //  SAHTE TESPİT — YZ modeli hazır olmadan güdüm testi:
-  //  Buton AÇIK iken FPV üzerinde mouse BASILI TUTULAN nokta /api/sahte'ye
-  //  akıtılır; server dedektör döngüsünde model çıktısının YERİNE koyar.
-  //  Mouse bırakılınca / pencere odağı gidince aktif=false gider; ayrıca
-  //  server tarafında 0.6 s tazelik failsafe'i var (mesaj kesilirse düşer).
+  //   · SOL TIK       : hedefi İŞARETLER — bırakınca da KALIR (kalıcı akış;
+  //                     basılı tutup sürüklersen işaret imleci izler, bırakınca
+  //                     son yerde sabitlenir). Yeni SOL TIK işareti taşır.
+  //   · SAĞ TIK / ESC : işareti temizler (mod kapatma / odak kaybı da temizler).
+  //  İşaret /api/sahte'ye ~12 Hz akıtılır; server dedektör döngüsünde model
+  //  çıktısının YERİNE koyar. Akış kesilirse server 0.6 s failsafe ile düşürür
+  //  (kalıcı akışı bu sekme sürdürür; sekme kapanırsa failsafe devrede).
   // =====================================================================
   let sahteAcik = false;      // buton durumu (mod silahlı mı?)
-  let sahteBasili = false;    // mouse şu an basılı mı?
-  let sahteSonXY = null;      // [cx,cy] normalize — hem gönderim hem yerel imleç çizimi
-  let sahteTimer = null;      // basılıyken ~12 Hz tazeleme (failsafe + sürükleme takibi)
+  let sahteBasili = false;    // SOL tuş şu an basılı mı? (sürükleme işareti izletir)
+  let sahteSabitXY = null;    // [cx,cy] normalize — işaretli sahte hedef (KALICI)
+  let sahteTimer = null;      // işaret varken ~12 Hz tazeleme (failsafe + takip)
+  let sonGorevAktif = false;  // telemetriden: dedektör döngüsü sahteyi işliyor mu?
 
+  function sahteDurumYaz(){
+    // Mod + paylaşım durumuna göre yol gösterici mesaj. Paylaşım SONRADAN açılıp
+    // kapanırsa da çağrılır (startShare/stopShare) — bayat ipucu kalmasın.
+    if(!sahteAcik){
+      $("leftStatus").textContent = "Sahte tespit kapalı — güdüm gerçek dedektör çıktısını kullanır.";
+      return;
+    }
+    $("leftStatus").textContent = ($("overlay").style.display !== "block")
+      ? "SAHTE TESPİT AÇIK — ama FPV paylaşımı KAPALI: önce Ekranı Paylaş (overlay görünmeden tıklama işlenemez)."
+      : "SAHTE TESPİT AÇIK — FPV'de SOL TIK ile hedefi işaretle (bırakınca kalır); SAĞ TIK / ESC temizler.";
+  }
   function sahteTogle(){
     sahteAcik = !sahteAcik;
     $("sahteBtn").classList.toggle("active", sahteAcik);
     $("overlay").style.cursor = sahteAcik ? "crosshair" : "default";
-    $("leftStatus").textContent = sahteAcik
-      ? "SAHTE TESPİT AÇIK — görev sırasında FPV'de hedefin üstüne mouse ile BASILI TUT."
-      : "Sahte tespit kapalı — güdüm gerçek dedektör çıktısını kullanır.";
-    if(!sahteAcik) sahteBirak();
+    // CSS varsayılanı pointer-events:none (overlay saf çizim katmanı, tıklama alta geçer);
+    // mod açıkken tıklamayı overlay ALMALI — yoksa mousedown/contextmenu hiç tetiklenmez.
+    $("overlay").style.pointerEvents = sahteAcik ? "auto" : "none";
+    sahteDurumYaz();
+    if(!sahteAcik) sahteTemizle();
   }
   function sahteGonder(aktif){
     const b = {aktif: aktif};
-    if(aktif && sahteSonXY){ b.cx = sahteSonXY[0]; b.cy = sahteSonXY[1]; }
+    if(aktif && sahteSabitXY){ b.cx = sahteSabitXY[0]; b.cy = sahteSabitXY[1]; }
     fetch("/api/sahte",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify(b)}).catch(()=>{});
   }
@@ -469,24 +494,50 @@
     const y = (ev.clientY - r.top  - rc.y) / rc.h;
     return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
   }
-  function sahteBirak(){
+  function sahteTimerKur(){
+    if(sahteTimer) return;
+    sahteTimer = setInterval(()=>{
+      if(sahteSabitXY) sahteGonder(true);
+      else { clearInterval(sahteTimer); sahteTimer = null; }  // işaret kalmadı
+    }, 80);
+  }
+  function sahteGorevUyari(){
+    // Dedektör döngüsü sahteyi yalnız OTONOM görevde işler; değilse nedenini söyle
+    // ("işaretledim ama hiçbir şey olmuyor" karışıklığını önler).
+    if(!sonGorevAktif) $("leftStatus").textContent =
+      "⚠ Sahte hedef işaretlendi ama GÖREV AKTİF DEĞİL — işlenmesi için Görev Başlat (manuel mod da kapalı olmalı).";
+  }
+  function sahteTemizle(){
+    // işareti + akışı bırak (SAĞ TIK / ESC / mod kapatma / odak kaybı)
+    const vardi = !!sahteSabitXY;
+    sahteBasili = false; sahteSabitXY = null;
     if(sahteTimer){ clearInterval(sahteTimer); sahteTimer = null; }
-    if(sahteBasili){ sahteBasili = false; sahteGonder(false); }
-    sahteSonXY = null;
+    if(vardi) sahteGonder(false);
   }
   window.addEventListener("DOMContentLoaded", ()=>{
     const ov = $("overlay");
-    ov.addEventListener("mousedown", ev=>{
+    ov.addEventListener("mousedown", ev=>{         // SOL TIK: işaret koy / taşı
       if(!sahteAcik || ev.button !== 0) return;
-      sahteBasili = true; sahteSonXY = sahteXY(ev); sahteGonder(true);
-      if(!sahteTimer) sahteTimer = setInterval(()=>{ if(sahteBasili) sahteGonder(true); }, 80);
+      sahteBasili = true; sahteSabitXY = sahteXY(ev);
+      sahteGonder(true); sahteTimerKur(); sahteGorevUyari();
       ev.preventDefault();
     });
-    window.addEventListener("mousemove", ev=>{     // sürükleme: hedef hareket ederse takip et
-      if(sahteBasili) sahteSonXY = sahteXY(ev);
+    ov.addEventListener("contextmenu", ev=>{       // SAĞ TIK: işareti temizle
+      if(!sahteAcik) return;                       // mod kapalıyken normal sağ-tık menüsü
+      ev.preventDefault();                         // tarayıcı menüsünü bastır
+      if(sahteSabitXY){
+        sahteTemizle();
+        $("leftStatus").textContent = "Sahte hedef işareti temizlendi.";
+      }
     });
-    window.addEventListener("mouseup", sahteBirak);
-    window.addEventListener("blur", sahteBirak);   // sekme/pencere odağı gitti -> güvenli bırak
+    window.addEventListener("mousemove", ev=>{     // basılıyken sürükle: işaret imleci izler
+      if(sahteBasili) sahteSabitXY = sahteXY(ev);
+    });
+    window.addEventListener("mouseup", ()=>{ sahteBasili = false; });  // bırakınca işaret KALIR
+    window.addEventListener("blur", sahteTemizle); // sekme/pencere odağı gitti -> güvenli bırak
+    window.addEventListener("keydown", ev=>{       // ESC: işareti temizle
+      if(ev.key === "Escape" && sahteAcik) sahteTemizle();
+    });
   });
 
   // =====================================================================
@@ -600,11 +651,21 @@
       ["VIS_SIGN_YAW","Yön: burun sağ/sol   (hedef ters yöne kaçıyorsa −1/+1 çevir)",-1,1,2],
       ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
       ["VIS_SIGN_VZ","Yön: irtifa yukarı/aşağı   (ters ortalıyorsa çevir)",-1,1,2],
-      ["VIS_K_VZ","Dikey ortalama gücü   (artır=hızlı irtifa düzeltir)",0,1.5,0.05],
-      ["VIS_EY_REF","Dikey referans — 25° tilt telafisi   (hedef AYNI irtifadayken bbox'un oturduğu turuncu çizgi)",-0.8,0.8,0.01],
+      ["VIS_K_VZ","Dikey hız isteği kazancı   (görüntü hatası→hız isteği; ↑=küçük hatada tam hız)",0,4.0,0.05],
+      ["VIS_EY_REF","Dikey referans (STATİK; komp. kapalıyken)   (turuncu çizginin sabit konumu)",-0.8,0.8,0.01],
+      ["VIS_ATT_COMP","Duruş kompanzasyonu — dinamik REF   (1=AÇIK: çizgi yatışla hareket eder; 0=eski sabit)",0,1,1],
+      ["VIS_CAM_TILT_DEG","Kamera tilt (°) — dinamik REF kalibrasyonu   (aynı irtifada hedefte eyd=0 yap)",15,35,0.05],
+      ["VIS_VZ_MAX","Dikey hız tavanı (cm/s)   (iniş/tırmanış hız sınırı — serbest düşüş freni)",200,3300,50],
+      ["VIS_KV_Z","Dikey hız takip kazancı   (iniş dalı; hız hatası→throttle; kayit_ucusu 0.0020)",0.0005,0.006,0.0001],
+      ["VIS_ALC_MIN","İniş sırasında ileri kısma tabanı   (0.15=eski kanat-durması; 1=kısma yok)",0,1.0,0.05],
+      ["VIS_SIGN_ROLL","Yön: yana yatış   (roll açıkken ters yatıyorsa −1/+1 çevir)",-1,1,2],
+      ["VIS_K_ROLL","Çeviklik: yatay hatada yana yatış   (spec'teki roll←ex; 0=KAPALI varsayılan)",0,1.0,0.05],
       ["VIS_K_FWD","İleri yaklaşma hızı   (artır=hızlı dalar, önce ortala)",0,1.0,0.05],
       ["VIS_CENTER_GATE","İleri için ortalama toleransı   (büyük=erken yaklaşır)",0.1,0.8,0.05],
-      ["VIS_AREA_STOP","Durma yakınlığı (bbox alan oranı)   (küçük=daha uzakta yavaşlar)",0.05,0.6,0.01],
+      ["VIS_W_STOP","Durma yakınlığı (bbox GENİŞLİK oranı)   (küçük=uzakta durur; 0.30=Av-sığma payı)",0.06,0.6,0.01],
+      ["VIS_USE_POSE_DIST","Poz-mesafeli ileri profil   (1=ileri hızı poz mesafesi yönetir; poz yoksa genişlik)",0,1,1],
+      ["VIS_DIST_SLOW_M","Poz freni başlangıcı (m)   (bu mesafeden yakında yavaşlamaya başlar)",4,30,0.5],
+      ["VIS_DIST_STOP_M","Poz duruş mesafesi (m)   (bu mesafede ileri 0)",1,10,0.5],
       ["VIS_CONF_MIN","Tespit güven eşiği   (artır=az yanlış tespit, geç kilit)",0.10,0.90,0.05],
       ["VIS_EMA","Titreşim yumuşatma   (küçük=pürüzsüz ama yavaş)",0.10,1.0,0.05],
     ]],
@@ -672,7 +733,14 @@
   // Normalize koordinat (cx,cy,w,h ∈ [0,1]) kullanildigindan cozunurluk onemsiz; video
   // object-fit:contain oldugundan letterbox icerik dikdortgeni hesaplanir.
   function _icerikRect(el){
-    const cw=el.clientWidth, ch=el.clientHeight, vw=el.videoWidth, vh=el.videoHeight;
+    // Boyut referansi OVERLAY canvas kutusu (=#view'i kaplar), video ELEMENTININ kendi
+    // kutusu DEGIL: #cam videosu (max-width/height:100% + object-fit:contain) #view icinde
+    // flex ile ORTALANIR ve letterbox boyutundadir; onun kutusuna gore (0,0) demek
+    // overlay'de KAYIK cizim demekti (Av cercevesi/nisan/REF/bbox/mouse hepsi kosede).
+    // Stream en-boyunu overlay kutusuna sigdirip ofseti OVERLAY koordinatinda dondururuz
+    // -> tarayicinin videoyu cizdigi yerin AYNISI.
+    const ov=$("overlay");
+    const cw=ov.clientWidth, ch=ov.clientHeight, vw=el.videoWidth, vh=el.videoHeight;
     if(!vw||!vh) return {x:0,y:0,w:cw,h:ch};
     const s=Math.min(cw/vw, ch/vh), w=vw*s, h=vh*s;
     return {x:(cw-w)/2, y:(ch-h)/2, w:w, h:h};
@@ -699,11 +767,48 @@
     ctx.beginPath(); ctx.moveTo(mcx-28,refY); ctx.lineTo(mcx+28,refY); ctx.stroke();
     ctx.setLineDash([]);
     ctx.font="11px monospace"; ctx.fillStyle="rgba(255,170,60,.95)";
-    ctx.fillText("REF", mcx+33, refY+4);
+    // REF etiketi + eyd: kontrolorun SIFIRLADIGI dikey hata (dinamik referansa gore).
+    // Comp ACIKKEN cizgi durusla hareket eder (yapay ufuk gibi) — dogru davranis.
+    let refTxt = "REF";
+    if(gs.eyd!=null) refTxt += " eyd=" + (gs.eyd>=0?"+":"") + Number(gs.eyd).toFixed(2);
+    ctx.fillText(refTxt, mcx+33, refY+4);
+    // HEDEF VURUŞ ALANI + KİLİTLENME (şartname): kilitlenme dörtgeni (bbox) bu SARI
+    // alanın İÇİNDE ve boyutu ≥ eşik iken sayaç işler; 5 sn kesintisiz = KİLİTLENME.
+    // Geometri (alan payları/eşik/süre) telemetriden gelir → Cfg ile TEK kaynak,
+    // videoda görünen çizim ile kod birebir tutarlı.
+    const kl = gs.kilit;
+    if(kl){
+      const ax=(Number(kl.alan_x)||0)*rc.w, ay=(Number(kl.alan_y)||0)*rc.h;
+      const zx=rc.x+ax, zy=rc.y+ay, zw=rc.w-2*ax, zh=rc.h-2*ay;
+      ctx.strokeStyle = kl.gecerli ? "rgba(255,214,60,.95)" : "rgba(255,214,60,.40)";
+      ctx.lineWidth = kl.gecerli ? 2 : 1.2; ctx.setLineDash([10,6]);
+      ctx.strokeRect(zx,zy,zw,zh); ctx.setLineDash([]);
+      ctx.font="11px monospace"; ctx.fillStyle="rgba(255,214,60,.9)";
+      ctx.fillText("HEDEF VURUŞ ALANI", zx+6, zy+14);
+      // Kilit GEÇERSİZ nedeni FPV üstünde (yan karta bakmadan near-miss teşhisi)
+      if(kl.aktif && !kl.gecerli && kl.neden){
+        ctx.font="bold 11px monospace"; ctx.fillStyle="rgba(255,107,107,.95)";
+        ctx.fillText("✗ "+kl.neden, zx+zw-96, zy+14);
+      }
+      if(kl.aktif || kl.basarili){                 // kilit ilerleme çubuğu (alanın alt kenarı)
+        const hs=Number(kl.hedef_s)||5, sr=Number(kl.sure_s)||0, pr=Math.min(1,sr/hs);
+        const bw0=Math.min(220, zw*0.5), bx0=zx+8, by0=zy+zh-16, bh0=7;
+        ctx.fillStyle="rgba(255,255,255,.18)"; ctx.fillRect(bx0,by0,bw0,bh0);
+        ctx.fillStyle = kl.basarili ? "#25e0a0" : (kl.gecerli ? "#ffd63c" : "#ff9c3c");
+        ctx.fillRect(bx0,by0,bw0*pr,bh0);
+        ctx.font="bold 12px monospace";
+        ctx.fillStyle = kl.basarili ? "#25e0a0" : "#ffd63c";
+        let kt = kl.basarili ? "KİLİTLENME ✓"+(kl.sayi>1?" ×"+kl.sayi:"")
+                             : "KİLİTLENME "+sr.toFixed(1)+"/"+hs.toFixed(0)+" s";
+        if(!kl.basarili && kl.gap_s>0.0005) kt += "  kayıp "+Math.round(kl.gap_s*1000)+" ms";
+        ctx.fillText(kt, bx0+bw0+10, by0+7);
+      }
+    }
     const det=gs.tespit;
     if(det){
-      // SAHTE tespit (mouse) MACENTA çizilir — gerçek model çıktısıyla karışmasın
-      const bbClr = det.sahte ? "#ff52ff" : "#25e0a0";
+      // Kilit şartları sağlanıyorken bbox ŞARTNAME rengi KIRMIZI (kilitlenme dörtgeni);
+      // değilken kaynak rengi: gerçek model YEŞİL / SAHTE tespit (mouse) MACENTA.
+      const bbClr = (kl && kl.gecerli) ? "#ff4646" : (det.sahte ? "#ff52ff" : "#25e0a0");
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       ctx.strokeStyle=bbClr; ctx.lineWidth=2.5;                    // bbox
       ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
@@ -750,16 +855,20 @@
         }
       }
     }
-    // SAHTE TESPİT yerel imleç: mouse basılıyken ANINDA çizilir (telemetri gecikmesini
-    // beklemez); server'dan dönen macenta bbox ile üst üste oturması = akış doğru çalışıyor.
-    if(sahteBasili && sahteSonXY){
-      const px=rc.x+sahteSonXY[0]*rc.w, py=rc.y+sahteSonXY[1]*rc.h;
+    // SAHTE TESPİT yerel işaret: SOL TIK ile konan hedef ANINDA çizilir (telemetri
+    // gecikmesini beklemez); basılıyken DÜZ halka (sürükleme canlı), bırakınca
+    // KESİKLİ halka (işaret sabitlendi). Server'dan dönen macenta bbox ile üst
+    // üste oturması = akış doğru çalışıyor demektir.
+    if(sahteSabitXY){
+      const px=rc.x+sahteSabitXY[0]*rc.w, py=rc.y+sahteSabitXY[1]*rc.h;
       ctx.strokeStyle="#ff52ff"; ctx.lineWidth=2;
+      if(!sahteBasili) ctx.setLineDash([5,4]);          // sabitlenmiş işaret: kesikli halka
       ctx.beginPath(); ctx.arc(px,py,10,0,6.2832); ctx.stroke();
+      ctx.setLineDash([]);
       ctx.beginPath(); ctx.moveTo(px-16,py); ctx.lineTo(px+16,py);
       ctx.moveTo(px,py-16); ctx.lineTo(px,py+16); ctx.stroke();
       ctx.font="bold 11px monospace"; ctx.fillStyle="#ff52ff";
-      ctx.fillText("SAHTE HEDEF", px+14, py-14);
+      ctx.fillText(sahteBasili ? "SAHTE HEDEF" : "SAHTE HEDEF (SABİT)", px+14, py-14);
     }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
@@ -843,8 +952,8 @@
     $("gnssJd").innerHTML  = gn.j_duzeltme_m!=null ? f1(gn.j_duzeltme_m)+' <small>m</small>' : "—";
     // kHam / kJ (SAPMA satırları buraya taşındı) tick() içinde t.kiyas'tan doldurulur.
   }
-  function guncelleTakip(tk, det){
-    tk = tk || {};
+  function guncelleTakip(tk, det, kl, gs){
+    tk = tk || {}; gs = gs || {};
     $("tkAktif").innerHTML = tk.aktif
       ? '<span class="rozet ok">AKTİF</span>' : '<span class="rozet pasif">PASİF</span>';
     $("tkId").textContent   = (tk.id!=null) ? ("ID:"+tk.id) : "—";
@@ -852,6 +961,24 @@
     $("tkKilit").textContent= (tk.pos_count!=null && tk.n_lock) ? (tk.pos_count+"/"+tk.n_lock) : "—";
     $("tkKayip").innerHTML  = (tk.kayip_s!=null && tk.kayip_s>0.05) ? f1(tk.kayip_s)+' <small>s</small>' : '0.0 <small>s</small>';
     $("tkYeniden").textContent = (tk.yeniden!=null) ? tk.yeniden : "—";
+    // KİLİTLENME (şartname) satırları: durum rozeti + süre/tolerans bütçesi
+    let kroz = '<span class="rozet pasif">—</span>', ksure = "—";
+    if(kl){
+      if(kl.basarili)     kroz = '<span class="rozet ok">BAŞARILI ✓'+(kl.sayi>1?" ×"+kl.sayi:"")+'</span>';
+      else if(kl.gecerli) kroz = '<span class="rozet ok">SAYAÇ AKIYOR</span>';
+      else if(kl.aktif)   kroz = '<span class="rozet kes">'+_esc(kl.neden||"kayıp")+'</span>';
+      else                kroz = '<span class="rozet pasif">'+_esc(kl.neden||"—")+'</span>';
+      ksure = f1(kl.sure_s)+" / "+f0(kl.hedef_s)+" s";
+      if(kl.gap_s>0.0005) ksure += " · kayıp "+Math.round(kl.gap_s*1000)+" ms";
+    }
+    $("tkKilitlenme").innerHTML = kroz;
+    $("tkKilitSure").textContent = ksure;
+    // Dedektör kadansı: kilit tazelik bütçesi ≥~5 Hz ister; altına düşerse KIRMIZI
+    if(gs.det_hz!=null){
+      const hz = Number(gs.det_hz);
+      $("tkDetHz").innerHTML = '<span style="color:'+(hz<5?"var(--danger,#ff6b6b)":"inherit")+'">'
+                               + hz.toFixed(1) + ' <small>Hz</small></span>';
+    } else $("tkDetHz").textContent = "—";
   }
   // POZ KESTİRİMİ kartı: kamera-PnP mesafe/yaw + gerçekle kıyas (fark renklenir)
   function _aciFark(a,b){ return Math.abs(((a-b+540)%360)-180); }
@@ -898,6 +1025,9 @@
     $("gdDh").innerHTML = gd.d_h_m!=null ? f1(gd.d_h_m)+' <small>m</small>' : "—";
     $("gdHandoff").innerHTML = gd.handoff
       ? '<span style="color:var(--accent)">EVET</span>' : '<span style="color:var(--muted)">hayır</span>';
+    // dikey asimetrik yasa: istenen / ölçülen dikey hız (görsel fazda dolu; m/s)
+    $("gdVz").innerHTML = (gd.vis_vz_des_ms!=null && gd.vis_vz_ms!=null)
+      ? f1(gd.vis_vz_des_ms)+' / '+f1(gd.vis_vz_ms)+' <small>m/s</small>' : "—";
   }
 
   // ---- Görev olay günlüğü (dedup: sadece yeni id'ler DOM'a; renk sınıfı sv'den) ----
@@ -1001,6 +1131,8 @@
           : "⚪ Görev: Pasif";
       // Aktif güdüm kaynağına göre buton vurgusu
       kaynakVurgula(t.gorev_aktif ? t.kaynak : null);
+      // Sahte tespit uyarısı için: dedektör döngüsü yalnız otonom görevde işler
+      sonGorevAktif = !!t.gorev_aktif && !t.manuel_aktif;
       const d=t.drone, g=t.target;
       $("dx").innerHTML  = f1(d.x)+' <small>m</small>';
       $("dy").innerHTML  = f1(d.y)+' <small>m</small>';
@@ -1046,7 +1178,7 @@
       // --- Video ister panelleri (görev/gnss/takip/güdüm + olay günlüğü + harita) ---
       guncelleGorev(t.gorev);
       guncelleGnss(t.gnss);
-      guncelleTakip(t.takip, t.gorsel && t.gorsel.tespit);
+      guncelleTakip(t.takip, t.gorsel && t.gorsel.tespit, t.gorsel && t.gorsel.kilit, t.gorsel);
       guncellePoz(t.gorsel, t.gercek_mesafe_m);   // POZ kartı: kamera-PnP vs gerçek
       guncelleGudum(t.gudum);
       olayGuncelle(t.olaylar, t.gorev);
@@ -1075,12 +1207,14 @@
       cam.style.display = "block";
       $("overlay").style.display = "block";     // FPV overlay katmanini ac
       camPh.style.display = "none";
+      if(sahteAcik) sahteDurumYaz();            // "önce Ekranı Paylaş" ipucunu tazele
       stream.getVideoTracks()[0].addEventListener("ended", stopShare);
     }catch(e){ console.log("Görüntü paylaşımı iptal/hata:", e); }
   }
   function stopShare(){
     if(stream){ stream.getTracks().forEach(t=>t.stop()); stream=null; }
     cam.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
+    if(sahteAcik) sahteDurumYaz();  // mod açıkken paylaşım biterse ipucu bayat kalmasın
   }
   shareBtn.onclick = startShare;
 </script>

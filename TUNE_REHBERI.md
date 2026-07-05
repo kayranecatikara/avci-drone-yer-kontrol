@@ -151,6 +151,10 @@ hangi anda (log `nose_off_true` serisi)? Dönüşlerde kayıp + yaw_sat yüksek 
 
 **Aşama 2 — İrtifa hattı (dikey):** Kural: **hedefle aynı irtifaya erken in,
 üstünde süzülme** (25° tilt). Hedef senaryoda yüksekse `SEARCH_ALT`'ı ona yaklaştır.
+GÖRSEL fazda dikey referans artık DİNAMİK (`VIS_ATT_COMP=1`): kalibrasyon
+`VIS_EY_REF` yerine **`VIS_CAM_TILT_DEG`** slider'ıyla yapılır — aynı irtifadaki
+hedefte FPV'deki "REF eyd=" okuması 0'a oturana dek tilt'i ayarla (VIS_EY_REF yalnız
+komp. kapalıyken kullanılır).
 `[Z]`'de ez yaklaşma boyunca |ez|<2-3 m'ye oturmalı, sarkaç yapmamalı.
 **Karar: FPV'de hedef dikeyde kaybolmuyor → geç.**
 

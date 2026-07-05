@@ -75,26 +75,40 @@ def _get_sct():
     return _thread_local.sct
 
 
+# Pencere bolgesi CACHE: pencere_bul (getAllWindows + surec-adi/psutil taramasi)
+# pahali (5-30 ms) ve HER karede gereksizdi -> dedektor kadansini yiyordu. Sonuc
+# _REGION_CACHE_S boyunca onbelleklenir; grab hatasinda cache dusurulur (pencere
+# tasindiysa/kapandiysa <= 2 sn icinde kendini toparlar).
+_region_cache = {"rect": None, "t": 0.0}
+_REGION_CACHE_S = 2.0
+
+
 def _find_game_region():
-    """Oyun penceresinin (left, top, width, height) bolgesini doner.
+    """Oyun penceresinin (left, top, width, height) bolgesini doner (ONBELLEKLI).
     Bulamazsa None (o zaman tum ekran yakalanir). Pencere secimi
     detection.pencere_yakala.pencere_bul ile yapilir (SUREC-ADI oncelikli;
     tarayici sekmesi basliginda 'Drones of War' gecmesi yaniltamaz)."""
     if gw is None:
         return None
+    now = time.time()
+    if (now - _region_cache["t"]) < _REGION_CACHE_S:
+        return _region_cache["rect"]
+    rect = None
     try:
         from detection.pencere_yakala import pencere_bul
         baslik, hwnd = pencere_bul(GAME_TITLE_HINTS)
-        if baslik is None:
-            return None
-        for w in gw.getAllWindows():
-            if (hwnd is not None and getattr(w, "_hWnd", None) == hwnd) or \
-               (hwnd is None and (w.title or "").strip() == baslik):
-                if w.width > 0 and w.height > 0 and w.visible:
-                    return (w.left, w.top, w.width, w.height)
+        if baslik is not None:
+            for w in gw.getAllWindows():
+                if (hwnd is not None and getattr(w, "_hWnd", None) == hwnd) or \
+                   (hwnd is None and (w.title or "").strip() == baslik):
+                    if w.width > 0 and w.height > 0 and w.visible:
+                        rect = (w.left, w.top, w.width, w.height)
+                        break
     except Exception:
-        pass
-    return None
+        rect = None
+    _region_cache["rect"] = rect
+    _region_cache["t"] = now
+    return rect
 
 
 def grab_frame_jpeg():
@@ -197,6 +211,7 @@ def grab_frame_bgr():
         return _olcekle_bgr(bgr)
     except Exception as e:
         _fpv_log("KARE YOK", " (%s)" % e)
+        _region_cache["t"] = 0.0               # grab hatasi: bolge cache'ini tazele (pencere tasindi?)
         return None, 0, 0
 
 
@@ -274,10 +289,14 @@ TUNE_ALLOW = {
     # dikey (irtifa) PID
     "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
     # GORSEL GUDUM (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)
-    "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH",
-    "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
-    "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
-    "VIS_EY_REF",   # kamera 25 derece tilt telafisi (dikey referans; sim'de kalibre)
+    "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH", "VIS_SIGN_ROLL",
+    "VIS_K_YAW", "VIS_K_VZ", "VIS_VZ_MAX", "VIS_KV_Z", "VIS_K_FWD", "VIS_FWD_MAX",
+    "VIS_CENTER_GATE", "VIS_W_STOP", "VIS_EMA", "VIS_CONF_MIN",
+    "VIS_EY_REF",   # statik dikey referans (comp KAPALIYKEN fallback; sim'de kalibre)
+    "VIS_ALC_MIN", "VIS_K_ROLL",   # inis-kisma tabani + ceviklik roll'u (2026-07-05 v2)
+    "VIS_ATT_COMP", "VIS_CAM_TILT_DEG",           # dinamik dikey referans (F1)
+    "VIS_USE_POSE_DIST", "VIS_DIST_SLOW_M", "VIS_DIST_STOP_M",   # poz-mesafeli ileri profil
+    "VIS_CLS_ID",   # dedektor sinif filtresi (-1 kapali)
 }
 
 # ----------------------------------------------------------
@@ -364,7 +383,9 @@ _gorev = {"faz": "HAZIR", "t0": None, "vurus": False, "basari": False,
           "en_yakin_m": None, "vurus_t": None, "mesafe_kaynak": None}
 _izci = {"durum_prev": None, "handoff_prev": False, "kilit_ilan": False,
          "angajman_ilan": False, "angajman_min": None, "iska_ilan": False,
-         "kesinti": False, "son_paket_t": None}
+         "kesinti": False, "son_paket_t": None,
+         # KILITLENME (sartname) kenarlari: sayac-basladi ilani + basari kenari
+         "kilitlenme_ilan": False, "kilitlenme_basarili_prev": False}
 
 
 def _gorev_sifirla(faz):
@@ -373,7 +394,8 @@ def _gorev_sifirla(faz):
     _gorev.update(faz=faz, t0=time.time(), vurus=False, basari=False,
                   en_yakin_m=None, vurus_t=None, mesafe_kaynak=None)
     _izci.update(durum_prev=None, handoff_prev=False, kilit_ilan=False,
-                 angajman_ilan=False, angajman_min=None, iska_ilan=False)
+                 angajman_ilan=False, angajman_min=None, iska_ilan=False,
+                 kilitlenme_ilan=False, kilitlenme_basarili_prev=False)
 
 
 def _mesafe_olc():
@@ -472,6 +494,25 @@ def _gorev_izle():
         olay_ekle("iyi", "GORSEL KILIT hazir (%d/%d)" % (beyin._vis_pos_count, Cfg.VIS_N_LOCK))
     elif beyin._vis_pos_count == 0:
         _izci["kilit_ilan"] = False
+
+    # 3.5) KILITLENME (sartname) kenarlari — beyin.kilit GOZLEMCISI. Sayac beyin'de
+    #      (adim() her tik gunceller); burada yalnizca "durum degisti mi?" bakilir.
+    #      Anti-spam: sayac-basladi ilani deneme 1.0 sn'yi gecince (bbox alan
+    #      kenarinda titrerse her girisi cikisi gunluge basmayalim); KOPTU yalnizca
+    #      ilan edilmis (>=1 sn yasamis) deneme icin.
+    k = beyin.kilit
+    k_aktif = (k.t0 is not None)
+    if k_aktif and (not _izci["kilitlenme_ilan"]) and k.sure_s >= 1.0:
+        _izci["kilitlenme_ilan"] = True
+        olay_ekle("bilgi", "KILITLENME sayaci akiyor — bbox vurus alaninda, boyut >= %%%d"
+                  % round(Cfg.KILIT_ESIK_ORAN * 100))
+    if (not k_aktif) and _izci["kilitlenme_ilan"]:
+        _izci["kilitlenme_ilan"] = False
+        olay_ekle("uyari", "KILITLENME KOPTU (%s) — tolerans butcesi asildi, sayac bastan" % k.neden)
+    if k.basarili and not _izci["kilitlenme_basarili_prev"]:
+        olay_ekle("iyi", "KILITLENME BASARILI — %.0f sn kesintisiz (bbox >= %%%d, vurus alaninda)"
+                  % (Cfg.KILIT_SURE_S, round(Cfg.KILIT_ESIK_ORAN * 100)))
+    _izci["kilitlenme_basarili_prev"] = bool(k.basarili)
 
     # 4) GOREV FAZI + VURUS/BASARI (mesafe 50 Hz olculur -> vurus ani atlanmaz)
     mesafe, kaynak = _mesafe_olc()
@@ -664,6 +705,13 @@ _son_poz_ui = None         # UI icin son NORMALIZE poz (beyin_lock ile korunur)
 # kapanir (failsafe: tarayici kapanirsa/donarsa drone eski noktaya kilitli KALMAZ).
 SAHTE_TAZE_S = 0.6
 _sahte = {"aktif": False, "cx": 0.5, "cy": 0.5, "t": 0.0}   # beyin_lock ile korunur
+# SAHTE isaret -> OTOMATIK ZORLA GORSEL: OTO modda gorsel yol HIC devreye girmez
+# (Cfg.AUTO_VISUAL_HANDOFF=False, bilincli). Kullanici isaret koyunca drone'un
+# TEPKI VERMESI icin guduum modu otomatik GORSEL'e alinir; isaret kalkinca (veya
+# gorev durunca) onceki moda GERI donulur. Guduum kodu DEGISMEZ (set_vis_mode
+# zaten var olan test switch'idir; buradaki sadece otomasyonu).
+_sahte_mod_onceki = None     # isaretten once aktif olan vis_mode (geri donus icin)
+_sahte_aktif_prev = False    # kenar tespiti: isaret var->yok / yok->var
 
 
 def _sahte_oku():
@@ -731,8 +779,19 @@ def _normalize_poz(pdet, poz, yaw_pitch):
     return d
 
 
+# Poz inference'i her N karede bir kosulur: imgsz-960 yuku bbox kadansini (ve
+# dolayisiyla KILIT tazelik butcesini) yemesin. Gozlemci akisi icin 1/N yeterli
+# (cozucu EMA'si zaten yumusatir). Boru hatti dugumu oldugu icin Cfg degil modul sabiti.
+_POZ_HER_N = 2
+_poz_kare = [0]                                   # kosulan gercek-kare sayaci
+# Teslim edilen tespit kadansi (kare-ani farklarindan EMA'li Hz) — UI: gorsel.det_hz.
+# KILIT icin gereken >= ~5 Hz sartinin canli gorunurlugu (F2 denetim bulgusu).
+_det_hz = {"hz": None, "son_t": None}
+
+
 def dedektor_dongusu():
     global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
+    global _sahte_mod_onceki, _sahte_aktif_prev
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
     from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
     while True:
@@ -741,7 +800,8 @@ def dedektor_dongusu():
             time.sleep(0.05)
             continue
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
-            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN)
+            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
+                                     cls_id=int(getattr(Cfg, "VIS_CLS_ID", -1)))
             if dedektor.hazir:
                 print("[GORSEL] best.pt yuklendi (device=%s). Siniflar: %s"
                       % (dedektor.device, dedektor.names))
@@ -774,33 +834,24 @@ def dedektor_dongusu():
             time.sleep(1.0)                           # kurulum yok -> CPU yakma
             continue
         bgr, det = None, None
-        if dedektor.hazir:
+        # sahte AKTIFKEN agir inference ATLANIR: sonucu zaten sahte det ezecekti.
+        # Kazanc: sahte akis kadansi GPU/CPU hizindan bagimsiz ~20 Hz'e sabitlenir
+        # (bgr=None dali sleep(0.05) pace'ler) -> KILIT_TOLERANS_S (0.2 s) tazelik
+        # siniri yavas CPU inference'inda bile asilmaz; kilitlenme testi akici.
+        if dedektor.hazir and sahte is None:
             try:
                 dedektor.conf = float(Cfg.VIS_CONF_MIN)   # canli-tune: predict esigi slider'i izler
+                dedektor.cls_id = int(getattr(Cfg, "VIS_CLS_ID", -1))  # sinif filtresi de canli
+                t_cap = time.perf_counter()               # KARE ANI (fotonlarin zamani)
                 bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
                 # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
                 det = dedektor.tespit_et(bgr) if bgr is not None else None
+                if det is not None:
+                    # Tazelik KARE ANINDAN olculsun: inference suresi KILIT_TOLERANS_S
+                    # butcesini gizlice yemesin (tespit_et inference-SONU damgaliyordu).
+                    det["t"] = t_cap
             except Exception:
                 bgr, det = None, None
-        # POZ kestirimi: AYNI kare uzerinde ILAVE inference + PnP (kilit DISINDA).
-        # Her turlu hata poz'u None yapar; best.pt/gudum akisini ETKILEYEMEZ.
-        poz_ui = None
-        if (poz_dedektor is not None and poz_dedektor.hazir
-                and poz_cozucu is not None and bgr is not None):
-            try:
-                pdet = poz_dedektor.tespit_et(bgr)
-                if pdet is not None:
-                    poz = poz_cozucu.coz(pdet["kp_xy"], pdet["kp_conf"],
-                                         pdet["W"], pdet["H"], t=pdet["t"])
-                    yp = None
-                    if poz is not None:
-                        try:   # dunya yaw/pitch: kare anindaki drone rotasyonuyla
-                            yp = poz_cozucu.dunya_yonelim(poz, drone.get_drone_rotation())
-                        except Exception:
-                            yp = None
-                    poz_ui = _normalize_poz(pdet, poz, yp)
-            except Exception:
-                poz_ui = None
         # SAHTE TESPIT: mouse verisi tazeyken model ciktisinin YERINE gecer (o karede
         # gercek dedektor sonucu YOK SAYILIR — kullanici "modelin verdigi nokta bu"
         # senaryosunu oynatiyor). Sozluk HedefDedektor.tespit_et semasiyla birebir ->
@@ -811,13 +862,75 @@ def dedektor_dongusu():
             else:                                     # kare yok -> nominal cozunurluk
                 W_, H_ = 1920.0, 1080.0               # (her sey W/H'ye normalize edildigi icin sonuc ayni)
             det = {"cx": sahte["cx"] * W_, "cy": sahte["cy"] * H_,
-                   "w": 0.06 * W_, "h": 0.05 * H_,    # nominal bbox (guduum ex/ey merkezi kullanir)
+                   # nominal bbox: %10 x %8 — KILIT_ESIK_ORAN (%6) ustunde ki mouse ile
+                   # sartname kilitlenmesi de test edilebilsin (guduum ex/ey merkezi kullanir)
+                   "w": 0.10 * W_, "h": 0.08 * H_,
                    "conf": 1.0, "cls": -1, "sahte": True,
                    "W": W_, "H": H_, "t": time.perf_counter()}
+        # 1) BEYNE TESLIM ONCE: poz ILAVE gozlemcidir; guduum/kilit gecikmesi poz
+        #    inference'ini BEKLEMEZ (eski sirada poz, bbox tesliminin onundeydi).
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
+            # SAHTE isaret kenarlari: konunca ZORLA GORSEL'e gec (drone isarete tepki
+            # versin), kalkinca onceki moda don. olay_ekle beyin_lock altinda guvenli
+            # (kilit sirasi tek yonlu: beyin_lock -> olay_lock).
+            sahte_var = sahte is not None
+            if sahte_var and not _sahte_aktif_prev:
+                if beyin.vis_mode != "GORSEL":
+                    _sahte_mod_onceki = beyin.vis_mode
+                    beyin.set_vis_mode("GORSEL")
+                    olay_ekle("bilgi", "SAHTE ISARET kondu -> guduum otomatik ZORLA GORSEL "
+                                       "(isaret kalkinca %s'e doner)" % _sahte_mod_onceki)
+            elif (not sahte_var) and _sahte_aktif_prev:
+                if _sahte_mod_onceki is not None and beyin.vis_mode == "GORSEL":
+                    beyin.set_vis_mode(_sahte_mod_onceki)
+                    olay_ekle("bilgi", "SAHTE ISARET kalkti -> guduum %s moduna geri dondu"
+                              % _sahte_mod_onceki)
+                _sahte_mod_onceki = None
+            _sahte_aktif_prev = sahte_var
             beyin.set_gorsel_tespit(det)
             _son_tespit_ui = _normalize_tespit(det)
-            _son_poz_ui = poz_ui
+            # Dedektor kadansi: teslim edilen tespitlerin kare-ani farklarindan EMA'li Hz.
+            # KILIT icin ~5 Hz tabani gerekir (F2) — UI bu degeri gosterip boslugu gorunur kilar.
+            if det is not None:
+                _st = _det_hz["son_t"]
+                if _st is not None and det["t"] > _st:
+                    _inst = 1.0 / max(det["t"] - _st, 1e-3)
+                    _det_hz["hz"] = _inst if _det_hz["hz"] is None else (0.7 * _det_hz["hz"] + 0.3 * _inst)
+                _det_hz["son_t"] = det["t"]
+        # 2) POZ kestirimi TESLIMDEN SONRA ve her _POZ_HER_N karede bir: AYNI kare
+        #    uzerinde ILAVE inference + PnP (kilit DISINDA). Her turlu hata poz'u None
+        #    yapar; best.pt/gudum akisini ETKILEYEMEZ.
+        poz_ui, poz_kosustu, poz_mesafe = None, False, None
+        if (poz_dedektor is not None and poz_dedektor.hazir
+                and poz_cozucu is not None and bgr is not None):
+            _poz_kare[0] += 1
+            if _poz_kare[0] % _POZ_HER_N == 0:
+                poz_kosustu = True
+                try:
+                    pdet = poz_dedektor.tespit_et(bgr)
+                    if pdet is not None:
+                        poz = poz_cozucu.coz(pdet["kp_xy"], pdet["kp_conf"],
+                                             pdet["W"], pdet["H"], t=pdet["t"])
+                        yp = None
+                        if poz is not None:
+                            poz_mesafe = poz.get("mesafe_ema_cm")   # guduum ileri profili (bayrakli)
+                            try:   # dunya yaw/pitch: kare anindaki drone rotasyonuyla
+                                yp = poz_cozucu.dunya_yonelim(poz, drone.get_drone_rotation())
+                            except Exception:
+                                yp = None
+                        poz_ui = _normalize_poz(pdet, poz, yp)
+                except Exception:
+                    poz_ui, poz_mesafe = None, None
+        with beyin_lock:
+            if sahte is not None:
+                _son_poz_ui = None                    # sahte modda poz karti bayat veri gostermesin
+            elif poz_kosustu:
+                _son_poz_ui = poz_ui                  # atlanan karelerde son poz KORUNUR (N=2 titremesin)
+                # Guduum poz mesafesi: None ise eski deger KORUNUR (set_poz no-op);
+                # bayatlik beyin._poz_oku'da VIS_STALE_S ile elenir. Zaman damgasi =
+                # KARE ANI (t_cap; bbox ile ayni ilke — inference gecikmesi bayatlik
+                # penceresini gizlice genisletmesin).
+                beyin.set_poz(poz_mesafe, t_cap)
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
@@ -880,8 +993,20 @@ def build_telemetry():
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
+        # KILITLENME (sartname) sayaci — beyin.kilit'in anlik kopyasi (gozlemci)
+        kilit_s = {"gecerli": bool(beyin.kilit.gecerli), "neden": beyin.kilit.neden,
+                   "aktif": beyin.kilit.t0 is not None,
+                   "sure_s": float(beyin.kilit.sure_s), "gap_s": float(beyin.kilit.gap_s),
+                   "basarili": bool(beyin.kilit.basarili), "sayi": int(beyin.kilit.sayi)}
         # --- IZLEYICI/GUDUM alanlari (video isterleri) — hepsi ayni kilit altinda anlik kopya ---
         prev_cmd = dict(beyin.prev)                    # uygulanan 4 komut (tek dogruluk kaynagi)
+        # dikey asimetrik yasa ic sinyalleri (ibvs gozlemlenebilirligi; None = henuz yok)
+        vis_vz_des = getattr(beyin.ibvs, "son_vz_des", None)
+        vis_vz_own = getattr(beyin.ibvs, "son_vz", None)
+        vis_alc = getattr(beyin.ibvs, "son_alc", None)
+        vis_ey_ref = getattr(beyin.ibvs, "son_ey_ref", None)   # dinamik dikey referans (F1)
+        vis_eyd = getattr(beyin.ibvs, "son_eyd", None)         # referansa gore dikey hata
+        det_hz_v = _det_hz["hz"]                               # teslim kadansi (ayni kilit altinda yazilir)
         b_handoff = bool(beyin.handoff)
         b_none = int(getattr(beyin, "none_count", 0))
         son_xy = None if beyin.son_xy_anlik is None else (
@@ -962,6 +1087,10 @@ def build_telemetry():
         "roll": prev_cmd.get("roll", 0.0), "yaw": prev_cmd.get("yaw", 0.0),
         "durum": j_durum, "mod": vis_mode, "kaynak": j_kaynak,
         "handoff": b_handoff, "d_h_m": d_h_m,
+        # dikey asimetrik yasa: istenen / olculen dikey hiz (m/s) + ileri-kisma faktoru
+        "vis_vz_des_ms": None if vis_vz_des is None else vis_vz_des * CM_TO_M,
+        "vis_vz_ms": None if vis_vz_own is None else vis_vz_own * CM_TO_M,
+        "vis_alc": vis_alc,
     }
     kayip_s = 0.0
     if takip_s.get("id") is not None and (not takip_s.get("aktif")) and takip_s.get("kayip_t"):
@@ -989,11 +1118,24 @@ def build_telemetry():
     gorsel = {
         "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
         "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
-        "ey_ref": float(getattr(Cfg, "VIS_EY_REF", 0.0)),   # dikey referans (tilt telafisi; overlay cizer)
+        # dikey referans: F1 sonrasi DINAMIK (duruska degisir; overlay cizer). Henuz
+        # hesap yoksa statik Cfg degeri (eski davranis / comp kapali fallback'i).
+        "ey_ref": float(vis_ey_ref) if vis_ey_ref is not None
+                  else float(getattr(Cfg, "VIS_EY_REF", 0.0)),
+        "eyd": None if vis_eyd is None else float(vis_eyd),   # kontrolorun sifirladigi dikey hata
+        "det_hz": None if det_hz_v is None else float(det_hz_v),  # dedektor teslim kadansi (KILIT >= ~5 Hz ister)
         "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
+        # KILITLENME (sartname): sayac durumu + geometri sabitleri (overlay Cfg ile
+        # TEK kaynaktan cizsin diye alan/esik/sure de payload'da tasinir)
+        "kilit": dict(kilit_s,
+                      hedef_s=float(Cfg.KILIT_SURE_S),
+                      esik=float(Cfg.KILIT_ESIK_ORAN),
+                      alan_x=float(Cfg.KILIT_ALAN_X),
+                      alan_y=float(Cfg.KILIT_ALAN_Y),
+                      tolerans_s=float(Cfg.KILIT_TOLERANS_S)),
     }
     # POZ KESTIRIMI (kamera): gozlemci akisi — kp REF sirada normalize, mesafe/yaw
     # KAMERADAN. yaw_gercek kiyas icin telemetriden eklenir (sim/debug gostergesi).
@@ -1086,6 +1228,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         global gorev_aktif, manuel_aktif, manuel_son_giris
+        global _sahte_mod_onceki, _sahte_aktif_prev
         if self.path == "/api/command":
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length).decode("utf-8") if length else "{}"
@@ -1114,6 +1257,14 @@ class Handler(BaseHTTPRequestHandler):
                     drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, False)
                 except Exception:
                     pass
+                # SAHTE isaret aktifken durdurulduysa: dedektor dongusu pasifken
+                # "isaret kalkti" kenari islenemez -> otomatik GORSEL'i burada geri al
+                # (sonraki gorev bayat ZORLA GORSEL ile baslamasin).
+                with beyin_lock:
+                    if _sahte_mod_onceki is not None and beyin.vis_mode == "GORSEL":
+                        beyin.set_vis_mode(_sahte_mod_onceki)
+                    _sahte_mod_onceki = None
+                    _sahte_aktif_prev = False
                 msg = "GOREV DURDURULDU - drone pasif (motorlar kapali)"
                 olay_ekle("uyari", "GOREV DURDURULDU")   # basari latch'i KORUNUR (banner ekranda kalir)
             elif cmd == "manuel_on":

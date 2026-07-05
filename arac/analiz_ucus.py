@@ -60,7 +60,7 @@ def yukle(path):
     n = len(rows)
     cols = {}
     for name, i in idx.items():
-        if name == "phase" or name == "kaynak" or name == "durum":
+        if name in ("phase", "kaynak", "durum", "kilit_neden"):
             cols[name] = [(row[i] if i < len(row) else "") for row in rows]
         else:
             a = np.full(n, np.nan)
@@ -123,6 +123,61 @@ def araliklar(mask):
     return out
 
 
+def _gorsel_bolumu(cols, phase):
+    """(g) GORSEL GUDUM / KILITLENME hassasiyet ozeti (VISUAL fazi; 2026-07-05 F10).
+    Kolonlar ISIMLE okunur; eski loglarda alan yoksa satir atlanir (geriye uyumlu).
+    Mevcut APPROACH/STRIKE analizine DOKUNMAZ."""
+    V = np.where(phase == "VISUAL")[0]
+    if len(V) < 10:
+        return
+
+    def sayisal(ad):
+        return cols[ad][V] if ad in cols else None
+
+    print("\n--- (g) GORSEL GUDUM / KILITLENME (VISUAL: %d tik ~%.1f s) ---"
+          % (len(V), len(V) * 0.02))
+    g = sayisal("vis_gordu")
+    if g is not None:
+        print("  gordu orani      : %%%.0f" % (100.0 * np.mean(np.nan_to_num(g) > 0.5)))
+    vdt = sayisal("vis_det_t")
+    if vdt is not None and np.sum(~np.isnan(vdt)) > 3:
+        u = np.unique(vdt[~np.isnan(vdt)])
+        d = np.diff(u); d = d[(d > 1e-4) & (d < 2.0)]
+        if len(d):
+            print("  dedektor kadansi : medyan %.1f Hz | en yavas %.1f Hz "
+                  "(kilit tazeligi >= ~5 Hz ister)"
+                  % (1.0 / np.median(d), 1.0 / np.max(d)))
+    for ad, etiket in (("vis_eyd", "eyd (dinamik ref)"), ("vis_ex", "ex (yatay)")):
+        a = sayisal(ad)
+        if a is not None and np.sum(~np.isnan(a)) > 5:
+            a = a[~np.isnan(a)]
+            print("  %-17s: RMS %.3f | |maks| %.3f"
+                  % (etiket, float(np.sqrt(np.mean(a ** 2))), float(np.max(np.abs(a)))))
+    pc = sayisal("pitch_cmd")
+    if pc is not None:
+        v = np.nan_to_num(pc) > 1e-3
+        print("  ileri-kapi flip  : %d gecis (yuksek = cevrim/cirpinma suphesi)"
+              % int(np.sum(v[1:] != v[:-1])))
+    vd, tc = sayisal("vis_vz_des"), sayisal("thr_cmd")
+    if vd is not None and tc is not None:
+        m = (~np.isnan(vd)) & (vd < 0)
+        if np.sum(m):
+            ihlal = int(np.sum(np.nan_to_num(tc)[m] > 1e-6))
+            print("  inis ihlali      : %d tik (vz_des<0 iken thr>0; 0 OLMALI)" % ihlal)
+    ks, kb = sayisal("kilit_sure_s"), sayisal("kilit_sayi")
+    if ks is not None and np.sum(~np.isnan(ks)):
+        say = int(np.nanmax(kb)) if kb is not None and np.sum(~np.isnan(kb)) else 0
+        print("  kilit            : en uzun deneme %.1f s | tamamlanan %d"
+              % (float(np.nanmax(ks)), say))
+    if "kilit_neden" in cols:
+        from collections import Counter
+        neden = Counter(cols["kilit_neden"][i] for i in V
+                        if cols["kilit_neden"][i] not in ("", "OK"))
+        if neden:
+            print("  gecersizlik hist : " + ", ".join("%s=%d" % kv
+                                                      for kv in neden.most_common(4)))
+
+
 def analiz(path):
     cols, idx, n = yukle(path)
     print("=" * 78)
@@ -130,10 +185,11 @@ def analiz(path):
     print("=" * 78)
 
     phase = np.array(cols["phase"])
-    for ph in ("TAKEOFF", "WARMUP", "DROPOUT", "APPROACH", "STRIKE"):
+    for ph in ("TAKEOFF", "WARMUP", "DROPOUT", "APPROACH", "STRIKE", "VISUAL"):
         c = int(np.sum(phase == ph))
         if c:
             print("  phase %-9s: %5d tik (~%.1f s)" % (ph, c, c * 0.02))
+    _gorsel_bolumu(cols, phase)        # (g) gorsel hassasiyet — aktif-faz sartindan ONCE
     active = (phase == "APPROACH") | (phase == "STRIKE")
     if np.sum(active) < 10:
         print("\n[!] Yeterli aktif (APPROACH/STRIKE) tik yok - ucus cok kisa ya da hep loiter.")
