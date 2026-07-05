@@ -118,6 +118,16 @@
 >   drone hedefe yaklaşırken truth yalnız **%21 kadraj-içi** reprojekte oluyor, **%57
 >   "kamera arkası"** (yanlış). Truth loglansa bile reprojeksiyon güvenilmez →
 >   attitude işaret/sıra doğrulaması gerekli (k_sanity/pnp; iyi model/yakın hedef).
+>   - **ÇÖZÜM PLANI HAZIR (Madde 3, `arac/attitude_dogrula.py`):** hover'da hedef
+>     görüşteyken saf PITCH/ROLL adımları (±10-15°)+kombinasyon; her karede
+>     truth-reprojeksiyon vs gerçek hedef pikseli (siluet) ofseti EKSEN BAZINDA
+>     ölçülür; `eksen_analiz` ofseti pitch/roll/yaw'a regrese eder → |eğim|>0.003
+>     olan eksende işaret/sıra şüphesi; düzeltme kamera_model'de TEK noktadan,
+>     ">>> SIM'DE DOGRULA <<<" ölçüm kimliğiyle kapanır. Oturum sonunda **2-3 dk
+>     mini FSM segmenti** (Blokör A kapalı → TP/FP ilk kez gerçek sayı; eski CSV
+>     retroaktif vermez → segment ŞART). Offline çekirdek (reproj/analiz/öneri)
+>     test edildi; level reproj (0.5, 0.716)=ey_ref tutarlı (zincir level'da doğru,
+>     sorun yatışta — hipotez doğrulandı). **Kullanıcı "hazır" deyince koşulur.**
 > - **Qualitatif (kare gözlemi):** bbox'lar ufuk/arazi kenarı/güneş-parlaması üzerinde
 >   (203717 conf=0.78 sol-alt arazi; 203710 parlak nokta) → **FP-eğilimli**, ama
 >   küçük/uzak bbox kesinlik vermiyor.
