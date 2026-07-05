@@ -63,17 +63,27 @@ from detection import kamera_model as km
 
 # --- kontrollu attitude adim dizisi (manuel-mod komut [-1,1], derece DEGIL;
 #     drone fizigi tepki verir, attitude telemetriden OKUNUR) ---
+# adim: (ad, pitch_cmd, roll_cmd, yaw_cmd, sure_s). Saf eksenler + kombinasyon +
+# TESHIS-1 icin saf yaw. Reprojeksiyon sweep'i ve komut-eksen testi AYNI oturumda.
 ADIM_DIZISI = [
-    ("hover", 0.0, 0.0, 2.0),        # (ad, pitch_cmd, roll_cmd, sure_s)
-    ("pitch+", +0.30, 0.0, 2.5), ("hover", 0.0, 0.0, 1.5),
-    ("pitch-", -0.30, 0.0, 2.5), ("hover", 0.0, 0.0, 1.5),
-    ("roll+", 0.0, +0.30, 2.5), ("hover", 0.0, 0.0, 1.5),
-    ("roll-", 0.0, -0.30, 2.5), ("hover", 0.0, 0.0, 1.5),
-    ("pitch+roll+", +0.25, +0.25, 2.5), ("hover", 0.0, 0.0, 1.5),
-    ("pitch-roll-", -0.25, -0.25, 2.5), ("hover", 0.0, 0.0, 1.5),
+    ("hover", 0.0, 0.0, 0.0, 2.0),
+    ("pitch+", +0.30, 0.0, 0.0, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("pitch-", -0.30, 0.0, 0.0, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("roll+", 0.0, +0.30, 0.0, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("roll-", 0.0, -0.30, 0.0, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("yaw+", 0.0, 0.0, +0.30, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("yaw-", 0.0, 0.0, -0.30, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
+    ("pitch+roll+", +0.25, +0.25, 0.0, 2.5), ("hover", 0.0, 0.0, 0.0, 1.5),
 ]
 KAYIT_KOLON = ["t", "adim", "roll", "pitch", "yaw", "u_reproj", "v_reproj",
-               "u_gercek", "v_gercek", "du_norm", "dv_norm", "W", "H"]
+               "u_gercek", "v_gercek", "du_norm", "dv_norm", "W", "H",
+               "vx", "vy", "pitch_cmd", "roll_cmd", "yaw_cmd"]
+
+
+def _world_to_body(vx, vy, yaw_rad):
+    """dunya yatay vektor -> govde (fwd, right). ana_kontrol.world_to_body ile ayni."""
+    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
+    return vx * c + vy * s, vx * s - vy * c
 
 
 # ----------------------------------------------------------------------------
@@ -101,8 +111,9 @@ def eksen_analiz(kayitlar):
     """kayitlar: dict listesi (roll,pitch,yaw,du_norm,dv_norm). -> verdikt.
     Her eksen icin ofsetin o eksene REGRESYON egimi; buyukse konvansiyon suphesi.
     DOGRU konvansiyon: tum egimler ~0 + |ofset| kucuk."""
+    kayitlar = [k for k in kayitlar if k.get("du_norm") not in (None, "")]  # siluetli kareler
     if not kayitlar:
-        return {"n": 0, "sonuc": "veri yok"}
+        return {"n": 0, "sonuc": "reproj/siluet verisi yok (hedef siluet bulunamadi)"}
     roll = [k["roll"] for k in kayitlar]
     pitch = [k["pitch"] for k in kayitlar]
     yaw = [k["yaw"] for k in kayitlar]
@@ -122,6 +133,43 @@ def eksen_analiz(kayitlar):
             "sonuc": ("TUTARLI (attitude-bagimsiz, ofset<%%3)" if tutarli
                       else "SUPHE: " + ", ".join(suphe) if suphe
                       else "ofset buyuk (%.3f) ama attitude-bagimsiz -> zincir sabiti/K")}
+
+
+def komut_eksen_analiz(kayitlar):
+    """TESHIS-1: komut -> dunya-tepki eksen/isaret. Saf pitch/roll/yaw adimlarinda
+    govde-cercevesi hiz (fwd/right) + heading degisimi olculur; beklenen eksene
+    karsi dominant olculen eksen + isaret. Reproj tablosuyla YAN YANA konur (ayni
+    konvansiyon hatasini paylasabilirler)."""
+    from collections import defaultdict
+    grup = defaultdict(list)
+    for k in kayitlar:
+        ad = k.get("adim", "")
+        if ad and ad != "hover":
+            grup[ad].append(k)
+    bekle = {"pitch+": ("fwd", +1), "pitch-": ("fwd", -1),
+             "roll+": ("right", +1), "roll-": ("right", -1),
+             "yaw+": ("yawrate", +1), "yaw-": ("yawrate", -1)}
+    tablo = []
+    for ad, ks in sorted(grup.items()):
+        if ad not in bekle:
+            continue
+        fwd, right = [], []
+        for k in ks:
+            f, r = _world_to_body(k.get("vx") or 0.0, k.get("vy") or 0.0,
+                                  math.radians(k.get("yaw") or 0.0))    # yaw derece->rad
+            fwd.append(f); right.append(r)
+        mf = sum(fwd) / len(fwd) if fwd else 0.0
+        mr = sum(right) / len(right) if right else 0.0
+        yawrate = _lin_katsayi([(k.get("t") or 0.0) for k in ks],
+                               [(k.get("yaw") or 0.0) for k in ks]) if len(ks) > 2 else 0.0
+        olcu = {"fwd": mf, "right": mr, "yawrate": yawrate}
+        dominant = max(olcu, key=lambda a: abs(olcu[a]))
+        bek_eks, bek_is = bekle[ad]
+        isaret_ok = (olcu[bek_eks] * bek_is > 0) if abs(olcu[bek_eks]) > 1e-6 else None
+        tablo.append({"adim": ad, "beklenen": ("%s%s" % ("+" if bek_is > 0 else "-", bek_eks)),
+                      "fwd": mf, "right": mr, "yawrate": yawrate, "dominant": dominant,
+                      "eksen_ok": (dominant == bek_eks), "isaret_ok": isaret_ok})
+    return tablo
 
 
 def oneri_metni(analiz):
@@ -170,44 +218,56 @@ def canli_sweep(csv_yol):
     sct = mss.mss()
     kayit = []
     t0 = time.perf_counter()
-    for ad, pcmd, rcmd, sure in ADIM_DIZISI:
+    onceki = {"t": None, "pos": None}
+    for ad, pcmd, rcmd, ycmd, sure in ADIM_DIZISI:
         t_adim = time.perf_counter()
         while time.perf_counter() - t_adim < sure:
-            drone.set_control_surfaces(0.55, pcmd, rcmd, 0.0, True)   # hover throttle + adim
+            drone.set_control_surfaces(0.55, pcmd, rcmd, ycmd, True)   # hover throttle + adim
             dbg = drone.get_debug_truth()
             if not dbg.get("available"):
                 continue
+            tnow = time.perf_counter()
             tpos = np.array(dbg["target"]["position"], float)
             dpos = np.array(drone.get_drone_gps(), float)
-            roll, pitch, yaw = drone.get_drone_rotation()
+            roll, pitch, yaw = drone.get_drone_rotation()          # derece
+            # dunya yatay hiz (konum farki)
+            vx = vy = 0.0
+            if onceki["pos"] is not None and onceki["t"] is not None:
+                dt = tnow - onceki["t"]
+                if dt > 1e-3:
+                    vx = (dpos[0] - onceki["pos"][0]) / dt
+                    vy = (dpos[1] - onceki["pos"][1]) / dt
+            onceki = {"t": tnow, "pos": dpos}
             fr, _kaynak = kare_al(sct, cv2)
             H, W = fr.shape[:2]
             uvn = reproj_norm(tpos, dpos, roll, pitch, yaw, W, H)
-            if uvn is None:
-                continue
-            det, _neden = _siluet_tespit(fr, (uvn[0] * W, uvn[1] * H), cv2) if cv2 else (None, "")
-            if not det:
-                continue
-            ug, vg = det["cx"] / W, det["cy"] / H
-            kayit.append({"t": round(time.perf_counter() - t0, 2), "adim": ad,
-                          "roll": roll, "pitch": pitch, "yaw": yaw,
-                          "u_reproj": uvn[0], "v_reproj": uvn[1], "u_gercek": ug, "v_gercek": vg,
-                          "du_norm": ug - uvn[0], "dv_norm": vg - uvn[1], "W": W, "H": H})
+            det = None
+            if uvn is not None and cv2 is not None:
+                det, _neden = _siluet_tespit(fr, (uvn[0] * W, uvn[1] * H), cv2)
+            k = {"t": round(tnow - t0, 2), "adim": ad, "roll": roll, "pitch": pitch,
+                 "yaw": yaw, "W": W, "H": H, "vx": vx, "vy": vy,      # yaw derece
+                 "pitch_cmd": pcmd, "roll_cmd": rcmd, "yaw_cmd": ycmd}
+            if uvn is not None and det:                # reproj sweep verisi (siluet varsa)
+                ug, vg = det["cx"] / W, det["cy"] / H
+                k.update({"u_reproj": uvn[0], "v_reproj": uvn[1], "u_gercek": ug, "v_gercek": vg,
+                          "du_norm": ug - uvn[0], "dv_norm": vg - uvn[1]})
+            kayit.append(k)
             time.sleep(0.05)
     drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)     # hover birak
     if csv_yol and kayit:
         with open(csv_yol, "w", newline="", encoding="utf-8") as f:
-            w = csv.DictWriter(f, fieldnames=KAYIT_KOLON); w.writeheader()
+            w = csv.DictWriter(f, fieldnames=KAYIT_KOLON, restval="", extrasaction="ignore")
+            w.writeheader()
             for k in kayit:
                 w.writerow(k)
         print("[KAYIT] %d ornek -> %s" % (len(kayit), csv_yol))
-    _rapor(eksen_analiz(kayit))
+    _rapor(eksen_analiz(kayit), komut_eksen_analiz(kayit))
     return 0
 
 
-def _rapor(analiz):
+def _rapor(analiz, komut_tablo=None):
     print("=" * 68)
-    print(" ATTITUDE KONVANSIYON ANALIZI")
+    print(" ATTITUDE KONVANSIYON ANALIZI (A: telemetri->kamera reprojeksiyon)")
     print("=" * 68)
     print(" ornek: %d ; ofset medyan (norm): %s ; sonuc: %s"
           % (analiz.get("n", 0), round(analiz.get("ofset_medyan_norm", 0), 4)
@@ -218,13 +278,38 @@ def _rapor(analiz):
             print("    %-10s %+.4f%s" % (k, v, "  <== SUPHE" if abs(v) > 0.003 else ""))
     print("-" * 68)
     print(oneri_metni(analiz))
+    if komut_tablo is not None:
+        print("\n" + "=" * 68)
+        print(" KOMUT->DUNYA-TEPKI EKSEN TABLOSU (B: TESHIS-1)")
+        print("=" * 68)
+        print(" %-8s %-9s %10s %10s %10s  %-8s %s" %
+              ("adim", "beklenen", "fwd", "right", "yawrate", "dominant", "isaret"))
+        for r in komut_tablo:
+            iok = "-" if r["isaret_ok"] is None else ("OK" if r["isaret_ok"] else "TERS")
+            eok = "" if r["eksen_ok"] else "  <== EKSEN SAPMASI"
+            print(" %-8s %-9s %10.1f %10.1f %10.2f  %-8s %s%s"
+                  % (r["adim"], r["beklenen"], r["fwd"], r["right"], r["yawrate"],
+                     r["dominant"], iok, eok))
+        print(" NOT: A ve B AYNI konvansiyon hatasini paylasabilir (telemetri->kamera")
+        print("      ve komut->hareket); yan yana oku. Duzeltme kamera_model/komut-cevrim")
+        print("      TEK noktadan; sonra iki tablo da temiz olana dek tekrar kos.")
 
 
 def _analiz_csv(yol):
+    kayit = []
     with open(yol, encoding="utf-8", newline="") as f:
-        kayit = [{k: (float(v) if k not in ("adim",) else v) for k, v in r.items()}
-                 for r in csv.DictReader(f)]
-    _rapor(eksen_analiz(kayit))
+        for r in csv.DictReader(f):
+            k = {}
+            for key, v in r.items():
+                if key == "adim":
+                    k[key] = v
+                    continue
+                try:
+                    k[key] = float(v)
+                except (TypeError, ValueError):
+                    k[key] = None
+            kayit.append(k)
+    _rapor(eksen_analiz(kayit), komut_eksen_analiz(kayit))
 
 
 def main():

@@ -177,6 +177,18 @@ class Cfg:
                                # kaynakliydi; yumusak yaklasma-carpma (kademeli kapanis) o sorunu
                                # kaldirdigindan 0.30 guvenli: burun daha iyi takip eder, salinmaz.
 
+    # --- DUZELTME-1: YAKLASMA BURUN-HEDEFE (yaw-servo/turn-then-advance) ---
+    # Saha: drone hedefe GPS'le ulasip carpiyor ama kamera hedefe BAKMIYOR (Talon
+    # FOV'a girmiyor -> GORSEL_TAKIP hic tetiklenmiyor) + surekli roll osilasyonu.
+    # Teshis-2: corr(roll,yaw_err)=-0.40, |yaw_err| ort 37 -> omnidirek strafe (roll
+    # yanal hataya) burnu dondurmeden yana suzuyor. Cozum: ileri itki cos(yaw_err) ile
+    # kapilanir (buyuk bearing -> ONCE don), yan strafe kisilir (osilasyon soner),
+    # hedef dikey FOV disindaysa yatay yaklasma kisilir (once irtifa kapat -> "228m
+    # ustten hedefi hic gormeme" onlenir). YALNIZ YAKLASMA/ARAMA; GORSEL ailesine dokunmaz.
+    YAKLASMA_BURUN_HEDEFE = True   # False -> eski omnidirek strafe (regresyon karsilastirma)
+    YAKLASMA_ROLL_KIS = 0.30       # yan strafe (roll) kisma carpani (osilasyonu soner)
+    YAKLASMA_DIKEY_KIS = 0.30      # hedef dikey FOV disindayken yatay yaklasma kisma carpani
+
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
 
@@ -1000,6 +1012,21 @@ class AvciKontrol:
         bearing = math.atan2(ey, ex)
         yaw_err = deadband(wrap_pi(bearing - drone_yaw), Cfg.YAW_DEADBAND)
         yaw_raw = Cfg.YAW_SIGN * clamp(Cfg.KP_YAW * yaw_err, -Cfg.YAW_MAX, Cfg.YAW_MAX)
+
+        # 9b) DUZELTME-1: BURUN-HEDEFE / turn-then-advance (YAKLASMA/ARAMA; GORSEL DEGIL).
+        #     Omnidirek strafe yerine "once don, sonra bas": ileri itki cos(yaw_err) ile
+        #     kapilanir, yan strafe kisilir -> kamera hedefe bakar (GORSEL_TAKIP tetiklenir)
+        #     + roll osilasyonu soner. Hedef dikey FOV disindaysa yatay yaklasma da kisilir
+        #     (once irtifa kapansin). YAW'i gorsel hat yonettigi fazlara DOKUNMAZ.
+        if Cfg.YAKLASMA_BURUN_HEDEFE and self.durum not in _GORSEL_AILE:
+            ileri_kapi = max(0.0, math.cos(yaw_err))           # buyuk bearing -> once don
+            pitch_raw *= ileri_kapi
+            roll_raw  *= Cfg.YAKLASMA_ROLL_KIS * ileri_kapi    # yan-suzulme bastir
+            elev_deg = math.degrees(math.atan2(ez, max(d_h, 1.0)))    # hedef elevasyonu
+            yarim_vfov = math.degrees(kamera_model.vfov_rad(16.0, 9.0)) / 2.0
+            if abs(elev_deg - kamera_model.TILT_DEG) > yarim_vfov:    # dikey FOV disi
+                pitch_raw *= Cfg.YAKLASMA_DIKEY_KIS
+                roll_raw  *= Cfg.YAKLASMA_DIKEY_KIS
 
         # 10) deadband (cok yakinda yatay jitter onle)
         if d_h < Cfg.POS_DEADBAND:

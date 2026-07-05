@@ -188,6 +188,38 @@
 >   (FSM yine de oscile ediyor ama geç). **Somut dağa-güdüm penceresi ~2.5 s.**
 >   → ÖNERİ (davranış değişikliği, ayrı onay): coast'ta güdümü daha erken hover'a al /
 >   VIS_LOST_TO_GPS'i ölçülen-tespit (tespit_mi) zamanına bağla (coast bbox sayacı sıfırlamasın).
+>
+> ### Saha bulguları — TEŞHİS + DÜZELTME-1 (yaw-servo) + birleşik oturum
+> **Saha (DEV-truth):** drone GPS'le hedefe ulaşıp ÇARPIYOR ama kamera hedefe bakmıyor
+> (Talon FOV'a girmiyor → GÖRSEL_TAKİP hiç tetiklenmiyor); uçuş "ters ters" (yan/geri
+> süzülme); sürekli roll osilasyonu.
+> - **TEŞHİS-2 (`arac/osilasyon_teshis.py`, sim'siz):** roll_cmd RMS 0.408, periyot 8 s;
+>   **corr(roll_cmd, yaw_err)=−0.40**, |yaw_err| ort **37°**, yaw_cmd aktif %78; örnek
+>   yenilenme 0.1 s (≠ roll periyodu). **HİPOTEZ-ii (eksen coupling / yaw-servo zayıf):**
+>   omnidirek strafe (roll ∝ e_right ∝ sin(yaw_err)) burnu döndürmeden yana süzüyor.
+> - **DÜZELTME-1 (EKLENDİ, `Cfg.YAKLASMA_BURUN_HEDEFE=True`):** turn-then-advance — ileri
+>   itki `max(0,cos(yaw_err))` ile kapılanır (büyük bearing → önce dön), yan strafe
+>   `YAKLASMA_ROLL_KIS=0.30` ile kısılır (osilasyon söner), hedef dikey FOV dışındaysa
+>   yatay yaklaşma `YAKLASMA_DIKEY_KIS=0.30` ile kısılır (önce irtifa → "228 m üstten hedefi
+>   hiç görememe" önlenir). **YALNIZ YAKLASMA/ARAMA; GÖRSEL ailesine dokunmaz.** Kabul:
+>   handoff anında |yaw_err|<~10° VE hedef reprojeksiyonu kadraj-içi.
+> - **TEŞHİS-1 (attitude oturumuna EK, `attitude_dogrula.py`):** saf pitch/roll/yaw
+>   step'lerinde komut→dünya-tepki (gövde fwd/right + heading) tablosu; reproj tablosuyla
+>   YAN YANA (aynı konvansiyon hatasını paylaşabilir). Offline çekirdek test edildi.
+> - **DÜZELTME-2 (teşhise göre, bu SIRAYLA):** (ii çıkarsa) konvansiyon düzeltmesi TEK
+>   noktadan (kamera_model/komut-çevrim) → osilasyon kendiliğinden söner; (i çıkarsa) hedef
+>   poz+hız çıkışına örnek-tutma sıçramasını kıran EMA + komuta slew-rate limiti; (iii EN
+>   SON) PD kazanç/deadband canlı-tune, Cfg'de gerekçeli. **Konvansiyon doğrulanmadan
+>   kazanç ayarı YAPILMAZ.**
+>
+> ### 🎮 BİRLEŞİK UÇUŞLU OTURUM PLANI (tek oturum; zombileşme: taze) — "hazır" deyince
+> **(A) reproj pitch/roll sweep + (B) komut-eksen testi:** `python arac/attitude_dogrula.py
+> --adimlar` (aynı sweep iki tabloyu üretir: telemetri→kamera + komut→hareket). Bulunan
+> işaret/sıra düzeltmesi kamera_model'de TEK noktadan; `>>> SIM'DE DOGRULA <<<` kapanır.
+> **(C) yaw-servo'lu kısa YAKLASMA segmenti:** DÜZELTME-1 açıkken kısa görev; `osilasyon_teshis`
+> ile önce/sonra CSV kıyası (roll RMS düşmeli) + handoff anında |yaw_err|<10° ve hedef FOV-içi.
+> **(D) 2-3 dk mini FSM segmenti:** Blokör A kapalı → `tp_fp_analiz` **ilk kez gerçek TP/FP**
+> + FP conf p95 (eski referans CSV retroaktif vermez → segment ŞART).
 
 > **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
 > `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
