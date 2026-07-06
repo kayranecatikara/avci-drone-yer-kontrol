@@ -15,9 +15,17 @@ ofset yok). SDK govde uzunlugu 1100 mm; modelde burun->kuyruk_ucu 1087.1 mm
 (%1.2 sapma) -> olcek reproj error istatistigiyle teyit, elle "duzeltilmez".
 
 >>> KEYPOINT SIRASI SEMA-PARAMETRELI <<< pose modelinin cikardigi keypoint
-sirasi metadata'da YOK -> GORSEL TEYIT sart (FAZ 2 sim). Iki sema destekli:
-  "kuyruk_ucu" (YENI): burun, kuyruk_ucu, sol_vtail, sag_vtail, sol_kanat, sag_kanat
-  "motor"      (ESKI): burun, motor,     sol_vtail, sag_vtail, sol_kanat, sag_kanat
+sirasi metadata'da YOK -> GORSEL TEYIT sart (FAZ 2 sim). Uc sema destekli:
+  "berat_json" (MERGE 2026-07-06, ONERILEN): 3B tablo TEK KAYNAKTAN
+      pose/talon_keypoints.json (Berat; sim'de dogrulanmis, flip_idx'li) okunur;
+      keypoint SIRASI = talon_pose.pt MODEL CIKTI SIRASI (pose/sira_bul.py ile
+      87 karede deneysel bulunan pose.poz_cozucu.EGITIM_SIRASI) ve MESH_PIVOT
+      ofseti uygulanir -> tvec = kamera->ACTOR ORIGIN (= get_target_location;
+      telemetriyle dogrudan kiyaslanir). models/talon_pose.yaml bunu secer.
+  "kuyruk_ucu" (gomulu): burun, kuyruk_ucu, sol_vtail, sag_vtail, sol_kanat, sag_kanat
+  "motor"      (gomulu, ESKI): burun, motor, sol_vtail, sag_vtail, sol_kanat, sag_kanat
+(Gomulu tablolar SILINMEDI: JSON okunamazsa/başka modelde bayrakla [yaml 'sema']
+secilebilir yedek olarak durur. Sayilar zaten ayni preview.jpg tablosundandir.)
 Yanlis sira sessizce sacma cozum uretir; ilk belirti anormal reproj error.
 Model registry per-model yaml'daki 'sema' ile hangi setin kullanilacagini secer.
 
@@ -30,7 +38,9 @@ cv2 YOKSA gecerli=False (graceful). Saf sinif: sentetik keypoint'le round-trip
 unit-test edilir (test/).
 ================================================================================
 """
+import json
 import math
+import os
 
 import numpy as np
 
@@ -58,6 +68,47 @@ KP_ADLARI = {
     "kuyruk_ucu": ["burun", "kuyruk_ucu", "sol_vtail", "sag_vtail", "sol_kanat", "sag_kanat"],
     "motor":      ["burun", "motor", "sol_vtail", "sag_vtail", "sol_kanat", "sag_kanat"],
 }
+
+
+def sema_berat_yukle():
+    """MERGE 2026-07-06: 'berat_json' semasini pose/talon_keypoints.json'dan kur.
+
+    TEK KAYNAK ilkesi: 3B nokta DEGERLERI json'un `kaynak_tablo_mm` alanindan
+    (tablo-mm cercevesi = bu dosyanin obje cercevesi: +X kuyruk, +Y yukari,
+    +Z sol kanat — sayilar sim'de dogrulanmis), SIRA ve PIVOT ise Berat'in
+    calisan cozucusundan (pose.poz_cozucu.EGITIM_SIRASI / MESH_PIVOT_OFFSET_CM)
+    import edilir; burada IKINCI bir kopya tutulmaz.
+
+    pred[k] -> json[EGITIM_SIRASI[k]] esleme geregi obje noktalari MODEL CIKTI
+    SIRASINA dizilir. MESH_PIVOT_OFFSET (+11.76 cm ileri, UE) tablo cercevesinde
+    -X yonune (-117.6 mm) uygulanir -> cozulen tvec kamera->ACTOR ORIGIN olur
+    (= get_target_location; telemetriyle dogrudan kiyas).
+
+    Basarisizsa (json/pose paketi yok) None doner; gomulu semalar aynen kalir."""
+    try:
+        from pose.poz_cozucu import EGITIM_SIRASI, MESH_PIVOT_OFFSET_CM
+        kok = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        with open(os.path.join(kok, "pose", "talon_keypoints.json"), "r",
+                  encoding="utf-8") as f:
+            d = json.load(f)
+        ham = d["kaynak_tablo_mm"]                 # tablo-mm (bizim obje cercevemiz)
+        adlar = list(d["keypoint_isimleri"])       # json REF sirasi
+        model_adlar = [adlar[i] for i in EGITIM_SIRASI]   # model cikti sirasi
+        # UE +X(ileri) pivot ofseti -> tablo cercevesinde -X (tablo +X = kuyruk), mm
+        pivot_mm = float(MESH_PIVOT_OFFSET_CM[0]) * 10.0
+        obj = np.array([[float(ham[a][0]) - pivot_mm, float(ham[a][1]), float(ham[a][2])]
+                        for a in model_adlar], dtype=np.float64)
+        SEMALAR["berat_json"] = obj
+        KP_ADLARI["berat_json"] = model_adlar
+        return "berat_json"
+    except Exception as e:
+        print("[PNP] berat_json semasi yuklenemedi (%s) -> gomulu semalar kullanilir." % e)
+        return None
+
+
+# Modul yuklenirken dene (graceful): pose/ paketi + json varsa sema kayitli olur,
+# yoksa sessizce gomulu semalarla devam edilir (pose'suz kurulum bozulmaz).
+sema_berat_yukle()
 
 
 class PnPCfg:
@@ -94,8 +145,9 @@ class TalonPozKestirici:
     def kestir(self, keypoints, attitude, W, H, t=None):
         """keypoints: [[x,y,conf], ...] (model sirasinda, sema ile eslesir).
         attitude: (roll,pitch,yaw) deg (avci). -> sonuc dict (gecerli alani sart)."""
+        origin = "actor" if self.sema == "berat_json" else "AM"   # berat_json: pivot ofsetli
         bos = {"gecerli": False, "sebep": None, "sema": self.sema,
-               "origin": "AM", "kullanilan_kp": 0}
+               "origin": origin, "kullanilan_kp": 0}
         if not self._cv2_var:
             bos["sebep"] = "cv2 yok"
             return bos
@@ -158,7 +210,7 @@ class TalonPozKestirici:
         # dunya-cercevesi relatif konum (kamera->govde->dunya; R_mount 25 tilt burada)
         rel_dunya = kamera_model.kamera_to_dunya_yon(tvec_cm, *attitude)
 
-        return {"gecerli": True, "sebep": "ok", "sema": self.sema, "origin": "AM",
+        return {"gecerli": True, "sebep": "ok", "sema": self.sema, "origin": origin,
                 "tvec": tuple(float(x) for x in tvec_cm), "mesafe": mesafe_cm,
                 "phi_T": phi_T, "psi_T": psi_T, "reproj_err": reproj_err,
                 "kullanilan_kp": n, "rel_konum_dunya": tuple(float(x) for x in rel_dunya)}

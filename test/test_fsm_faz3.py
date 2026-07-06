@@ -73,15 +73,71 @@ def _kur(vis_mode="GORSEL"):
 
 
 def test_confirmed_gorsel_kilit():
-    # OTO mod: CONFIRMED track -> GORSEL_GUDUM (eski "5 kare" yerine tracker sorgusu)
+    # OTO mod: CONFIRMED track + YAKINLIK -> GORSEL_TAKIP (eski "5 kare" yerine tracker
+    # sorgusu). MERGE 2026-07-06: HANDOFF_YAKINLIK_SART varsayilani True -> kilit icin
+    # self.handoff (d_h<HANDOFF_RANGE) da SART; testte yakinligi simule ediyoruz.
     b, d = _kur("OTO")
     import time
     for _ in range(3):
+        b.handoff = True                     # yakinlik kapisi: tespit menzilindeyiz
         h = _hedef(durum="CONFIRMED")
         h["t"] = time.perf_counter()
         b.set_algi(_ciktiyla(h))
         b.adim()
     assert b.durum in _GORSEL_AILE, b.durum
+
+
+def test_confirmed_uzakta_kilit_olmaz_yakinlik_sarti():
+    # MERGE kapisi (main/serhadcan): HANDOFF_YAKINLIK_SART=True iken UZAKTAN
+    # (handoff=False) CONFIRMED track gorsele DEVREDEMEZ (FP kalkani).
+    b, d = _kur("OTO")
+    import time
+    assert Cfg.HANDOFF_YAKINLIK_SART is True     # varsayilan sozlesme
+    for _ in range(5):
+        b.handoff = False                        # hedef uzakta (d_h > HANDOFF_RANGE)
+        h = _hedef(durum="CONFIRMED")
+        h["t"] = time.perf_counter()
+        b.set_algi(_ciktiyla(h))
+        b.adim()
+        b.handoff = False                        # adim() GPS yolunda True'ya cekmesin
+    assert b.durum not in _GORSEL_AILE, b.durum
+
+
+def test_confirmed_yakinlik_sarti_kapali_eski_davranis():
+    # Bayrak False -> bizim ESKI davranis birebir: her mesafede CONFIRMED devri tetikler.
+    b, d = _kur("OTO")
+    import time
+    eski = Cfg.HANDOFF_YAKINLIK_SART
+    Cfg.HANDOFF_YAKINLIK_SART = False
+    try:
+        for _ in range(3):
+            b.handoff = False                    # uzakta bile olsa
+            h = _hedef(durum="CONFIRMED")
+            h["t"] = time.perf_counter()
+            b.set_algi(_ciktiyla(h))
+            b.adim()
+        assert b.durum in _GORSEL_AILE, b.durum
+    finally:
+        Cfg.HANDOFF_YAKINLIK_SART = eski
+
+
+def test_auto_handoff_kapali_gpste_kalir():
+    # MERGE kapisi (main/serhadcan): AUTO_VISUAL_HANDOFF=False -> kilit+yakinlik
+    # saglansa bile gorsele GECILMEZ (GPS standoff takibinde kal).
+    b, d = _kur("OTO")
+    import time
+    eski = Cfg.AUTO_VISUAL_HANDOFF
+    Cfg.AUTO_VISUAL_HANDOFF = False
+    try:
+        for _ in range(5):
+            b.handoff = True
+            h = _hedef(durum="CONFIRMED")
+            h["t"] = time.perf_counter()
+            b.set_algi(_ciktiyla(h))
+            b.adim()
+        assert b.durum not in _GORSEL_AILE, b.durum
+    finally:
+        Cfg.AUTO_VISUAL_HANDOFF = eski
 
 
 def test_tentative_gorsel_kilit_olmaz():

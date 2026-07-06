@@ -1,2 +1,6 @@
 # .bat dosyalari cmd.exe icin HER ZAMAN CRLF ile checkout edilsin
 *.bat text eol=crlf
+
+# .sh dosyalari bash icin HER ZAMAN LF ile checkout edilsin
+# (CRLF'li shebang '\r' yuzunden Linux'ta calismaz; bkz. 1/2_*.sh)
+*.sh text eol=lf

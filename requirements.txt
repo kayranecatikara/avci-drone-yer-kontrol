@@ -3,7 +3,11 @@
 numpy
 mss
 Pillow
-pygetwindow
+
+# --- Windows'a ozel (Linux'ta gerekmez, otomatik atlanir) ---
+# pygetwindow oyun penceresini bulmak icindir. Linux'ta yuklenmezse
+# server.py tum ekrani yakalar (kod bunu try/except ile otomatik yapar).
+pygetwindow; platform_system == "Windows"
 
 # --- Gorsel gudum (IBVS) fazi: YOLO nesne tespiti (models/best.pt) ---
 # NOT (CUDA/GPU): torch'u ONCE dogru wheel'den kur, sonra bu dosyayi yukle:

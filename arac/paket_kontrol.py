@@ -48,7 +48,17 @@ _PROJ_ROOT = os.path.dirname(_HERE)
 
 # --- Paket icerigi (teslim .zip'ine girecekler) ---
 PAKET_KOKLERI = ["detection", "guidance", "fusion", "web", "sdk", "models"]
-PAKET_DOSYALAR = ["main.py", "config.py", "README.md", "requirements.txt"]
+# MERGE 2026-07-06: pose KOSU-ZAMANI kalemleri pakete girer —
+# detection/talon_pose_estimator 'berat_json' semasini pose/talon_keypoints.json
+# + pose/poz_cozucu (EGITIM_SIRASI/MESH_PIVOT) uzerinden kurar; bu uc dosya +
+# __init__ olmadan paketlenmis kod gomulu (yanlis sirali) semaya duserdi.
+# pose/'un GERI KALANI (etiketleme/kalibrasyon/kayit araclari) UCUS DISIDIR ->
+# arsiv/test gibi PAKETLENMEZ (CLAUDE.md SERT AYRIM).
+PAKET_DOSYALAR = ["main.py", "config.py", "README.md", "requirements.txt",
+                  os.path.join("pose", "__init__.py"),
+                  os.path.join("pose", "poz_cozucu.py"),
+                  os.path.join("pose", "geometri.py"),
+                  os.path.join("pose", "talon_keypoints.json")]
 # Dev modul: pakete HIC girmez (madde a)
 PAKET_HARIC = {os.path.join("web", "dev_truth.py")}
 # Paket koklerinde bile atlanacaklar (calisma ciktisi/cop)

@@ -21,6 +21,7 @@ import json
 import os
 import threading
 import time
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -326,7 +327,10 @@ def connection_manager():
             bagli = drone.connect()  # oyun kapaliysa sessizce False doner, sorun olmaz
         if bagli and onceki_bagli is not True:
             print("[BAGLANTI] Oyuna baglanildi.")
+            olay_ekle("iyi", "Oyuna baglanildi")
             deneme = 0
+        elif (not bagli) and onceki_bagli is True:     # True -> False kenari (kopma)
+            olay_ekle("uyari", "Oyun baglantisi koptu")
         elif not bagli:
             deneme += 1
             if deneme == 1 or deneme % 15 == 0:      # ilk deneme + ~30 sn'de bir hatirlat
@@ -391,6 +395,11 @@ TUNE_ALLOW = {
     # (0.0=kapali eski omnidirek, 1.0=acik turn-then-advance) + kisma/EMA tau.
     "YAKLASMA_BURUN_HEDEFE", "YAKLASMA_ROLL_KIS", "YAKLASMA_DIKEY_KIS",
     "HEDEF_Z_EMA_TAU_SN",
+    # MERGE 2026-07-06 (main/serhadcan standoff profili) — iki profil canli secilebilir:
+    # GPS_TERMINAL_STRIKE 0.0=standoff (serhadcan) / 1.0=intercept+ram (bizim eski);
+    # AUTO_VISUAL_HANDOFF ve HANDOFF_YAKINLIK_SART gorsel devir kapilari (0/1).
+    "GPS_TERMINAL_STRIKE", "AUTO_VISUAL_HANDOFF", "HANDOFF_YAKINLIK_SART",
+    "APPROACH_STANDOFF", "APPROACH_LEAD_S", "APPROACH_ALT_OFFSET",
 }
 
 # ----------------------------------------------------------
@@ -408,6 +417,223 @@ MANUEL_TIMEOUT = 0.7         # sn: bu sureden uzun giris gelmezse HOVER'a gec
                              # (sekme/baglanti koparsa drone kacmaz, oldugu yerde durur)
 
 # Telafi tarama testi tamamlandi -> en iyi telafi_sn=2.0 (Efe'nin orijinal ayari).
+
+
+# ============================================================
+#  GOREV IZLEYICI + OLAY GUNLUGU (video isterleri 3-10)
+#  MERGE 2026-07-06: main'in _gorev_izle deseninden alinip BIZIM 5-durum
+#  FSM'e (ARAMA->YAKLASMA->GORSEL_TAKIP->KILIT_BILDIR->ANGAJMAN) uyarlandi.
+#  TEMEL KURAL: tum sinyaller beyin'in VAR OLAN alanlarindan KENAR-TESPITIYLE
+#  (onceki tik <-> bu tik) turetilir; gudume DOKUNMAZ (kural 8: izleyici
+#  "durum degisti mi?" karsilastirmasindan ibaret, takimca aciklanabilir).
+# ============================================================
+GNSS_KESINTI_S    = 1.0    # sn; hedef GPS paketi bu suredir yenilenmediyse KESINTI
+                           # (nominal 5 Hz -> 0.2 s; sartname kesintisi ~2 s -> 5x marj)
+VURUS_ESIK_M      = 3.0    # m; ANGAJMAN'da mesafe altina inerse VURUS (sim'de kalibre)
+BASARI_GECIKME_S  = 1.5    # sn; VURUS latch'inden sonra BASARI ilani
+TAKIP_TAM_KAYIP_S = Cfg.VIS_STALE_S + Cfg.VIS_LOST_TO_GPS_S   # takip-ID kapanma esigi
+                           # (gudumun GPS'e donus penceresiyle AYNI -> tutarli anlatim)
+
+olay_lock = threading.Lock()          # YAPRAK kilit: tutulurken asla beyin_lock/SDK cagrisi YOK
+_olaylar  = deque(maxlen=400)         # {"id","t","sv","m"}
+_olay_id  = 0
+
+
+def olay_ekle(sv, mesaj):
+    """Gorev olayini gunluge ekle. sv: bilgi|iyi|uyari|kritik. Thread-safe (yaprak kilit).
+    Kilit sirasi tek yonlu (beyin_lock -> olay_lock) oldugundan deadlock imkansiz."""
+    global _olay_id
+    with olay_lock:
+        _olay_id += 1
+        _olaylar.append({"id": _olay_id, "t": time.time(), "sv": sv, "m": mesaj})
+    print("[OLAY] %s" % mesaj)         # konsol kaydi da videoyla tutarli kalsin
+
+
+# --- Izleyici durumu: YALNIZ kontrol thread'i yazar (tek-yazar); build_telemetry beyin_lock ile okur ---
+_takip = {"id": None, "yeniden": 0, "aktif": False, "kayip_t": None}
+_gorev = {"faz": "HAZIR", "t0": None, "vurus": False, "basari": False,
+          "en_yakin_m": None, "vurus_t": None, "mesafe_kaynak": None}
+_izci = {"durum_prev": None, "handoff_prev": False, "confirmed_ilan": False,
+         "angajman_ilan": False, "angajman_min": None, "iska_ilan": False,
+         "kesinti": False, "son_paket_t": None, "son_ham_prev": None}
+
+
+def _gorev_sifirla(faz):
+    """Yeni gorev baslarken izleyici latch'lerini sifirla (basari banner'i dahil)."""
+    _takip.update(id=None, yeniden=0, aktif=False, kayip_t=None)
+    _gorev.update(faz=faz, t0=time.time(), vurus=False, basari=False,
+                  en_yakin_m=None, vurus_t=None, mesafe_kaynak=None)
+    _izci.update(durum_prev=None, handoff_prev=False, confirmed_ilan=False,
+                 angajman_ilan=False, angajman_min=None, iska_ilan=False)
+
+
+def _mesafe_olc():
+    """VURUS/BASARI icin DURUST mesafe (m): J-temiz kestirim (ucusta mevcut tek
+    guvenilir kaynak). HAM ASLA kullanilmaz (buyuk ham hata sahte vurus tetikler).
+    -> (mesafe_m, kaynak) | (None, None)."""
+    m, kaynak = None, None
+    if beyin.son_xy_anlik is not None and beyin.son_z_anlik is not None:
+        dp = drone.get_drone_location()
+        tx, ty, tz = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]), float(beyin.son_z_anlik)
+        d = ((dp[0] - tx) ** 2 + (dp[1] - ty) ** 2 + (dp[2] - tz) ** 2) ** 0.5
+        m, kaynak = d * CM_TO_M, "temiz"
+    # >>> DEV-ONLY >>>
+    # DEV kosusunda latch'i gercek 3B mesafeyle olc (dev_truth modulu uzerinden;
+    # paketlenmis kodda bu blok yok -> J-temiz kalir).
+    if dev_yardimci is not None:
+        try:
+            g = dev_yardimci.mesafe_m()
+            if g is not None:
+                m, kaynak = g, "gercek"
+        except Exception:
+            pass
+    # <<< DEV-ONLY <<<
+    return m, kaynak
+
+
+def _yatay_mesafe_cm():
+    """Avci <-> hedef YATAY mesafe (cm): temiz kestirim, yoksa ham. Panel/angajman icin."""
+    dp = drone.get_drone_location()
+    if beyin.son_xy_anlik is not None:
+        tx, ty = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1])
+    elif beyin.son_ham is not None:
+        tx, ty = float(beyin.son_ham[0]), float(beyin.son_ham[1])
+    else:
+        return None
+    return ((dp[0] - tx) ** 2 + (dp[1] - ty) ** 2) ** 0.5
+
+
+_GORSEL_AILE_UI = ("GORSEL_TAKIP", "KILIT_BILDIR", "ANGAJMAN")
+
+
+def _gorev_izle():
+    """kontrol_dongusu icinde, beyin_lock ALTINDA, her tik (~50 Hz). GUDUME DOKUNMAZ:
+    beyin'in alanlarini okuyup olay/durum turetir. Kesinti gorev pasifken de izlenir."""
+    now = time.time()
+
+    # 1) GNSS KESINTI: paket yasini beyin.son_ham degisiminden izle (yeni paket ->
+    #    son_ham degisir; _hedef_temizle zaten yalniz yeni pakette gunceller).
+    sh = beyin.son_ham
+    if sh is not None and sh != _izci["son_ham_prev"]:
+        _izci["son_ham_prev"] = sh
+        _izci["son_paket_t"] = now
+    spt = _izci["son_paket_t"]
+    yas = (now - spt) if spt is not None else None
+    kesinti_simdi = (yas is not None and yas > GNSS_KESINTI_S)
+    if kesinti_simdi and not _izci["kesinti"]:
+        _izci["kesinti"] = True
+        olay_ekle("uyari", "GNSS KESINTISI — hedef GPS paketi gelmiyor")
+    elif (not kesinti_simdi) and _izci["kesinti"]:
+        _izci["kesinti"] = False
+        olay_ekle("iyi", "GNSS geri geldi — kesinti bitti (%.1f s)" % (yas if yas else 0.0))
+
+    if not gorev_aktif:
+        return   # gorev pasif: FSM/takip/vurus izlenmez (sadece kesinti yukarida)
+
+    # 2) TAKIP olaylari (girdi: beyin.son_tespit_t tazeligi + ByteTrack ID'si)
+    det = beyin.son_tespit
+    stt = beyin.son_tespit_t
+    taze = (stt is not None) and ((time.perf_counter() - stt) <= Cfg.VIS_STALE_S)
+    tid = (det or {}).get("track_id")
+    if taze:
+        if _takip["id"] is None:                       # ACILIS
+            _takip["id"] = tid if tid is not None else 1
+            _takip["kayip_t"] = None
+            try:
+                conf = float((det or {}).get("conf", 0.0))
+            except Exception:
+                conf = 0.0
+            if _takip["yeniden"] == 0:
+                olay_ekle("iyi", "ILK TESPIT — ID:%s (conf=%.2f)" % (_takip["id"], conf))
+            else:
+                olay_ekle("iyi", "YENIDEN TESPIT — ID:%s (conf=%.2f)" % (_takip["id"], conf))
+        elif tid is not None and tid != _takip["id"]:  # tracker yeni ID acti
+            _takip["id"] = tid
+            _takip["yeniden"] += 1
+            olay_ekle("iyi", "YENIDEN TESPIT — yeni ID:%s" % tid)
+        elif not _takip["aktif"]:                      # blip koprulendi
+            olay_ekle("iyi", "TAKIP SURUYOR — ID:%s korundu" % _takip["id"])
+            _takip["kayip_t"] = None
+        _takip["aktif"] = True
+    else:
+        if _takip["id"] is not None:
+            if _takip["aktif"]:
+                _takip["aktif"] = False
+                _takip["kayip_t"] = now
+                olay_ekle("uyari", "TESPIT KAYBI — ID:%s (kor-devam)" % _takip["id"])
+            elif _takip["kayip_t"] is not None and (now - _takip["kayip_t"]) >= TAKIP_TAM_KAYIP_S:
+                olay_ekle("uyari", "TAKIP KAPANDI — ID:%s (%.1f s kayip)"
+                          % (_takip["id"], now - _takip["kayip_t"]))
+                _takip["id"] = None
+                _takip["yeniden"] += 1                 # sonraki acilis "YENIDEN TESPIT" desin
+                _takip["kayip_t"] = None
+
+    # 3) FSM kenarlari (beyin.durum / beyin.handoff / tracker CONFIRMED)
+    durum = beyin.durum
+    dp_ = _izci["durum_prev"]
+    if durum != dp_:
+        if durum == "GORSEL_TAKIP" and dp_ not in _GORSEL_AILE_UI:
+            olay_ekle("iyi", "GORSEL TAKIBE GECILDI — GPS yonelimi KAPALI (yonelim yalniz kamera)")
+        elif durum == "KILIT_BILDIR":
+            olay_ekle("iyi", "KILIT TAMAM — hakem paketi gonderildi (+400)")
+        elif durum == "ANGAJMAN" and dp_ != "ANGAJMAN":
+            pass                                       # angajman olayi asagida (latch ile)
+        elif durum in ("ARAMA", "YAKLASMA") and dp_ in _GORSEL_AILE_UI:
+            olay_ekle("uyari", "GPS'e DONULDU — yeniden yaklasma")
+        _izci["durum_prev"] = durum
+    if beyin.handoff and not _izci["handoff_prev"]:
+        olay_ekle("bilgi", "Tespit menzilinde — YAKLASMA (gorus devralabilir)")
+    _izci["handoff_prev"] = bool(beyin.handoff)
+    # tracker CONFIRMED kenari (bizim kilit on-kosulu; _vis_pos_count yeni hatta kullanilmiyor)
+    confirmed = bool(det and det.get("track_durumu") == "CONFIRMED" and taze)
+    if confirmed and not _izci["confirmed_ilan"]:
+        _izci["confirmed_ilan"] = True
+        olay_ekle("iyi", "TRACKER CONFIRMED — gorsel kilit on-kosulu saglandi")
+    elif not confirmed and not taze:
+        _izci["confirmed_ilan"] = False
+
+    # 4) GOREV FAZI + VURUS/BASARI (mesafe 50 Hz olculur -> vurus ani atlanmaz)
+    mesafe, kaynak = _mesafe_olc()
+    if mesafe is not None:
+        if _gorev["en_yakin_m"] is None or mesafe < _gorev["en_yakin_m"]:
+            _gorev["en_yakin_m"] = mesafe
+
+    angajman = (durum == "ANGAJMAN" and _takip["aktif"])
+    if Cfg.GPS_TERMINAL_STRIKE:                        # test kipi: GPS ram menzilinde de angajman
+        dh = _yatay_mesafe_cm()
+        if dh is not None and dh < Cfg.STRIKE_RANGE:
+            angajman = True
+
+    if _gorev["basari"]:
+        _gorev["faz"] = "BASARI"
+    elif _gorev["vurus"]:
+        _gorev["faz"] = "VURUS"
+        if _gorev["vurus_t"] is not None and (now - _gorev["vurus_t"]) >= BASARI_GECIKME_S:
+            _gorev["basari"] = True
+            _gorev["faz"] = "BASARI"
+            olay_ekle("iyi", "GOREV BASARILI — HEDEF DUSURULDU")
+    elif angajman:
+        _gorev["faz"] = "ANGAJMAN"
+        if not _izci["angajman_ilan"]:
+            _izci["angajman_ilan"] = True
+            olay_ekle("kritik", "ANGAJMAN — terminal gorsel yaklasma basladi")
+        if mesafe is not None and mesafe < VURUS_ESIK_M:          # VURUS latch (kalici)
+            _gorev["vurus"] = True
+            _gorev["vurus_t"] = now
+            _gorev["mesafe_kaynak"] = kaynak
+            olay_ekle("kritik", "VURUS! mesafe=%.1f m (%s kaynak)" % (mesafe, kaynak))
+        elif mesafe is not None:                                  # ISKA tespiti (angajman icinde)
+            am = _izci["angajman_min"]
+            if am is None or mesafe < am:
+                _izci["angajman_min"] = mesafe
+            elif (not _izci["iska_ilan"]) and mesafe > am + 15.0:
+                _izci["iska_ilan"] = True
+                olay_ekle("uyari", "ISKA — en yakin %.1f m; yeniden angajman" % am)
+    else:
+        _izci["angajman_ilan"] = False
+        _izci["angajman_min"] = None
+        _izci["iska_ilan"] = False
+        _gorev["faz"] = durum          # ARAMA | YAKLASMA | GORSEL_TAKIP | KILIT_BILDIR
 
 
 def _manuel_uygula():
@@ -438,6 +664,7 @@ def kontrol_dongusu():
                         beyin.adim()              # tam kontrol (drone hedefe gider)
                     else:
                         beyin._hedef_temizle()    # sadece J'yi guncelle (pasif izleme)
+                    _gorev_izle()                 # olay/durum izleyici (GUDUME DOKUNMAZ)
             except Exception:
                 pass
         time.sleep(0.02)   # 50 Hz
@@ -454,6 +681,26 @@ model_yon = None           # ModelYonetici (lazy)
 algi = None                # AlgiHatti (lazy)
 _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock ile korunur)
 _son_pnp_ui = None         # UI icin son PnP ozeti
+
+# --- SAHTE TESPIT (mouse ile hedef isaretleme) — YZ modeli olgun DEGILKEN guduum testi ---
+# MERGE 2026-07-06 (main'den): arayuzde FPV uzerinde mouse BASILI tutulunca normalize
+# (cx,cy) buraya akar ve dedektor dongusunde asil algi ciktisinin YERINE gecer (ayni
+# det sozlugu, ayni beyin.set_gorsel_tespit yolu) -> gorsel guduum "model bu noktayi
+# verdi" senaryosuyla test edilir. Mesaj SAHTE_TAZE_S icinde yenilenmezse otomatik
+# kapanir (failsafe: tarayici kapanirsa/donarsa drone eski noktaya kilitli KALMAZ).
+# GELISTIRME KOLAYLIGIDIR; yarisma kosusunda kullanilmaz (video isteri: manuel
+# isaretleme YOK) — teslim oncesi arayuz butonuyla birlikte devre disi birakilir.
+SAHTE_TAZE_S = 0.6
+_sahte = {"aktif": False, "cx": 0.5, "cy": 0.5, "t": 0.0}   # beyin_lock ile korunur
+
+
+def _sahte_oku():
+    """Taze sahte-tespit verisi varsa kopyasini dondur, yoksa None."""
+    with beyin_lock:
+        s = dict(_sahte)
+    if s["aktif"] and (time.time() - s["t"]) <= SAHTE_TAZE_S:
+        return s
+    return None
 
 
 def _normalize_tespit(det):
@@ -473,6 +720,8 @@ def _normalize_tespit(det):
         "track_id": det.get("track_id"),
         "track_durumu": det.get("track_durumu"),
         "tespit_mi": det.get("tespit_mi"),
+        "sahte": bool(det.get("sahte", False)),    # UI rozeti: tespit mouse'tan mi geldi?
+        "sinif": ("manuel" if det.get("sahte") else det.get("sinif", "hedef")),
     }
     kp = det.get("keypoints")
     if kp:                                          # normalize keypoints (overlay ciz)
@@ -529,6 +778,29 @@ def dedektor_dongusu():
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
             time.sleep(0.05)
             continue
+        # SAHTE TESPIT: mouse verisi tazeyken ASIL algi hattinin YERINE gecer (o
+        # dongude inference HIC kosulmaz — GPU bosa yanmaz, ByteTrack sahteyle
+        # kirlenmez). Sozluk eski det semasiyla birebir; track_durumu YOK ->
+        # beyin._confirmed_track 5-kare fallback sayaciyla kilitlenir (ayni esik).
+        sahte = _sahte_oku()
+        if sahte is not None:
+            with _kare_cond:
+                _bgr = _kare["bgr"]
+            if _bgr is not None:
+                H_, W_ = _bgr.shape[:2]
+            else:                                     # kare yok -> nominal cozunurluk
+                W_, H_ = 1920.0, 1080.0               # (normalize edildigi icin sonuc ayni)
+            det = {"cx": sahte["cx"] * W_, "cy": sahte["cy"] * H_,
+                   "w": 0.06 * W_, "h": 0.05 * H_,    # nominal bbox (guduum ex/ey merkezi kullanir)
+                   "conf": 1.0, "cls": -1, "sahte": True,
+                   "W": W_, "H": H_, "t": time.perf_counter()}
+            with beyin_lock:                          # enjeksiyon (kilit ICINDE)
+                beyin.set_gorsel_tespit(det)
+                beyin._algi_pnp = None                # bayat PnP OIPN'e sizmasin
+                _son_tespit_ui = _normalize_tespit(det)
+                _son_pnp_ui = None
+            time.sleep(0.03)                          # ~30 Hz enjeksiyon temposu
+            continue
         if algi is None:                              # LAZY: ilk gorev tikinde kur
             try:
                 _algi_kur()
@@ -560,32 +832,9 @@ def dedektor_dongusu():
         # islenmez). Ekstra sleep GEREKMEZ.
 
 
-# ----------------------------------------------------------
-#  GOREV SONU / VURUS degerlendirmesi (video kalem 9-10).
-#  Bir kez BASARILI olunca kilitlenir (dalgalanan mesafe geri almasin).
-# ----------------------------------------------------------
-VURUS_ESIK_M = 3.0           # ham GPS mesafe bu altina inince "vurus" (sim)
-_gorev_sonu_durum = {"basarili": False, "min_mesafe_m": None, "an": None}
-
-
-def _gorev_sonu_degerlendir(fsm_durum, mesafe_m):
-    global gorev_aktif
-    st = _gorev_sonu_durum
-    if not gorev_aktif:                          # gorev bitti/durduruldu -> sifirla
-        if st["basarili"] or st["min_mesafe_m"] is not None:
-            _gorev_sonu_durum.update(basarili=False, min_mesafe_m=None, an=None)
-        return {"basarili": False, "vurus_menzili": False, "min_mesafe_m": None}
-    if mesafe_m is not None:
-        if st["min_mesafe_m"] is None or mesafe_m < st["min_mesafe_m"]:
-            st["min_mesafe_m"] = mesafe_m
-        # ANGAJMAN + mesafe esigi -> BASARILI (bir kez kilitle)
-        if not st["basarili"] and mesafe_m <= VURUS_ESIK_M and fsm_durum in (
-                "ANGAJMAN", "KILIT_BILDIR", "GORSEL_TAKIP"):
-            st["basarili"] = True
-            print("[GOREV] BASARILI — hedefe %.1f m'de vurus (FSM=%s)." % (mesafe_m, fsm_durum))
-    return {"basarili": st["basarili"],
-            "vurus_menzili": (mesafe_m is not None and mesafe_m <= VURUS_ESIK_M),
-            "min_mesafe_m": st["min_mesafe_m"]}
+# (GOREV SONU / VURUS degerlendirmesi _gorev_izle icine tasindi — MERGE 2026-07-06:
+#  eski ham-GPS'li latch yerine izleyicinin J-temiz[/DEV] mesafeli VURUS/BASARI
+#  latch'i tek dogruluk kaynagi; arayuzdeki gorev_sonu anahtari oradan beslenir.)
 
 
 # ----------------------------------------------------------
@@ -627,6 +876,19 @@ def build_telemetry():
         kilit_engel = beyin.kilit.engel_ozeti() if hasattr(beyin, "kilit") else None
         oipn_acik = bool(getattr(beyin, "oipn_acik", True))
         oipn_beta = float(getattr(beyin, "oipn_beta", 0.3))
+        # --- IZLEYICI/GUDUM alanlari (video isterleri) — ayni kilit altinda anlik kopya ---
+        prev_cmd = dict(beyin.prev)                    # uygulanan 4 komut (rate-limit sonrasi)
+        b_handoff = bool(beyin.handoff)
+        b_none = int(getattr(beyin, "none_count", 0))
+        son_xy = None if beyin.son_xy_anlik is None else (
+            float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]))
+        son_ham_full = None if beyin.son_ham is None else (
+            float(beyin.son_ham[0]), float(beyin.son_ham[1]), float(beyin.son_ham[2]))
+        son_z_anl = None if beyin.son_z_anlik is None else float(beyin.son_z_anlik)
+        takip_s = dict(_takip)
+        gorev_s = dict(_gorev)
+        izci_kesinti = bool(_izci["kesinti"])
+        izci_spt = _izci["son_paket_t"]
     j_info = {"durum": j_durum, "hazir": j_temiz is not None}
     if j_temiz is not None:
         j_info["temiz"] = {"x": j_temiz[0] * CM_TO_M,
@@ -674,15 +936,63 @@ def build_telemetry():
         "oipn": {"acik": oipn_acik, "beta": oipn_beta},
         # HEDEF GNSS: GORSEL ailesinde (GORSEL_TAKIP/KILIT_BILDIR/ANGAJMAN) KULLANILMIYOR
         "gnss_kullaniliyor": (j_durum in ("ARAMA", "YAKLASMA")),
-        # GOREV SONU / VURUS (video kalem 9-10): ANGAJMAN + hedefe cok yakin -> vurus.
-        # Sim'de vurus = ham GPS mesafe VURUS_ESIK alti (model/terminal vurus hedefe girer).
-        "gorev_sonu": _gorev_sonu_degerlendir(j_durum, distance_m),
+        # GOREV SONU / VURUS (video kalem 9-10): izleyicinin latch'inden (J-temiz mesafe).
+        "gorev_sonu": {"basarili": bool(gorev_s.get("basari")),
+                       "vurus_menzili": bool(gorev_s.get("vurus")),
+                       "min_mesafe_m": gorev_s.get("en_yakin_m")},
     }
     # MODEL REGISTRY durumu + canli metrikler (arayuz paneli)
     if model_yon is not None:
         gorsel["model"] = {"durum": model_yon.durum(),
                            "liste": model_yon.modelleri_listele(),
                            "metrik": model_yon.metrikler()}
+
+    # --- IZLEYICI TELEMETRISI (video isterleri 3/6/7/8/9/10) — MERGE 2026-07-06 ---
+    _now = time.time()
+    # d_h (yatay mesafe, m): temiz kestirim, yoksa ham
+    d_h_m = None
+    _txy = son_xy if son_xy is not None else (
+        (son_ham_full[0], son_ham_full[1]) if son_ham_full is not None else None)
+    if _txy is not None:
+        d_h_m = (((dpos[0] - _txy[0]) ** 2 + (dpos[1] - _txy[1]) ** 2) ** 0.5) * CM_TO_M
+    # J duzeltme buyuklugu (ucus telemetrisinden): ham <-> anlik temiz fark (m)
+    j_duzeltme_m = None
+    if son_ham_full is not None and son_xy is not None and son_z_anl is not None:
+        _jd = ((son_ham_full[0] - son_xy[0]) ** 2 + (son_ham_full[1] - son_xy[1]) ** 2
+               + (son_ham_full[2] - son_z_anl) ** 2) ** 0.5
+        j_duzeltme_m = _jd * CM_TO_M
+    paket_yasi_s = (_now - izci_spt) if izci_spt is not None else None
+
+    gnss_info = {
+        "paket_yasi_s": paket_yasi_s,
+        "kesinti": izci_kesinti,
+        "j_duzeltme_m": j_duzeltme_m,
+        "none_count": b_none,
+    }
+    gudum_info = {
+        "thr": prev_cmd.get("thr", 0.0), "pitch": prev_cmd.get("pitch", 0.0),
+        "roll": prev_cmd.get("roll", 0.0), "yaw": prev_cmd.get("yaw", 0.0),
+        "durum": j_durum, "mod": vis_mode, "kaynak": j_kaynak,
+        "handoff": b_handoff, "d_h_m": d_h_m,
+        "profil": ("intercept+ram" if getattr(Cfg, "GPS_TERMINAL_STRIKE", False)
+                   else "standoff"),               # aktif GPS yaklasma profili (bayrak)
+    }
+    kayip_s = 0.0
+    if takip_s.get("id") is not None and (not takip_s.get("aktif")) and takip_s.get("kayip_t"):
+        kayip_s = _now - takip_s["kayip_t"]
+    takip_info = {
+        "id": takip_s.get("id"), "aktif": bool(takip_s.get("aktif")),
+        "kayip_s": kayip_s, "yeniden": int(takip_s.get("yeniden", 0)),
+        "pos_count": vis_pos, "n_lock": Cfg.VIS_N_LOCK,
+    }
+    gorev_info = {
+        "faz": gorev_s.get("faz", "HAZIR"), "vurus": bool(gorev_s.get("vurus")),
+        "basari": bool(gorev_s.get("basari")), "en_yakin_m": gorev_s.get("en_yakin_m"),
+        "mesafe_kaynak": gorev_s.get("mesafe_kaynak"), "vurus_t": gorev_s.get("vurus_t"),
+        "t0": gorev_s.get("t0"), "esik_m": VURUS_ESIK_M,
+    }
+    with olay_lock:
+        olay_listesi = list(_olaylar)[-60:]           # son 60 olay (durumsuz; F5 sorunsuz)
 
     veri = {
         "connected": connected,
@@ -706,6 +1016,11 @@ def build_telemetry():
         "manuel_aktif": manuel_aktif,
         "kaynak": j_kaynak,
         "gorsel": gorsel,
+        "olaylar": olay_listesi,                # [{id,t,sv,m}] son 60 (video: olay gunlugu)
+        "gnss": gnss_info,                      # bozuk GNSS girdisi + kesinti (ister 3)
+        "gudum": gudum_info,                    # uygulanan komutlar + karar + profil (ister 8)
+        "takip": takip_info,                    # ID + aktif/pasif + kayip/yeniden (ister 5/6/7)
+        "gorev": gorev_info,                    # faz + vurus/basari (ister 9/10)
     }
     # >>> DEV-ONLY >>>
     if dev_yardimci is not None:
@@ -805,9 +1120,11 @@ class Handler(BaseHTTPRequestHandler):
             if cmd in ("start", "start_v2"):
                 with beyin_lock:
                     beyin.set_kaynak("v2")    # tek guduum kaynagi: Inovasyonlu J
+                    _gorev_sifirla("ARAMA")   # izleyici latch'lerini sifirla (basari banner dahil)
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
                 msg = "GOREV BASLATILDI - kaynak: Inovasyonlu J"
+                olay_ekle("iyi", "GOREV BASLADI — kaynak: Inovasyonlu J")
             elif cmd == "stop":
                 gorev_aktif = False
                 manuel_aktif = False
@@ -817,6 +1134,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception:
                     pass
                 msg = "GOREV DURDURULDU - drone pasif (motorlar kapali)"
+                olay_ekle("uyari", "GOREV DURDURULDU")   # basari latch'i KORUNUR (banner kalir)
             elif cmd == "manuel_on":
                 gorev_aktif = False           # gorev ve manuel ayni anda olmaz
                 # Tek kilit altinda: durumu kur + arm/hover yolla (50Hz dongu ile
@@ -834,6 +1152,7 @@ class Handler(BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 msg = "MANUEL MOD ACIK - klavye: W/A/S/D, Q/E (don), R/F (yuksel/alcal)"
+                olay_ekle("bilgi", "MANUEL MOD ACIK")
             elif cmd == "manuel_off":
                 # Motoru KESMEZ: drone havada sabit kalsin (hover). Tamamen
                 # durdurmak icin kullanici 'Gorev Durdur'a basar.
@@ -853,6 +1172,8 @@ class Handler(BaseHTTPRequestHandler):
                              "GPS": "ZORLA GPS (gorsel kapali)",
                              "GORSEL": "ZORLA GORSEL (GPS kapali)"}.get(m, "")
                 msg = ("GUDUM MODU: %s - %s" % (m, _aciklama)) if ok else "GECERSIZ mod: %s" % m
+                if ok:
+                    olay_ekle("bilgi", "Guduum modu -> %s" % m)
             # >>> DEV-ONLY >>>
             elif cmd == "dev_kaynak":
                 # KAYNAK secici (gelistirme): "gercek" <-> "filtre". Gudum modu
@@ -904,6 +1225,30 @@ class Handler(BaseHTTPRequestHandler):
                     manuel_kontrol["roll"] = _eksen(data.get("roll", 0.0))
                     manuel_kontrol["yaw"] = _eksen(data.get("yaw", 0.0))
                     manuel_son_giris = time.time()
+            self._send(200, b'{"ok":true}', "application/json")
+        elif self.path == "/api/sahte":
+            # SAHTE TESPIT akisi (mouse -> normalize hedef merkezi). /api/manuel ile
+            # ayni desen: yuksek frekansli, status yazisini kirletmez. aktif=false
+            # gelirse veya mesaj SAHTE_TAZE_S boyunca kesilirse enjeksiyon durur ->
+            # asil algi ciktisina kendiliginden geri donulur (failsafe).
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            try:
+                data = json.loads(raw)
+            except Exception:
+                data = {}
+
+            def _n01(x):
+                try:
+                    return max(0.0, min(1.0, float(x)))
+                except Exception:
+                    return 0.5
+
+            with beyin_lock:
+                _sahte["aktif"] = bool(data.get("aktif"))
+                _sahte["cx"] = _n01(data.get("cx", _sahte["cx"]))
+                _sahte["cy"] = _n01(data.get("cy", _sahte["cy"]))
+                _sahte["t"] = time.time()
             self._send(200, b'{"ok":true}', "application/json")
         elif self.path == "/api/tune":
             # CANLI TUNE: {param, value} -> Cfg.<param> = float(value) (allowlist'te ise).

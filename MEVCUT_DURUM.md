@@ -5,6 +5,38 @@
 > Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
 > (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
 
+> **🔀 MAIN MERGE TAMAMLANDI (2026-07-06) — bayrak-koru stratejisi, HİÇBİR TARAF SİLİNMEDİ.**
+> origin/main (9 commit: serhadcan standoff güdümü + Berat pose paketi + video arayüzü +
+> sahte tespit) yarisma-pipeline'a merge edildi. Karar dokümanı: `docs/MAIN_MERGE_VE_POSE_ACIKLAMA.md`.
+> - **Güdümde İKİ PROFİL, Cfg bayrağı seçer** (`guidance/ana_kontrol.py`):
+>   `GPS_TERMINAL_STRIKE=False` (VARSAYILAN) → serhadcan STANDOFF: hedefin
+>   `APPROACH_STANDOFF` (5 m) gerisinde + `APPROACH_ALT_OFFSET` (5 m) altında pace,
+>   kısa lead (`APPROACH_LEAD_S=0.5s`), kamera hedefi kadrajda ortalar; vuruş görsel fazın.
+>   `GPS_TERMINAL_STRIKE=True` → bizim eski INTERCEPT+RAM birebir geri gelir.
+>   Bizim DÜZELTME-1 (`YAKLASMA_BURUN_HEDEFE`) ve hedef-Z EMA'sı iki profilde de aktif
+>   (dikey-FOV kapısı artık `ez_hedef` ile hedefin KENDİ elevasyonuna bakar, ofsete değil).
+> - **Görsel devir kapıları:** `AUTO_VISUAL_HANDOFF=True` (bizim FSM akışı; False=serhadcan
+>   "GPS'te kal" test modu) + YENİ `HANDOFF_YAKINLIK_SART=True` (main'in FP kalkanı: CONFIRMED
+>   track ancak d_h<HANDOFF_RANGE iken devreder; False=eski her-mesafede davranış).
+>   KP_YAW/YAW_MAX bizim tarama değerlerinde kaldı (1.0/0.30; main 1.3/0.45 denemişti — canlı-tune).
+>   Tüm yeni bayraklar TUNE_ALLOW'da (arayüzden canlı değişir).
+> - **Pose TEK HAT:** `models/talon_pose.pt` (42 MB, Berat) + `pose/` paketi geldi. 3B keypoint
+>   TEK KAYNAĞI `pose/talon_keypoints.json`; bizim `talon_pose_estimator` bunu `berat_json`
+>   şemasıyla OKUR (sıra=EGITIM_SIRASI [0,1,2,5,3,4], pivot=+11.76 cm → tvec=actor origin).
+>   `models/talon_pose.yaml` bu şemayı seçer; registry'den hot-swap ile bbox+kp aynı ağdan →
+>   ByteTrack+PnP+OIPN zinciri. Sentetik round-trip doğrulandı. Gömülü şemalar yedek durur.
+> - **Arayüz (bizim baz):** main'den taşınanlar — `_gorev_izle()` görev izleyici + olay günlüğü
+>   + mini-harita + GNSS kesinti rozeti + GÖREV kartı + VURUŞ/BAŞARI latch'i (J-temiz mesafe;
+>   DEV koşusunda çit içinde truth) + 🖱️ SAHTE TESPİT modu (`/api/sahte`; teslim öncesi kaldırılır).
+>   AYRICA düzeltme: basariEkran `gorev_sonu`'nu artık doğru anahtardan okuyor (önceden hiç yanmıyordu).
+> - **SERT AYRIM korundu:** main'in çitsiz truth kıyas/GPS-log blokları GERİ ALINMADI; vuruş
+>   latch'inin truth yolu `web/dev_truth.mesafe_m()` üzerinden DEV-ONLY çitte. `pose/` koşu-zamanı
+>   üçlüsü (poz_cozucu+geometri+json) pakete girdi (paket_kontrol güncellendi); **paket_kontrol
+>   [TEMİZ] veriyor (10/10 zorunlu kalem)**. Testler: 14 dosya, hepsi geçiyor (FSM testine 3 yeni
+>   kapı-testi eklendi).
+> - **Sim regresyonu BEKLİYOR:** iki profil + sahte tespit + talon_pose canlı doğrulama uçuşları
+>   yapılmadı (CLAUDE.md BEKLEYEN İŞ'te liste).
+
 > **🎬 MÜSABAKA VİDEO KAYDEDİCİ — FİNAL AŞAMASI ZORUNLULUĞU (2026-07-04, ŞİMDİ KODLANMAZ).**
 > Müsabaka (gerçek uçuş) teslimi için ayrı bir kayıt zorunluluğu var; **kod finalde yazılır,
 > spec burada dursun.** Gereksinimler (Teslim Esasları):

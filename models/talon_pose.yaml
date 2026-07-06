@@ -1,0 +1,10 @@
+# talon_pose.pt metadata (model_yonetici okur; MERGE 2026-07-06)
+# Berat'in yolo11m-pose modeli (6 keypoint; main'den geldi, sim'de dogrulanmis).
+# sema: PnP obje-nokta SIRASI 'berat_json' = pose/talon_keypoints.json +
+#       pose/poz_cozucu.EGITIM_SIRASI (model cikti sirasi, 87 karede deneysel) +
+#       MESH_PIVOT ofseti (tvec = kamera->actor origin, telemetriyle kiyaslanir).
+sema: berat_json
+# conf: YALNIZ gorsellestirme/metrik esigi (kilit zincirine girmez).
+# main canli testi (4 Tem): 0.20'de bos gokyuzune "talon" diyor -> 0.35 guvenli.
+conf: 0.35
+aciklama: "Berat yolo11m-pose (6kp); PnP semasi berat_json (talon_keypoints.json)"

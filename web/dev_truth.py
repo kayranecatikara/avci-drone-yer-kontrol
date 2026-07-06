@@ -141,3 +141,17 @@ class DevTruthKaynagi:
         return {"var": True,
                 "aktif": bool(getattr(beyin, "hedef_kaynak_ad", "filtre") == "gercek"),
                 "akiyor": self.mevcut()}
+
+    def mesafe_m(self):
+        """DEV olcum: avci<->hedef GERCEK 3B mesafe (m). Truth akmiyorsa None.
+        server'daki VURUS/BASARI latch'i DEV kosularinda J-temiz yerine bunu
+        kullanir (cit icinde); paketlenmis kodda bu modul yoktur -> J-temiz kalir."""
+        try:
+            dbg = self.drone.get_debug_truth()
+            if not dbg.get("available"):
+                return None
+            a = np.array(dbg["drone"]["position"], float)
+            t = np.array(dbg["target"]["position"], float)
+            return float(np.linalg.norm(a - t)) / 100.0
+        except Exception:
+            return None

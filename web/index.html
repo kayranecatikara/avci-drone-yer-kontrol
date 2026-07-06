@@ -195,6 +195,32 @@
   .be-ikon{font-size:96px;filter:drop-shadow(0 0 20px var(--accent))}
   .be-baslik{font-size:44px;font-weight:800;color:var(--accent);letter-spacing:3px;margin-top:8px}
   .be-alt{font-size:18px;color:var(--text);margin-top:10px}
+
+  /* ---- MERGE 2026-07-06 (main'den): orta panel alt şerit = mini-harita + olay günlüğü ---- */
+  #altSerit{display:grid;grid-template-columns:300px 1fr;gap:10px;height:200px;flex:0 0 auto;min-height:0;margin-top:10px}
+  #minimapWrap{position:relative;background:#06080c;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  #minimap{width:100%;height:100%;display:block}
+  .mm-lej{position:absolute;left:8px;bottom:6px;font-size:10px;line-height:1.5;color:var(--muted);
+    background:rgba(6,8,12,.6);padding:3px 6px;border-radius:5px}
+  .mm-lej i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  #olayLogWrap{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    display:flex;flex-direction:column;min-height:0}
+  #olayLogWrap .lgt{font-size:11px;letter-spacing:1px;color:var(--muted);font-weight:600;
+    padding:8px 10px;border-bottom:1px solid var(--border);text-transform:uppercase;flex:0 0 auto}
+  #olayLog{flex:1;overflow-y:auto;padding:6px 10px;font-size:12px;font-family:Consolas,monospace;line-height:1.55;min-height:0}
+  #olayLog .ole{display:flex;gap:8px;padding:1px 0}
+  #olayLog .ole .ot{color:#55627a;flex:0 0 auto}
+  .ol-bilgi{color:var(--text)} .ol-iyi{color:var(--accent)}
+  .ol-uyari{color:var(--warn)} .ol-kritik{color:#ff5d5d;font-weight:600}
+  /* rozetler (GNSS kesinti / takip aktif) */
+  .rozet{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px}
+  .rozet.ok{background:rgba(20,140,90,.22);color:var(--accent)}
+  .rozet.pasif{background:#1a2230;color:var(--muted)}
+  .rozet.kes{background:rgba(220,40,40,.25);color:#ff5d5d;animation:yaniprozet 1s infinite}
+  @keyframes yaniprozet{0%,100%{opacity:1}50%{opacity:.45}}
+  /* sahte tespit butonu (aktifken macenta vurgusu) */
+  .btn.sahte-aktif{border-color:#ff52ff;background:#2a1030;color:#ff9bff;
+    box-shadow:inset 0 0 0 1px #ff52ff}
 </style>
 <!-- >>> DEV-ONLY >>> -->
 <style>
@@ -238,6 +264,10 @@
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
         <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
+        <!-- MERGE 2026-07-06 (main'den): YZ modeli olgun değilken güdüm testi — görev
+             sırasında FPV'de mouse BASILI TUTULAN nokta model çıktısının yerine geçer.
+             Geliştirme kolaylığı; yarışma koşusunda KAPALI (manuel işaretleme yasak). -->
+        <button id="sahteBtn" class="btn" onclick="sahteTogle()"><span class="ic">🖱️</span> Sahte Tespit (Mouse)</button>
 
         <!-- >>> DEV-ONLY >>> -->
         <!-- HEDEF-KAYNAK secici (GELISTIRME): midcourse beslemesi FILTRE <-> GERCEK.
@@ -317,11 +347,11 @@
       <div class="status" id="leftStatus">Sistem hazır.</div>
     </section>
 
-    <!-- ORTA: Görüntü -->
+    <!-- ORTA: Görüntü + mini-harita + olay günlüğü (alt şerit MERGE 2026-07-06 main'den) -->
     <section class="col">
       <h2>Kamera / Görüntü</h2>
-      <div class="body" style="padding:12px">
-        <div id="view">
+      <div class="body" style="padding:12px;display:flex;flex-direction:column;overflow:hidden">
+        <div id="view" style="flex:1;min-height:0">
           <video id="cam" autoplay muted playsinline></video>
           <img id="camImg" alt="">
           <canvas id="overlay"></canvas>
@@ -330,6 +360,21 @@
             <div class="sub">Oyun görüntüsü <b>otomatik</b> bağlanır (oyun açık + görev sunucusu çalışıyorsa).<br>
             Gelmezse: oyun penceresi açık mı? Alternatif olarak ekran paylaşımı:</div>
             <button id="shareBtn" class="sharebtn">📡 Ekran Paylaşımına Geç</button>
+          </div>
+        </div>
+        <!-- ALT ŞERİT: solda kuşbakışı mini-harita (ister 2), sağda görev olay günlüğü (ister 4/7) -->
+        <div id="altSerit">
+          <div id="minimapWrap">
+            <canvas id="minimap"></canvas>
+            <div class="mm-lej">
+              <div><i style="background:#25e0a0"></i>Avcı</div>
+              <div><i style="background:#ff5d5d"></i>Hedef (ham GPS)</div>
+              <div><i style="background:#b98cff"></i>Hedef (J-temiz)</div>
+            </div>
+          </div>
+          <div id="olayLogWrap">
+            <div class="lgt">📜 Görev Olay Günlüğü</div>
+            <div id="olayLog"></div>
           </div>
         </div>
       </div>
@@ -398,6 +443,21 @@
           <div class="row"><span class="k">PnP mesafe</span><span class="v mono" id="pnpMes">—</span></div>
           <div class="row"><span class="k">reproj err</span><span class="v mono" id="pnpReproj">—</span></div>
           <div class="row"><span class="k">φ_T / ψ_T</span><span class="v mono" id="pnpAci">—</span></div>
+        </div>
+
+        <!-- 📡 BOZUK GNSS (ister 3): kesinti rozeti + paket yaşı + J düzeltme büyüklüğü -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--warn)">📡 BOZUK GNSS <span id="gnssRozet" class="rozet pasif">—</span></div>
+          <div class="row"><span class="k">Paket yaşı</span><span class="v mono" id="gnssYas">—</span></div>
+          <div class="row"><span class="k">J düzeltme (ham↔temiz)</span><span class="v mono" id="gnssJd">—</span></div>
+        </div>
+
+        <!-- 🏁 GÖREV (ister 9/10): faz + takip ID + en yakın mesafe -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent)">🏁 GÖREV <span id="takipRozet" class="rozet pasif">TAKİP: —</span></div>
+          <div class="row"><span class="k">Faz</span><span class="v mono" id="gorevFaz">—</span></div>
+          <div class="row"><span class="k">GPS profili</span><span class="v mono" id="gorevProfil">—</span></div>
+          <div class="row"><span class="k">En yakın mesafe</span><span class="v mono" id="gorevYakin">—</span></div>
         </div>
 
         <div class="dist">
@@ -735,8 +795,9 @@
     if(det){
       // COAST AYRIMI (olcumsuz tahmin): KESIKLI kenar + turuncu + "TAHMİN (coast)";
       // conf gosterilmez, "son conf" olarak isaretlenir (video kalem-7 gorsellestirmesi).
+      // SAHTE (mouse) tespit: MACENTA — asil model ciktisiyla karistirilmasin.
       const coast = !!(gs.track && gs.track.tespit_mi===false);
-      const renk = coast ? "#ffb454" : "#25e0a0";                 // coast turuncu / olcum yesil
+      const renk = det.sahte ? "#ff52ff" : (coast ? "#ffb454" : "#25e0a0");
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       ctx.strokeStyle=renk; ctx.lineWidth=coast?2:2.5;             // bbox
       if(coast) ctx.setLineDash([7,5]);                           // coast: KESIKLI
@@ -756,9 +817,11 @@
       ctx.strokeStyle=coast?"rgba(255,180,84,.4)":"rgba(37,224,160,.5)"; ctx.lineWidth=1.5;
       ctx.beginPath(); ctx.moveTo(mcx,refY); ctx.lineTo(bx,by); ctx.stroke();   // REF -> hedef sapma
       ctx.font="12px monospace"; ctx.fillStyle=coast?"#ffd9a0":"#cfe";
-      ctx.fillText(coast
-        ? "TAHMİN (coast)  son conf="+Number(det.conf).toFixed(2)
-        : "ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+"  conf="+Number(det.conf).toFixed(2),
+      ctx.fillText(det.sahte
+        ? "[SAHTE/MOUSE] manuel işaret — güdüm testi"
+        : (coast
+          ? "TAHMİN (coast)  son conf="+Number(det.conf).toFixed(2)
+          : "ex="+Number(det.ex).toFixed(2)+"  ey="+Number(det.ey).toFixed(2)+"  conf="+Number(det.conf).toFixed(2)),
         bx-bw/2, by-bh/2-6);
     }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
@@ -794,6 +857,144 @@
     const b=$("takipBildirim"); b.className="takip-bildirim "+sinif; b.textContent=metin;
     if(_trkBildirimTimer) clearTimeout(_trkBildirimTimer);
     _trkBildirimTimer=setTimeout(()=>{ b.className="takip-bildirim"; }, 2500);
+  }
+
+  // =====================================================================
+  //  SAHTE TESPİT (MERGE 2026-07-06 main'den) — YZ modeli olgun değilken güdüm
+  //  testi: buton AÇIK iken FPV üzerinde mouse BASILI TUTULAN nokta /api/sahte'ye
+  //  akıtılır; server dedektör döngüsünde asıl algı çıktısının YERİNE koyar.
+  //  Mouse bırakılınca / pencere odağı gidince aktif=false; server tarafında da
+  //  0.6 s tazelik failsafe'i var (mesaj kesilirse kendiliğinden düşer).
+  // =====================================================================
+  let sahteAcik = false;      // buton durumu (mod silahlı mı?)
+  let sahteBasili = false;    // mouse şu an basılı mı?
+  let sahteSonXY = null;      // [cx,cy] normalize
+  let sahteTimer = null;      // basılıyken ~12 Hz tazeleme (failsafe + sürükleme takibi)
+
+  function sahteTogle(){
+    sahteAcik = !sahteAcik;
+    $("sahteBtn").classList.toggle("sahte-aktif", sahteAcik);
+    $("overlay").style.cursor = sahteAcik ? "crosshair" : "default";
+    $("leftStatus").textContent = sahteAcik
+      ? "SAHTE TESPİT AÇIK — görev sırasında FPV'de hedefin üstüne mouse ile BASILI TUT."
+      : "Sahte tespit kapalı — güdüm asıl algı çıktısını kullanır.";
+    if(!sahteAcik) sahteBirak();
+  }
+  function sahteGonder(aktif){
+    const b = {aktif: aktif};
+    if(aktif && sahteSonXY){ b.cx = sahteSonXY[0]; b.cy = sahteSonXY[1]; }
+    fetch("/api/sahte",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(b)}).catch(()=>{});
+  }
+  function sahteXY(ev){
+    // Mouse konumu -> FPV İÇERİK dikdörtgeninde normalize [0..1] (letterbox payı düşülür).
+    // aktifFpv(): görünür kaynak (sunucu karesi <img> veya paylaşım <video>).
+    const el = aktifFpv() || $("camImg");
+    const rc = _icerikRect(el);
+    const r = $("overlay").getBoundingClientRect();
+    const x = (ev.clientX - r.left - rc.x) / rc.w;
+    const y = (ev.clientY - r.top  - rc.y) / rc.h;
+    return [Math.max(0, Math.min(1, x)), Math.max(0, Math.min(1, y))];
+  }
+  function sahteBirak(){
+    if(sahteTimer){ clearInterval(sahteTimer); sahteTimer = null; }
+    if(sahteBasili){ sahteBasili = false; sahteGonder(false); }
+    sahteSonXY = null;
+  }
+  window.addEventListener("DOMContentLoaded", ()=>{
+    const ov = $("overlay");
+    ov.addEventListener("mousedown", ev=>{
+      if(!sahteAcik || ev.button !== 0) return;
+      sahteBasili = true; sahteSonXY = sahteXY(ev); sahteGonder(true);
+      if(!sahteTimer) sahteTimer = setInterval(()=>{ if(sahteBasili) sahteGonder(true); }, 80);
+      ev.preventDefault();
+    });
+    window.addEventListener("mousemove", ev=>{     // sürükleme: hedef hareket ederse takip et
+      if(sahteBasili) sahteSonXY = sahteXY(ev);
+    });
+    window.addEventListener("mouseup", sahteBirak);
+    window.addEventListener("blur", sahteBirak);   // sekme/pencere odağı gitti -> güvenli bırak
+  });
+
+  // ---- Görev olay günlüğü (MERGE main'den; dedup: sadece yeni id'ler DOM'a) ----
+  let sonOlayId = 0;
+  function _mmss(s){ s=Math.max(0,s); const m=Math.floor(s/60), ss=s-m*60;
+    return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss.toFixed(1); }
+  function _hhmm(epoch){ try{ return new Date(epoch*1000).toLocaleTimeString('tr-TR',{hour12:false}); }catch(e){ return ""; } }
+  function _esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function olayGuncelle(olaylar, gorev){
+    if(!Array.isArray(olaylar)) return;
+    const log=$("olayLog"); if(!log) return;
+    // sunucu yeniden başladıysa id geriye sarar -> günlüğü sıfırla
+    if(olaylar.length && olaylar[olaylar.length-1].id < sonOlayId){ sonOlayId=0; log.innerHTML=""; }
+    const t0 = (gorev && gorev.t0) ? gorev.t0 : null;
+    const atAlt = (log.scrollTop + log.clientHeight) >= (log.scrollHeight - 24);
+    for(const e of olaylar){
+      if(e.id <= sonOlayId) continue;
+      sonOlayId = e.id;
+      const rel = (t0!=null) ? (e.t - t0) : null;
+      const zaman = (rel!=null && rel>=0) ? ("T+"+_mmss(rel)) : _hhmm(e.t);
+      const row=document.createElement("div"); row.className="ole";
+      row.innerHTML = '<span class="ot">'+zaman+'</span><span class="ol-'+(e.sv||"bilgi")+'">'+_esc(e.m)+'</span>';
+      log.appendChild(row);
+    }
+    while(log.childElementCount>300) log.removeChild(log.firstChild);
+    if(atAlt) log.scrollTop = log.scrollHeight;
+  }
+
+  // ---- Kuşbakışı mini-harita (MERGE main'den): avcı / ham hedef / J-temiz izleri ----
+  let mmAvci=[], mmHam=[], mmTemiz=[], mmT0=null;
+  function cizMinimap(t){
+    const cv=$("minimap"); if(!cv) return;
+    const wrap=cv.parentElement, cw=wrap.clientWidth, ch=wrap.clientHeight;
+    if(!cw||!ch) return;
+    if(cv.width!==cw)  cv.width=cw;
+    if(cv.height!==ch) cv.height=ch;
+    const ctx=cv.getContext("2d"); ctx.clearRect(0,0,cw,ch);
+    // görev t0 değişti (yeni görev) -> izleri sıfırla
+    const t0 = (t.gorev && t.gorev.t0) ? t.gorev.t0 : null;
+    if(t0!==mmT0){ mmT0=t0; mmAvci=[]; mmHam=[]; mmTemiz=[]; }
+    const d=t.drone, g=t.target, j=t.j;
+    if(d && d.x!=null){ mmAvci.push([d.x,d.y]); if(mmAvci.length>600)mmAvci.shift(); }
+    if(g && g.x!=null){ mmHam.push([g.x,g.y]); if(mmHam.length>600)mmHam.shift(); }
+    if(j && j.temiz){ mmTemiz.push([j.temiz.x,j.temiz.y]); if(mmTemiz.length>600)mmTemiz.shift(); }
+    const pts=mmAvci.concat(mmHam,mmTemiz);
+    if(!pts.length){ ctx.fillStyle="#55627a"; ctx.font="11px monospace";
+      ctx.fillText("harita: veri bekleniyor…",10,20); return; }
+    let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
+    for(const [x,y] of pts){ if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+    const cxm=(minx+maxx)/2, cym=(miny+maxy)/2;
+    const half=Math.max((maxx-minx)/2,(maxy-miny)/2,10)*1.1;   // en az ~20 m pencere; %10 pay
+    const pad=14;
+    const sx = x => pad + (cw-2*pad)*((x-(cxm-half))/(2*half));
+    const sy = y => pad + (ch-2*pad)*(1-(y-(cym-half))/(2*half));  // y yukarı -> ekranda ters
+    ctx.strokeStyle="rgba(255,255,255,.05)"; ctx.lineWidth=1;      // merkez ızgara
+    ctx.beginPath(); ctx.moveTo(sx(cxm),pad); ctx.lineTo(sx(cxm),ch-pad);
+    ctx.moveTo(pad,sy(cym)); ctx.lineTo(cw-pad,sy(cym)); ctx.stroke();
+    const ciz=(iz,renk)=>{ if(iz.length<2)return; ctx.strokeStyle=renk; ctx.lineWidth=1.5;
+      ctx.beginPath(); iz.forEach(([x,y],i)=> i?ctx.lineTo(sx(x),sy(y)):ctx.moveTo(sx(x),sy(y))); ctx.stroke(); };
+    ciz(mmTemiz,"rgba(185,140,255,.45)");
+    ciz(mmHam,"rgba(255,93,93,.35)");
+    ciz(mmAvci,"rgba(37,224,160,.55)");
+    const nokta=(p,renk,r)=>{ const [x,y]=p[p.length-1]; ctx.fillStyle=renk;
+      ctx.beginPath(); ctx.arc(sx(x),sy(y),r,0,6.2832); ctx.fill(); };
+    // hedef (ham): kesintide gri halka + "KESİNTİ" etiketi
+    const kes = t.gnss && t.gnss.kesinti;
+    if(mmHam.length){ const [x,y]=mmHam[mmHam.length-1];
+      if(kes){ ctx.strokeStyle="#6b7891"; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.arc(sx(x),sy(y),4,0,6.2832); ctx.stroke();
+        ctx.fillStyle="#8a94a8"; ctx.font="9px monospace"; ctx.fillText("KESİNTİ",sx(x)+7,sy(y)-3); }
+      else nokta(mmHam,"#ff5d5d",4);
+    }
+    if(mmTemiz.length) nokta(mmTemiz,"#b98cff",4);
+    if(mmAvci.length){ const [x,y]=mmAvci[mmAvci.length-1], px=sx(x), py=sy(y);
+      nokta(mmAvci,"#25e0a0",5);
+      if(d && d.yaw!=null){ const a=d.yaw*Math.PI/180;             // yön çentiği (yaw)
+        ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2; ctx.beginPath();
+        ctx.moveTo(px,py); ctx.lineTo(px+Math.cos(a)*14, py-Math.sin(a)*14); ctx.stroke(); }
+    }
+    ctx.fillStyle="#55627a"; ctx.font="10px monospace";
+    ctx.fillText("~"+Math.round(2*half)+" m", cw-64, ch-8);
   }
 
   let lastOk = 0;
@@ -878,13 +1079,39 @@
       const cf=(x)=> (x==null?"—":(x>=0?"+":"")+Number(x).toFixed(2));
       $("cmdThr").textContent=cf(d.cmd_throttle); $("cmdPit").textContent=cf(d.cmd_pitch);
       $("cmdRol").textContent=cf(d.cmd_roll); $("cmdYaw").textContent=cf(d.cmd_yaw);
-      // 🎯 Görev-sonu başarı ekranı (kalem 10)
-      const gsonu = t.gorev_sonu||{};
+      // 🎯 Görev-sonu başarı ekranı (kalem 10) — DÜZELTME: anahtar gorsel İÇİNDE
+      // (eski kod t.gorev_sonu okuyordu -> hep undefined, banner hiç yanmıyordu).
+      const gsonu = gs.gorev_sonu || t.gorev_sonu || {};
       $("basariEkran").classList.toggle("on", !!gsonu.basarili);
       if(gsonu.basarili && gsonu.min_mesafe_m!=null)
         $("basariAlt").textContent = "Hedefe "+f1(gsonu.min_mesafe_m)+" m'de otonom angajman — insan müdahalesi yok";
       // 📡 Takip kayıp/yeniden-tespit bildirimi (kalem 7)
       takipGecisIzle(gs.track);
+
+      // --- MERGE 2026-07-06 panelleri: GNSS / GÖREV / olay günlüğü / mini-harita ---
+      const gn = t.gnss || {};
+      const rz = $("gnssRozet");
+      if(gn.kesinti){ rz.className="rozet kes"; rz.textContent="KESİNTİ"; }
+      else if(gn.paket_yasi_s!=null){ rz.className="rozet ok"; rz.textContent="AKIYOR"; }
+      else { rz.className="rozet pasif"; rz.textContent="—"; }
+      $("gnssYas").innerHTML = (gn.paket_yasi_s!=null) ? gn.paket_yasi_s.toFixed(2)+' <small>s</small>' : "—";
+      $("gnssJd").innerHTML  = (gn.j_duzeltme_m!=null) ? f1(gn.j_duzeltme_m)+' <small>m</small>' : "—";
+      const gv = t.gorev || {};
+      const tk = t.takip || {};
+      const tr2 = $("takipRozet");
+      if(tk.aktif){ tr2.className="rozet ok"; tr2.textContent="TAKİP: AKTİF"+(tk.id!=null?" ID:"+tk.id:""); }
+      else if(tk.id!=null){ tr2.className="rozet kes"; tr2.textContent="TAKİP: KAYIP ("+(tk.kayip_s||0).toFixed(1)+"s)"; }
+      else { tr2.className="rozet pasif"; tr2.textContent="TAKİP: —"; }
+      $("gorevFaz").textContent = gv.faz || "—";
+      const gd = t.gudum || {};
+      $("gorevProfil").textContent = gd.profil || "—";
+      $("gorevYakin").innerHTML = (gv.en_yakin_m!=null) ? f1(gv.en_yakin_m)+' <small>m</small>' : "—";
+      // 💥 VURUŞ! uçucu bildirimi (yükselen kenar)
+      if(gv.vurus && !window._vurusIlan){ window._vurusIlan = true;
+        _takipBanner("kayip","💥 VURUŞ! — hedefe temas ("+(gv.en_yakin_m!=null?f1(gv.en_yakin_m)+" m":"")+")"); }
+      if(!gv.vurus) window._vurusIlan = false;
+      olayGuncelle(t.olaylar, gv);
+      cizMinimap(t);
       // kilit engel teshisi (tamamlanamiyorsa hangi kosulda takildi)
       if(kl && !kl.kilit_tamam && kl.engel){
         $("kilitSayan").innerHTML += ' <small style="color:var(--warn)">('+kl.engel+')</small>';

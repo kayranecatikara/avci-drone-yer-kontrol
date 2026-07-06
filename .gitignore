@@ -6,9 +6,13 @@ Drones of War Teknofest/
 bestpose.pt
 models/bestpose.pt
 # Deneysel/alternatif agirliklar repoya KONMAZ (Drive'dan gelir); yalniz aktif
-# models/best.pt izlenir. Yeni .pt varsayilan olarak ignore, best.pt istisna.
+# modeller izlenir: best.pt (tespit) + talon_pose.pt (poz, main'den; 42 MB).
 models/*.pt
 !models/best.pt
+!models/talon_pose.pt
+# ham Colab ciktisi 126 MB (optimizer dahil) > 100 MB siniri. Calisan kopyasi
+# models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
+talon_yolo11m_pose_2_best.pt
 
 # --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
 veri/
