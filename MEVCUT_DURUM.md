@@ -542,13 +542,16 @@ Bozuk hedef GPS ──▶ İnovasyonlu J (temizle + hız kestir, +2sn lead)
   kalsa bile doğru kare). Yoksa mss ekran-bölgesine düşer.
 
 ### `web/server.py` + `web/index.html`
-- 3 thread: `connection_manager` (oto yeniden bağlan + pencere-yakalamayı ayakta tut),
-  `kontrol_dongusu` (50 Hz beyin), `dedektor_dongusu` (ayrı thread YOLO).
+- 4 thread: `connection_manager` (oto yeniden bağlan + pencere-yakalamayı ayakta tut),
+  `kontrol_dongusu` (50 Hz beyin), `dedektor_dongusu` (ayrı thread YOLO),
+  `kare_uretici_dongusu` (TEK yakalayıcı, ~25 fps: FPV ve dedektör AYNI kareyi tüketir;
+  çift PrintWindow yarışı yok → arayüz FPV'si akıcı).
 - 3 mod, karşılıklı dışlar: **görev** (otonom, `gorev_aktif`), **manuel** (klavye WASD/QE/RF, failsafe hover),
   **pasif** (sadece J ölçümü akar, drone uçmaz).
 - **Kıyas ölçümü:** İnovasyonlu J'nin gerçeğe hatası vs ham GPS taban çizgisi (ort/std/max) → `veri/kiyas_log.csv`.
 - **Canlı-tune:** arayüz slider'ları `Cfg`'yi çalışırken değiştirir (allowlist'li; server restart gerekmez).
-- **API:** `/api/telemetry`, `/api/frame` (ham FPV; overlay istemci canvas'ında), `/api/command`
+- **API:** `/api/telemetry`, `/api/frame` (ham FPV; long-poll `?seq=N` → hazır JPEG anında
+  döner, yakalama istek yolunda değil; overlay istemci canvas'ında), `/api/command`
   (start/stop/manuel/vismode), `/api/manuel`, `/api/tune`.
 
 ---

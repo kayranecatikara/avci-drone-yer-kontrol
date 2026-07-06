@@ -904,7 +904,7 @@
       drawOverlay(null);       // hata: overlay'i temizle
     }
   }
-  setInterval(tick, 200);
+  setInterval(tick, 100);   // 10 Hz: overlay (bbox/rozet) akici FPV ile uyumlu tazelensin
   tick();
 
   // ---- Canlı görüntü: tarayıcının ekran/pencere paylaşımı (getDisplayMedia) ----
@@ -915,34 +915,40 @@
   const camImg = $("camImg");
   let stream = null;
 
-  // ---- OTOMATIK FPV: sunucu /api/frame (PrintWindow; occlusion-proof, JEST GEREKMEZ) ----
-  // Ekran-paylasimi (getDisplayMedia) yerine sunucunun yakaladigi oyun karesini <img>'e
-  // akitir -> kullanici tiklamadan FPV gelir. Overlay bbox koordinatlari da bu SUNUCU
-  // karesine gore normalize oldugundan hizalama birebir. Ekran-paylasimi acilinca durur.
-  let autoFpvAktif = false, autoFpvErr = 0;
-  function autoFpvTick(){
-    if(!autoFpvAktif) return;
-    const im = new Image();
-    im.onload = ()=>{
-      if(!autoFpvAktif) return;
-      camImg.src = im.src;
-      if(camImg.style.display!=="block"){
-        camImg.style.display="block"; $("overlay").style.display="block"; camPh.style.display="none";
+  // ---- OTOMATIK FPV: sunucu /api/frame LONG-POLL (PrintWindow; occlusion-proof) ----
+  // Sunucu kareleri ARKA PLANDA sabit tempoda uretir (kare_uretici_dongusu); biz
+  // "?seq=N -> N'den yenisini ver" diye sorariz: yanit HAZIR JPEG'tir, istek basina
+  // yakalama gecikmesi YOKTUR -> akici FPV. blob URL kullanilir (ayni URL'yi <img>'e
+  // tekrar verip ikinci fetch tetikleme riski yok); yeni kare gelince eski blob
+  // serbest birakilir. Ekran-paylasimi acilinca durur.
+  let autoFpvAktif = false, autoFpvErr = 0, autoFpvSeq = -1;
+  async function autoFpvDongu(){
+    while(autoFpvAktif){
+      try{
+        const r = await fetch("/api/frame?seq="+autoFpvSeq, {cache:"no-store"});
+        if(!r.ok) throw new Error("kare yok ("+r.status+")");
+        autoFpvSeq = parseInt(r.headers.get("X-Kare-Seq")||"-1", 10);
+        const blob = await r.blob();
+        if(!autoFpvAktif) return;
+        const url = URL.createObjectURL(blob);
+        const eski = (camImg.src && camImg.src.startsWith("blob:")) ? camImg.src : null;
+        camImg.onload = camImg.onerror = ()=>{ if(eski) URL.revokeObjectURL(eski); };
+        camImg.src = url;
+        if(camImg.style.display!=="block"){
+          camImg.style.display="block"; $("overlay").style.display="block"; camPh.style.display="none";
+        }
+        autoFpvErr = 0;                  // tempo sunucudan gelir; ekstra bekleme yok
+      }catch(e){
+        if(!autoFpvAktif) return;
+        autoFpvErr++;
+        if(autoFpvErr>10 && camImg.style.display==="block"){   // kaynak kesildi -> placeholder
+          camImg.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
+        }
+        await new Promise(res=>setTimeout(res, 300));
       }
-      autoFpvErr = 0;
-      setTimeout(autoFpvTick, 66);                 // ~15 fps
-    };
-    im.onerror = ()=>{
-      if(!autoFpvAktif) return;
-      autoFpvErr++;
-      if(autoFpvErr>10 && camImg.style.display==="block"){   // kaynak kesildi -> placeholder
-        camImg.style.display="none"; $("overlay").style.display="none"; camPh.style.display="flex";
-      }
-      setTimeout(autoFpvTick, 300);
-    };
-    im.src = "/api/frame?t=" + Date.now();
+    }
   }
-  function autoFpvBaslat(){ if(!autoFpvAktif){ autoFpvAktif=true; autoFpvErr=0; autoFpvTick(); } }
+  function autoFpvBaslat(){ if(!autoFpvAktif){ autoFpvAktif=true; autoFpvErr=0; autoFpvDongu(); } }
   function autoFpvDurdur(){ autoFpvAktif=false; camImg.style.display="none"; }
 
   async function startShare(){

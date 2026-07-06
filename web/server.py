@@ -22,6 +22,7 @@ import os
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlparse
 
 from sdk import drone_sdk as drone
 from guidance.ana_kontrol import AvciKontrol, Cfg
@@ -101,26 +102,6 @@ def _find_game_region():
     except Exception:
         pass
     return None
-
-
-def grab_frame_jpeg():
-    """mss FALLBACK: oyun penceresi bolgesini (yoksa tum ekrani) yakalayip JPEG doner.
-    windows-capture kuruluysa buraya dusulmez (fpv_jpeg pencere-icerigini kullanir)."""
-    sct = _get_sct()
-    region = _find_game_region()
-    if region:
-        left, top, width, height = region
-        bbox = {"left": left, "top": top, "width": width, "height": height}
-    else:
-        bbox = sct.monitors[1]  # birincil monitor (tum ekran)
-    raw = sct.grab(bbox)
-    img = Image.frombytes("RGB", raw.size, raw.bgra, "raw", "BGRX")
-    if img.width > CAM_MAX_WIDTH:
-        ratio = CAM_MAX_WIDTH / img.width
-        img = img.resize((CAM_MAX_WIDTH, int(img.height * ratio)))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
-    return buf.getvalue()
 
 
 # ----------------------------------------------------------
@@ -250,13 +231,9 @@ def grab_frame_bgr():
         return None, 0, 0
 
 
-def fpv_jpeg():
-    """/api/frame'in dondurdugu HAM oyun karesi (overlay YOK — bbox/rozet istemci
-    canvas'inda cizilir). grab_frame_bgr fallback zincirini kullanir -> gorunur bir
-    oyun/ekran varsa HER ZAMAN kare doner. Hicbir kaynak yoksa None (-> 503)."""
-    bgr, _w, _h = grab_frame_bgr()
-    if bgr is None:
-        return None
+def _bgr_jpeg(bgr):
+    """BGR kareyi JPEG'e cevirir (HAM oyun karesi; overlay YOK — bbox/rozet istemci
+    canvas'inda cizilir). cv2 varsa hizli yol, yoksa PIL."""
     if cv2 is not None:
         ok, enc = cv2.imencode(".jpg", bgr, [int(cv2.IMWRITE_JPEG_QUALITY), CAM_JPEG_QUALITY])
         if ok:
@@ -265,6 +242,70 @@ def fpv_jpeg():
     buf = io.BytesIO()
     img.save(buf, format="JPEG", quality=CAM_JPEG_QUALITY)
     return buf.getvalue()
+
+
+# ----------------------------------------------------------
+#  KARE URETICI — FPV akiciliginin cozumu (TEK yakalayici thread)
+#  ESKI: her /api/frame istegi + dedektor dongusu AYRI AYRI PrintWindow cagirirdi;
+#  kare basina yakalama (20-60 ms) HTTP yaniti icinde beklenir, gorev sirasinda
+#  iki thread ayni pencereyi yakalamak icin yarisirdi -> arayuz FPV'si takilirdi.
+#  YENI: bu thread ~KARE_FPS temposunda yakalar ve SON kareyi yayinlar:
+#    - /api/frame long-poll ile HAZIR JPEG'i aninda alir (yakalama istek yolunda degil),
+#    - dedektor ayni BGR kareyi tuketir (cift yakalama yuku kalkti).
+#  Tarayici kapali + gorev pasifken yakalama da durur (bosuna CPU yok).
+# ----------------------------------------------------------
+KARE_FPS = 25.0              # yakalama temposu (PrintWindow ~20-40 ms -> surdurulebilir)
+_kare = {"bgr": None, "jpeg": None, "seq": 0, "ts": 0.0}
+_kare_cond = threading.Condition()
+_fpv_talep_ts = 0.0          # son /api/frame ani (tarayici FPV izliyor mu?)
+
+
+def _fpv_talep_var():
+    return (time.time() - _fpv_talep_ts) < 3.0
+
+
+def _kare_gerekli():
+    """Yakalama kossun mu? Tarayici FPV istiyor VEYA otonom gorev algisi calisiyor."""
+    return _fpv_talep_var() or (drone.is_connected() and gorev_aktif and not manuel_aktif)
+
+
+def kare_uretici_dongusu():
+    while True:
+        if not _kare_gerekli():
+            time.sleep(0.15)
+            continue
+        t0 = time.perf_counter()
+        try:
+            bgr, _w, _h = grab_frame_bgr()
+        except Exception:
+            bgr = None
+        # Tarayici izlemiyorsa (kareyi yalniz dedektor tuketiyor) JPEG encode'a girme.
+        jpeg = _bgr_jpeg(bgr) if (bgr is not None and _fpv_talep_var()) else None
+        with _kare_cond:
+            _kare["bgr"] = bgr
+            _kare["jpeg"] = jpeg
+            _kare["seq"] += 1
+            _kare["ts"] = time.time()
+            _kare_cond.notify_all()
+        if bgr is None:
+            time.sleep(0.25)                       # kaynak yok -> CPU'yu bosalt
+            continue
+        kalan = (1.0 / KARE_FPS) - (time.perf_counter() - t0)
+        if kalan > 0:
+            time.sleep(kalan)                      # sabit tempo (yakalama jitter'ini torpuler)
+
+
+def kare_bekle_yeni(son_seq, timeout):
+    """son_seq'ten YENI yayin gelene kadar bekler; (bgr, guncel_seq) doner.
+    Timeout'ta (None, son_seq); yayin var ama kare alinamadiysa (None, yeni_seq)."""
+    bitis = time.monotonic() + timeout
+    with _kare_cond:
+        while _kare["seq"] == son_seq:
+            kalan = bitis - time.monotonic()
+            if kalan <= 0:
+                return None, son_seq
+            _kare_cond.wait(kalan)
+        return _kare["bgr"], _kare["seq"]
 
 
 # ----------------------------------------------------------
@@ -482,6 +523,7 @@ def _algi_kur():
 
 def dedektor_dongusu():
     global _son_tespit_ui, _son_pnp_ui
+    kare_seq = 0               # kare_uretici'den tuketilen son yayin sirasi
     while True:
         # Sadece OTONOM gorev sirasinda algi yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
@@ -499,7 +541,9 @@ def dedektor_dongusu():
             continue
         try:
             model_yon.conf = float(Cfg.VIS_CONF_MIN)  # canli-tune predict esigi (yalniz gorsel/metrik)
-            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi (kilit DISINDA)
+            # Kareyi kare_uretici'den TUKET (kendi PrintWindow cagrisi YOK -> FPV ile
+            # ayni kare; cift yakalama yarisi bitti). Yeni yayin yoksa kisa bekler.
+            bgr, kare_seq = kare_bekle_yeni(kare_seq, timeout=0.3)
             att = drone.get_drone_rotation()          # gyro-CMC icin attitude (temiz/tam-hizli)
             cikti = algi.adim(bgr, att) if bgr is not None else None
         except Exception:
@@ -511,9 +555,9 @@ def dedektor_dongusu():
             beyin.set_algi(cikti)                     # AlgiCiktisi snapshot (hedef + PnP + turevler)
             _son_tespit_ui = _normalize_tespit(hedef)
             _son_pnp_ui = (cikti.pnp if cikti else None)
-        if bgr is None:
-            time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
-        # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
+        # Kare yoksa kare_bekle_yeni timeout'u zaten bekletti (spin yok); kare varsa
+        # bir sonraki yayini bekleyerek inference dogal pace'lenir (ayni kare iki kez
+        # islenmez). Ekstra sleep GEREKMEZ.
 
 
 # ----------------------------------------------------------
@@ -675,6 +719,11 @@ def build_telemetry():
 #  HTTP istek isleyici
 # ----------------------------------------------------------
 class Handler(BaseHTTPRequestHandler):
+    # HTTP/1.1 keep-alive: FPV long-poll + telemetri ayni TCP baglantisini yeniden
+    # kullanir (istek basina baglanti kurulumu/TIME_WAIT birikimi olmaz). Tum
+    # yanitlar Content-Length gonderdigi icin guvenlidir.
+    protocol_version = "HTTP/1.1"
+
     def log_message(self, *args):
         pass  # konsolu gereksiz log ile kirletme
 
@@ -702,13 +751,40 @@ class Handler(BaseHTTPRequestHandler):
             vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
             self._send(200, json.dumps(vals).encode("utf-8"), "application/json")
         elif self.path.startswith("/api/frame"):
+            # LONG-POLL: istemci son aldigi kare sirasini (?seq=N) verir; N'den YENI
+            # kare yayinlanana kadar (<=1 sn) bekler, HAZIR JPEG'i aninda doneriz.
+            # Yakalama bu yolda DEGIL (kare_uretici_dongusu yapar) -> istek basina
+            # PrintWindow gecikmesi kalkti; FPV sabit tempoda akar. seq'siz eski
+            # cagrilar (?t=...) en son kareyi hemen alir (geriye uyumlu).
+            global _fpv_talep_ts
+            _fpv_talep_ts = time.time()           # talep isareti (uretici thread kossun)
             try:
-                jpeg = fpv_jpeg()                 # ham oyun karesi (pencere-icerigi / mss)
-                if jpeg is None:
+                q = parse_qs(urlparse(self.path).query)
+                istemci_seq = int(q.get("seq", ["-1"])[0])
+            except Exception:
+                istemci_seq = -1
+            try:
+                bitis = time.monotonic() + 1.0
+                with _kare_cond:
+                    # Yeni + JPEG'li + TAZE yayin bekle (bosta kalmis bayat kare donmesin)
+                    while (_kare["jpeg"] is None or _kare["seq"] == istemci_seq
+                           or (time.time() - _kare["ts"]) > 1.5):
+                        kalan = bitis - time.monotonic()
+                        if kalan <= 0:
+                            break
+                        _kare_cond.wait(kalan)
+                    jpeg, seq, ts = _kare["jpeg"], _kare["seq"], _kare["ts"]
+                if jpeg is None or (time.time() - ts) > 2.5:
                     self._send(503, "kare yok (oyun penceresi bekleniyor)".encode("utf-8"),
                                "text/plain; charset=utf-8")
                 else:
-                    self._send(200, jpeg, "image/jpeg")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "image/jpeg")
+                    self.send_header("Content-Length", str(len(jpeg)))
+                    self.send_header("Cache-Control", "no-store")
+                    self.send_header("X-Kare-Seq", str(seq))   # istemci sonraki istekte geri verir
+                    self.end_headers()
+                    self.wfile.write(jpeg)
             except Exception as e:
                 self._send(500, ("goruntu hatasi: %s" % e).encode("utf-8"),
                            "text/plain; charset=utf-8")
@@ -902,6 +978,8 @@ def main():
     threading.Thread(target=kontrol_dongusu, daemon=True).start()
     # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
+    # Kare uretici: FPV + dedektor icin TEK yakalayici (talep varken ~KARE_FPS).
+    threading.Thread(target=kare_uretici_dongusu, daemon=True).start()
 
     try:
         server = ThreadingHTTPServer((WEB_HOST, WEB_PORT), Handler)
