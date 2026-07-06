@@ -286,12 +286,15 @@ TUNE_ALLOW = {
     "V_CAP_FAR", "V_CAP_NEAR", "BRAKE_DIST",
     # dikey (irtifa) PID
     "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
-    # GORSEL GUDUM (IBVS): isaret/kazanc/kapi + kilit guveni (SIM'de canli kalibrasyon)
-    "VIS_SIGN_YAW", "VIS_SIGN_VZ", "VIS_SIGN_PITCH",
-    "VIS_K_YAW", "VIS_K_VZ", "VIS_K_FWD", "VIS_FWD_MAX",
-    "VIS_CENTER_GATE", "VIS_AREA_STOP", "VIS_EMA", "VIS_CONF_MIN",
+    # GORSEL GUDUM (PNG): yaw kanali + kilit guveni + PN cekirdek parametreleri
+    # (IBVS-only tunable'lar 2026-07-06 temizliginde IBVS ile birlikte kaldirildi)
+    "VIS_SIGN_YAW", "VIS_K_YAW", "VIS_EMA", "VIS_CONF_MIN",
+    "VIS_KP_CLOSE",  # kapanma hizi talebi (v_close_des = KP*R) — 1 numarali tune dugmesi
+    "VIS_PN_N",      # navigasyon sabiti (3..5)
+    "VIS_PN_TILT",   # PN ivme -> pitch/roll yetki carpani
+    "VIS_TAU_Z",     # dikey kanal ataklik zaman sabiti
     "VIS_EY_REF",   # arayuz turuncu REF cizgisi (elev=0 gostergesi; sim'de kalibre)
-    "VIS_TILT_DEG", # LOS dikey guduum: kamera tilt (hedef ayni irtifadayken duz ucana kadar ayarla)
+    "VIS_TILT_DEG", # kamera tilt (png_gorsel LOS geometrisine katar)
 }
 
 # ----------------------------------------------------------
