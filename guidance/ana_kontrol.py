@@ -1,50 +1,37 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
-AVCI DRONE — ANA KONTROL DONGUSU  (FAZ 1: GNSS ile Yaklasma)
+AVCI DRONE — ANA KONTROL DONGUSU  (guduum + karar mekanizmasi, tek dosya)
 ================================================================================
-J (GNSSDuzeltici) + FAZ-1 guduum + handoff + debug olcumu, tek dosyada.
+GIRIS NOKTASI: main.py -> web.server.main() -> beyin = AvciKontrol(drone),
+50 Hz beyin.adim(). Manuel/pasif modda server yalnizca beyin._hedef_temizle()
+cagirir (J olcumu akar, ucus komutu uretilmez). Ayrinti: guidance/GUDUM_HARITA.md
 
->>> BU DOSYA YENI GUDUM ILE DEGISTIRILDI <<<
-    Eski "RAM / hiz-takipli kuyruk takibi" yaklasma mantigi (V_RAM, STANDOFF,
-    KP_CLOSE, KP_VEL, _kendi_hiz, agresif dalis...) TAMAMEN KALDIRILDI.
-    Yerine "faz1_gnss_yaklasma" guudumu gomuldu:
-      PD + EMA-filtreli turev -> sonumleme, mesafeye gore komut tavani
-      (overshoot guard), komut hiz limiti (rate limit), holonomik oteleme +
-      yavas yaw, sure-tabanli None yonetimi, genis HISTEREZISLI handoff.
+FAZLAR / FSM (self.durum):
+  ARAMA  -> GPS yaklasma: bozuk GNSS'i J (fusion/inovasyonlu_j_v2) temizler
+            (+2sn lead), PD + EMA-turev + mesafeye gore hiz tavani (speed_cap
+            FRENLEME profili) + STANDOFF nisan noktasi ile hedefe yaklasir.
+            YALNIZ bu fazda calisan mekanikler: kalkis kapisi, loiter/dropout,
+            APPROACH_STANDOFF/ALT_OFFSET (kamera kadraji icin hedefin 5 m alti),
+            speed_cap/fren. GORSEL fazda BUNLARIN HICBIRI CALISMAZ (erken return).
+  KILIT  -> ayni GPS yaklasma; d_h < HANDOFF_RANGE histerezisiyle isaretlenir
+            (gorsel faz devralmaya hazir).
+  GORSEL_GUDUM -> yonelim YALNIZCA kameradan: YOLO bbox (server dedektor thread
+            -> set_gorsel_tespit) -> _gorsel_guduum -> guidance/png_gorsel.py
+            (PNG carpisma rotasi, Cfg.VIS_LAW). Kayipta kademeli: kor-devam ->
+            hover -> (OTO'da) GPS'e geri don.
+  Otomatik gecis (vis_mode=OTO): AUTO_VISUAL_HANDOFF + ard arda VIS_N_LOCK
+  gecerli tespit + handoff yakinligi. Manuel: set_vis_mode GPS/GORSEL zorlar.
 
 TASARIM TEZI (cevik hedefe dayaniklilik):
-  GNSS gecikme-baskin + ~29 m hata tabani. Bu yuzden FAZ 1 HEDEFI "kestirilen
-  noktaya hassas oturmak" DEGIL, "tespit yaricapina yaklasip devretmek"
-  (PROXIMITY). Manevra yapan hedefi kotu GNSS ile hassas kovalamak hem bosuna
-  hem salinim uretir; hassasiyet gorus/CV fazinin isidir.
-
-AKIS:
-  1. SDK'dan BOZUK hedef konumu al  -> J (inovasyonlu_j_v2) temizler (+2sn lead)
-  2. Kendi TEMIZ konumunu al (get_drone_location)
-  3. Bagil hatayi GOVDE cercevesine cevir -> PD ile yaklasma komutu uret
-  4. Tespit menziline (HANDOFF_RANGE) girince -> durum "KILIT" (gorus devralabilir)
-  5. Gorus/CV fazi [YAPILACAK]: _kamera_kontrol stub'i yerine YOLO baglanacak
-
-KULLANIM (gercek oyun):
-    import drone_sdk
-    from ana_kontrol import AvciKontrol
-    k = AvciKontrol(drone_sdk)
-    k.calistir()
-
-KULLANIM (test / web arayuz):
-    server.py beyin = AvciKontrol(drone) yapip 50 Hz beyin.adim() cagirir.
-    Manuel/pasif modda beyin._hedef_temizle() ile sadece J olcumu akar.
+  GNSS gecikme-baskin + ~29 m hata tabani. GPS fazinin HEDEFI "kestirilen
+  noktaya hassas oturmak" DEGIL, "tespit yaricapina yaklasip gorsel faza
+  devretmek" (PROXIMITY). Hassas terminal is gorsel fazin (PNG) isidir.
 
 >>> SIMDE DOGRULA (frame/birim/isaret) <<<
   - Konum birimi cm (filtre R=100, hiz_max=3000 -> cm; get_drone_speed cm/s).
   - get_drone_rotation DERECE dondurur (Cfg.ROT_IN_DEGREES=True).
   - Isaret yonleri yanlissa Cfg.PITCH_SIGN / ROLL_SIGN / YAW_SIGN cevir.
-    (Tuning sirasi: once SIGN/frame, sonra yaw, yatay KP, KD, hiz tavanlari.)
-
->>> KISIT: Asagidaki GAIN ve HIZ TAVANLARI sim'de elle tune edilecektir;
-    KP_H/KD_H/KP_Z/KD_Z/KP_YAW ve V_CAP_FAR/V_CAP_NEAR/BRAKE_DIST verili
-    baslangic degerleridir, kod entegrasyonunda DEGISTIRILMEZ.
 ================================================================================
 """
 import csv
@@ -88,9 +75,15 @@ _LOG_COLS = [
 
 
 # ==========================================================
-# CONFIG  (faz1_gnss_yaklasma'dan; gain/tavan degerleri AYNEN)
+# CONFIG — FAZ BANTLARINA AYRILMISTIR (hangi sabit hangi fazda calisir):
+#   [ORTAK]         : her fazda gecerli (birim/isaret/dongu/komut tavani/log)
+#   [GPS-YAKLASMA]  : YALNIZ durum != GORSEL_GUDUM iken (kalkis, standoff,
+#                     fren/speed_cap, PD, None yonetimi). Gorsel faza KARISMAZ.
+#   [GORSEL]        : kilit/kayip FSM'i + PNG carpisma rotasi (png_gorsel.py).
+# Canli-tune: web arayuzu /api/tune ile TUNE_ALLOW listesindekileri degistirir.
 # ==========================================================
 class Cfg:
+    # ================= [ORTAK] =================
     # --- BIRIM / FRAME / ISARET (SIMDE DOGRULA) ---
     ROT_IN_DEGREES = True       # get_drone_rotation derece dondururse True
     PITCH_SIGN = +1.0           # ileri hareket +pitch degilse -1
@@ -105,6 +98,7 @@ class Cfg:
     LOOP_HZ = 50.0
     DT = 1.0 / LOOP_HZ
 
+    # ================= [GPS-YAKLASMA] (durum != GORSEL_GUDUM) =================
     # --- KALKIS / ARAMA IRTIFASI ---
     SEARCH_ALT = 5000.0         # cm; arama irtifasi (TUNE). Kalkis ayrı katmanda ise TAKEOFF=False.
     TAKEOFF = True
@@ -148,7 +142,12 @@ class Cfg:
     VZ_MAX       = 3333.0       # cm/s; oyun max dikey hiz (120 km/h). Terminal 3D-carpmada
                                # throttle ~ (istenen dikey hiz)/VZ_MAX olceginde kullanilir.
 
-    # --- YAKLASMA HIZI PROFILI (overshoot guard) — DEGISTIRME ---
+    # --- YAKLASMA HIZI PROFILI / FRENLEME (overshoot guard) ---
+    # speed_cap(): hedefe BRAKE_DIST altinda yaklastikca hiz tavani V_CAP_FAR'dan
+    # V_CAP_NEAR'a kademeli iner; hiz tavani asilirsa pitch sonumlenir (fren).
+    # YALNIZ GPS-yaklasma fazinda calisir; gorsel fazda devrede DEGIL. Etkisi:
+    # gorsel handoff ANINDAKI hizi/geometriyi bu profil belirler (V_CAP_NEAR
+    # dusukse handoff yavas ama kontrollu baslar).
     V_CAP_FAR  = 2500.0         # cm/s uzakta (120km/h = 3333 cm/s'in altinda)
     V_CAP_NEAR = 500.0          # cm/s handoff yakininda
     BRAKE_DIST = 7000.0         # cm; bu mesafe altinda hizi kademeli dusur
@@ -216,6 +215,7 @@ class Cfg:
     HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (2 sn kesintilere bol marj)
     DROPOUT_TICKS = 300        # otesi: dropout -> loiter
 
+    # ================= [ORTAK] =================
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
     # True: ~2Hz konsola [Z] satiri basar. drone_z vs hedef irtifasi (filtre & GERCEK),
     # ez, thr, hiz, pitch. Sorun cozulunce False yap.
@@ -227,6 +227,7 @@ class Cfg:
     # gorsel-temas-kaybi teshisi yapar. Yarismada/uretimde False yap.
     LOG_ENABLE = True
 
+    # ================= [GORSEL] (kilit/kayip FSM + yasalar) =================
     # --- GORSEL GUDUM (DUZ IBVS) — gorsel temas SONRASI yonelim (YALNIZCA kamera) ---
     # Kilit: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec
     # ve BIR DAHA GPS'e donme (yarisma kurali). Isaret/gain'ler CANLI tune ile
@@ -322,7 +323,9 @@ def world_to_body(ex, ey, yaw_rad):
     return e_fwd, e_right
 
 def speed_cap(d_horiz):
-    """Mesafeye gore izin verilen yaklasma hizi tavani (cm/s)."""
+    """[GPS-YAKLASMA] Mesafeye gore yaklasma hizi tavani (cm/s) — FRENLEME profili.
+    adim() icinde hiz tavani asilirsa pitch sonumlenir. GORSEL fazda CALISMAZ
+    (adim gorsel yolda erken doner); handoff ANINDAKI hizi bu profil belirler."""
     if d_horiz >= Cfg.BRAKE_DIST:
         return Cfg.V_CAP_FAR
     t = d_horiz / Cfg.BRAKE_DIST                      # 0..1
@@ -856,8 +859,9 @@ class AvciKontrol:
                 # onceki tikte hesaplanir) VE YOLO kilidi (ard arda VIS_N_LOCK gecerli tespit).
                 # Ikisi birden saglaninca saldiri KAMERAYA devredilir; oncesinde GPS yaklasmaya
                 # devam eder (uzaktan yanlis-kilit yok).
-                # SIMDILIK KAPALI (Cfg.AUTO_VISUAL_HANDOFF=False): kilit+yakinlik saglansa
-                # bile GPS takibe DEVAM eder, gorsele gecmez. Manuel GORSEL switch etkilenmez.
+                # ACIK (Cfg.AUTO_VISUAL_HANDOFF=True, 2026-07-06): kilit+yakinlik saglaninca
+                # OTONOM olarak GORSEL_GUDUM'a gecilir (Ister 9/10 angajman zinciri).
+                # Manuel GORSEL/GPS switch bu bayraktan bagimsiz calisir.
                 if (Cfg.AUTO_VISUAL_HANDOFF
                         and self._vis_pos_count >= Cfg.VIS_N_LOCK and self.handoff):
                     self.durum = "GORSEL_GUDUM"
@@ -876,6 +880,10 @@ class AvciKontrol:
                 return
             # sonuc None (yalnizca OTO) -> gorsel UZUN kayip -> GPS yolu BU tik calisir
 
+        # ==================== [GPS-YAKLASMA YOLU] ====================
+        # Buradan asagisi YALNIZ durum != GORSEL_GUDUM iken calisir (gorsel yol
+        # yukarida return etti): None yonetimi, standoff nisan, PD, speed_cap/
+        # fren, alcalma onceligi, dikey PID, yaw. Gorsel guduume KARISMAZ.
         # 3) None yonetimi: normal donmus kare (hold) vs dropout (loiter)
         if not self._fresh:
             self.none_count += 1
