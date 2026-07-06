@@ -3,9 +3,9 @@
 ================================================================================
 HAKEM ISTEMCI — kilit paketi + telemetri gonderimi (YARISMA PIPELINE FAZ 3 stub)
 ================================================================================
-Sim'de gercek hakem sunucusu YOK -> dosyaya/loga yazar. Amac: FSM'deki
+Sim'de canli bir hakem sunucusu YOK -> dosyaya/loga yazar. Amac: FSM'deki
 kilit -> bildir -> angajman SIRALAMASINI kodda somutlastirmak; yarisma gunu
-gercek istemci AYNI arayuze takilir (kod degismez).
+sahadaki istemci AYNI arayuze takilir (kod degismez).
 
 Sozlesme (yarisma sunucusu bunlari bekler; buradaki imza sabit tutulur):
   kilit_paketi_gonder(t, konum, kilit_durumu) -> +400 garanti altina alinir

@@ -3,7 +3,7 @@
 ================================================================================
 MODEL YONETICI — models/ registry + thread-safe hot-swap + canli metrikler
 ================================================================================
-(master_prompt_model_yonetimi.md). Amac: models/ altina .pt atinca KOD
+(docs/master_prompt_model_yonetimi.md). Amac: models/ altina .pt atinca KOD
 DEGISIKLIGI OLMADAN arayuzde gorunsun, ucus/test sirasinda takilip cikarilsin,
 performansi canli izlensin, CSV'ye loglansin. Kotu detection + kotu pose'lar +
 gelecek yeniler kiyaslanabilsin (yeni modelin hedefini SAYIYLA koyar).

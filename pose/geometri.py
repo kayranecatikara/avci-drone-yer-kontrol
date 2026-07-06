@@ -26,7 +26,7 @@ _KP_JSON = os.path.join(_BURADA, "talon_keypoints.json")
 #   - SAHA VERISI (3 Tem, best.pt kalibrasyonu): ~15-25 derece YUKARI tilt VAR
 #     (tilt=0 veriyle celisiyor). Kesin deger latency'den bulanik; pose/kalibre.py
 #     TEMIZ (yavas) kayittan olcecek. Simdilik SDK degeri 25 placeholder.
-KAMERA_TILT_DEG = 25.0     # YUKARI tilt/pitch (deg) — UNCONFIRMED placeholder; kalibre.py netleştirir
+KAMERA_TILT_DEG = 25.0     # YUKARI tilt/pitch (deg) — detection/kamera_model.TILT_DEG ile ESIT tutulmali; kalibre.py netleştirir
 KAMERA_TILT_YAW_DEG = 0.0  # kamera montaj YAW ofseti (deg) — kalibre.py olcerse doldurulur
 KAMERA_TILT_ROLL_DEG = 0.0 # kamera montaj ROLL ofseti (deg)
 KAMERA_HFOV_DEG = 125.0    # YATAY FOV (kullanici teyidi) -> fx = (W/2)/tan(HFOV/2)

@@ -44,7 +44,7 @@ import numpy as np
 
 # --- Platform sabitleri (SDK v0.0.5; oyuna gomulu, degistirilemez) ---
 HFOV_DEG = 125.0     # YATAY gorus alani (derece)
-TILT_DEG = 25.0      # kamera montaj tilti: burun ekseninin ustu (pitch-up, derece)
+TILT_DEG = 25.0      # kamera montaj tilti: burun ekseninin ustu (pitch-up, derece) — pose/geometri.KAMERA_TILT_DEG ile esit tutulmali
 
 
 # ----------------------------------------------------------------------------

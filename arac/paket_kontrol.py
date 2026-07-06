@@ -47,7 +47,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 _PROJ_ROOT = os.path.dirname(_HERE)
 
 # --- Paket icerigi (teslim .zip'ine girecekler) ---
-PAKET_KOKLERI = ["detection", "guidance", "fusion", "web", "sdk", "models"]
+PAKET_KOKLERI = ["detection", "guidance", "fusion", "iletisim", "web", "sdk", "models"]
 # MERGE 2026-07-06: pose KOSU-ZAMANI kalemleri pakete girer —
 # detection/talon_pose_estimator 'berat_json' semasini pose/talon_keypoints.json
 # + pose/poz_cozucu (EGITIM_SIRASI/MESH_PIVOT) uzerinden kurar; bu uc dosya +
@@ -60,7 +60,11 @@ PAKET_DOSYALAR = ["main.py", "config.py", "README.md", "requirements.txt",
                   os.path.join("pose", "geometri.py"),
                   os.path.join("pose", "talon_keypoints.json")]
 # Dev modul: pakete HIC girmez (madde a)
-PAKET_HARIC = {os.path.join("web", "dev_truth.py")}
+# SDK_README.md: resmi VERILI dokuman (2026-07-06'da kok -> sdk/ tasindi); teslim
+# zorunlu kalemi degildir ve icindeki "gercek..." metinleri taramaya takilir ->
+# drone_sdk.py istisnasindan farkli olarak PAKETE DE ALINMAZ (eski davranisla ayni).
+PAKET_HARIC = {os.path.join("web", "dev_truth.py"),
+               os.path.join("sdk", "SDK_README.md")}
 # Paket koklerinde bile atlanacaklar (calisma ciktisi/cop)
 ATLA_UZANTI = {".pyc", ".log", ".csv", ".png", ".jpg", ".jpeg", ".zip"}
 ATLA_DIZIN = {"__pycache__"}
@@ -249,6 +253,12 @@ def zorunlu_icerik_denetimi(dosyalar):
 
 
 def main():
+    # Windows konsolu (cp1254) emoji/ozel karakter iceren bulgu satirlarinda
+    # UnicodeEncodeError ile cokuyordu -> rapor UTF-8/replace ile her ortamda basilir.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except AttributeError:
+        pass
     ap = argparse.ArgumentParser(description="Teslim paketi temizlik kontrolu")
     ap.add_argument("--zip", action="store_true",
                     help="tarama temizse teslim zip'ini olustur (veri/ altina)")
@@ -264,7 +274,7 @@ def main():
     print("=" * 68)
     print(" paket icerigi   : %d dosya (%s + %s)"
           % (len(dosyalar), ", ".join(PAKET_KOKLERI), ", ".join(PAKET_DOSYALAR)))
-    print(" dislanan        : %s (dev modul; pakete girmez)"
+    print(" dislanan        : %s (dev modul + resmi SDK dokumani; pakete girmez)"
           % ", ".join(sorted(PAKET_HARIC)))
     print(" cit sokumu      : %s"
           % ("; ".join("%s -> %d blok silindi" % kv for kv in sorted(cit_bilgi.items()))

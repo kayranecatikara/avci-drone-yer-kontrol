@@ -134,12 +134,13 @@ def ue_rot_matrix(pitch, yaw, roll):
     return np.column_stack([fwd, right, up])
 ```
 
-**Kamera pozu** = drone pozu; kamera **dümdüz ileri bakar** (kullanıcı teyidi, Tem 2026 —
-SDK_README'deki "25° yukarı tilt" bilgisi YANLIŞ/ESKİ çıktı; `geometri.KAMERA_TILT_DEG=0`):
+**Kamera pozu** = drone pozu; kamera **25° YUKARI tilt'lidir** (saha bulgusu 3 Tem, bkz.
+Faz 1 notu — ilk "tilt yok" kullanıcı teyidi YANLIŞ çıktı, SDK_README doğrulandı;
+`geometri.KAMERA_TILT_DEG=25`):
 
 ```python
 R_drone = ue_rot_matrix(pitch=p, yaw=y, roll=r)      # SDK: r,p,y = get_drone_rotation()
-R_cam   = R_drone @ ue_rot_matrix(TILT, 0.0, 0.0)    # TILT=0 (duz); kapida dikey kayma cikarsa yeniden bakilir
+R_cam   = R_drone @ ue_rot_matrix(TILT, 0.0, 0.0)    # TILT=25 (yukari); kesin deger pose/kalibre.py ile netlesir
 cam_pos = np.array(drone_pos)                        # kamera ofseti ~0 varsay (kapida dogrulanir)
 ```
 
@@ -194,8 +195,9 @@ gövde |kp0 − kp5| = 108.7 cm (~110). `python pose/geometri.py` 6 işaret test
 - **AM = telemetri pivotu mu?** Kullanıcı: `get_target_location()` = ağırlık merkezi (AM) =
   keypoint origin. Doğruysa noktalar tam oturur. Sabit bir kayma görülürse pivot≠AM →
   tüm keypoint'lere **tek gövde-frame ofset vektörü** eklenir (tek satır düzeltme; bu yüzden
-  JSON'da ham tablo da saklı). Tilt=0 varsayımı da burada teyit olur (SDK_README'nin "25°
-  tilt" bilgisi kullanıcı teyidiyle YANLIŞ çıktı; noktalar sistematik DİKEY kayarsa tilt'e geri bakılır).
+  JSON'da ham tablo da saklı). Tilt=25° değeri de burada teyit olur (ilk "tilt=0" kullanıcı
+  teyidi saha verisiyle YANLIŞ çıktı — bkz. Faz 1 notu; noktalar sistematik DİKEY kayarsa
+  tilt pose/kalibre.py ile yeniden ölçülür).
 
 **Kapı patlarsa (opsiyonel `fov_kalibre.py`):** 3D model artık BİLİNDİĞİ için ~10 karede
 noktaları elle tıklayıp reprojeksiyon hatasını minimize eden tilt+pivot ofsetini çöz —
@@ -343,7 +345,7 @@ CLAUDE.md ilkesine uygun: mevcut sistemi bozmadan, ayrı modül + anahtar.
 - `web/server.py` dedektör döngüsünde pose modeli varsa onu kullan; overlay'e
   noktalar + iskelet + **"MESAFE (KAMERA): 14.2 m / HEDEF YAW: 213°"** rozetini ekle
   (video kanıtı için altın değerinde).
-- `guidance/ana_kontrol.py`: GORSEL_GUDUM fazında kamera-mesafesi angajman kararlarına
+- `guidance/ana_kontrol.py`: GORSEL_TAKIP fazında kamera-mesafesi angajman kararlarına
   (dalış zamanlaması), hedef yaw'ı lead öngörüsüne beslenebilir — GNSS bağımlılığı
   görünür şekilde azalır.
 - FPS: yolo11s-pose @1280, RTX sınıfı GPU'da 60+ FPS; sorun olursa `imgsz` düşür

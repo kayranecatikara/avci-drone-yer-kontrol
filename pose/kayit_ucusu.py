@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ================================================================================
- POSE VERI TOPLAMA UCUSU  (Faz 1 — bkz. POSE_REHBERI.md)
+ POSE VERI TOPLAMA UCUSU  (Faz 1 — bkz. docs/POSE_REHBERI.md)
 ================================================================================
 Amac: YOLO-pose egitimi icin HAM veri toplamak: oyun karesi (PNG) + o anin tam
 telemetrisi (JSONL). Etiket URETMEZ — etiketleme sonradan pose/etiketle.py'de
@@ -494,7 +494,7 @@ def calistir(args):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Pose veri toplama ucusu (Faz 1) — bkz. POSE_REHBERI.md")
+        description="Pose veri toplama ucusu (Faz 1) — bkz. docs/POSE_REHBERI.md")
     ap.add_argument("--cikti", default=r"C:\talon_pose_data\ham",
                     help=r"cikti koku (vars: C:\talon_pose_data\ham; OneDrive'a KOYMA)")
     ap.add_argument("--dakika", type=float, default=10.0,

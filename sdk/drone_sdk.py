@@ -13,7 +13,7 @@ Kendi AI mantığınızı, bu SDK'daki 'get_' fonksiyonları ile telemetri alıp
 Platform sabitleri (oyun içine gömülü, değiştirilemez):
     * Kamera: 25° yukarı tilt, 125° FOV
     * Hedef Talon İHA: kanat açıklığı 1718 mm, gövde uzunluğu 1100 mm
-    * Hedef GPS telemetrisi: en fazla 1 Hz (saniyede 1 güncelleme)
+    * Hedef GPS telemetrisi: 5 Hz (saniyede 5 güncelleme; sim v0.0.5 — eski sürümlerde 1 Hz idi)
 
 Örnek Kullanım:
     import drone_sdk as drone
@@ -52,7 +52,7 @@ CORRUPTION_FLAGS = [
     (FLAG_OFFSET,     "Sabit offset (kayma)"),
     (FLAG_JUMP,       "Ani ziplama (spike)"),
     (FLAG_DROPOUT,    "Veri kesintisi (dropout)"),
-    (FLAG_RATELIMIT,  "Guncelleme hizi siniri (max 1 Hz)"),
+    (FLAG_RATELIMIT,  "Guncelleme hizi siniri (nominal 5 Hz)"),
     (FLAG_DELAY,      "Gecikmeli veri"),
 ]
 
@@ -193,7 +193,7 @@ class _DroneInternal:
                     line, buffer = buffer.split("\n", 1)
                     if line: self._parse_telemetry(line)
             except socket.timeout:
-                # Hedef GPS telemetrisi 1 Hz'e kadar yavaş olabilir veya geçici olarak kesilebilir (dropout).
+                # Hedef GPS telemetrisi yavaş gelebilir (nominal 5 Hz) veya geçici olarak kesilebilir (dropout).
                 # Bu durumda bağlantıyı KOPARMA; en son bilinen telemetri korunur, beklemeye devam et.
                 continue
             except Exception:
@@ -356,7 +356,7 @@ def get_active_corruption():
 
 # --- ÖNEMLİ NOT (GERÇEKÇİ SENSÖR DAVRANIŞI) ------------------------------------
 # Telemetri verisi gerçek bir GPS/sensör gibi davranabilir:
-#   * Hedef (Talon) konum/hız telemetrisi en fazla 1 Hz güncellenir.
+#   * Hedef (Talon) konum/hız telemetrisi 5 Hz güncellenir (sim v0.0.5; eski sürümlerde 1 Hz idi).
 #   * Kendi dron telemetrisi tam hızda ve temiz gelir.
 #   * Konum/hız değerleri bir miktar gürültü, sabit kayma veya ani sıçrama içerebilir.
 #   * Veri kısa süreliğine kesilebilir; bu sırada 'get_' fonksiyonları SON bilinen

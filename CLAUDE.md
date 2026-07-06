@@ -30,7 +30,7 @@ resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
   `poz_cozucu.py`+`geometri.py`+`talon_keypoints.json` uçuş hattı sayılır ve
   truth-izsiz tutulur/paketlenir; pose/'un kalan scriptleri uçuş dışıdır,
   paketlenmez.)
-- **Uçuş pipeline'ı (`detection/`, `guidance/`, `fusion/`, `web/`, `main.py`)
+- **Uçuş pipeline'ı (`detection/`, `guidance/`, `fusion/`, `iletisim/`, `web/`, `main.py`)
   truth'a erişemez:** import, çağrı, yorum, log dizesi dahil hiçbir iz
   bulunamaz. TEK istisna biçimi: `web/server.py` ve `web/index.html` içinde
   `>>> DEV-ONLY >>> ... <<< DEV-ONLY <<<` işaretçileriyle ÇİTLENMİŞ bağlantı
@@ -41,8 +41,8 @@ resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
   olması bizim kullanmamız değildir.)
 - **DEV hedef-kaynağı bir GÜDÜM modu değil KAYNAK seçicisidir:**
   `AvciKontrol.set_hedef_kaynagi` dikişine bağlanır; yalnızca midcourse
-  (ARAMA/TAKIP) beslemesini değiştirir, OTO/GPS/GÖRSEL anahtarına ve
-  GORSEL_GUDUM sonrasına dokunmaz. GERÇEK (DEV) aktifken arayüzde kırmızı
+  (ARAMA/YAKLASMA) beslemesini değiştirir, OTO/GPS/GÖRSEL anahtarına ve
+  GORSEL_TAKIP sonrasına dokunmaz. GERÇEK (DEV) aktifken arayüzde kırmızı
   bant çıkar; uçuş CSV'sine `hedef_kaynak` (filtre/gercek) yazılır.
 - **Truth kullanan her scriptin başına şerh:** "GELİŞTİRME/DOĞRULAMA ARACI —
   görev uçuşunda ve değerlendirme koşusunda kullanılmaz."
@@ -51,7 +51,7 @@ resmî SDK'nın debug alanları) yalnızca GELİŞTİRME/DOĞRULAMA içindir:
 
 ## TESLİM PAKETİ KURALI
 Yarışmaya gidecek kod paketi = uçuş pipeline'ı (`main.py`, `detection/`,
-`guidance/`, `fusion/`, `web/`, `sdk/`, `models/`, requirements, README
+`guidance/`, `fusion/`, `iletisim/`, `web/`, `sdk/`, `models/`, requirements, README
 + pose koşu-zamanı üçlüsü: `pose/poz_cozucu.py`, `pose/geometri.py`,
 `pose/talon_keypoints.json` [PnP 3B tablo tek kaynağı] ve `pose/__init__.py`).
 `arac/` altındaki geliştirme scriptleri, pose/'un kalan araçları ve
@@ -67,19 +67,19 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 1. Bozuk GNSS'i optimize et (İnovasyonlu J ile temizle + hedef hızını kestir).
 2. Araca yönel (öngörülü/lead yönelim — hedefin gideceği yere nişan al).
 3. Hedefle **kesintisiz, düzgün görsel temas** kur (kamera FOV'unda merkezde tut).
-4. Görsel güdüm fazına (YOLO/CV) temiz devret (ARAMA→KILIT). Terminal vuruş görsel fazın işi.
+4. Görsel güdüm fazına (YOLO/CV) temiz devret (YAKLASMA→GORSEL_TAKIP devri). Terminal vuruş görsel fazın işi.
 
 ## SİSTEM MİMARİSİ (modül → şartname teslim eşlemesi)
 - `drone_sdk.py`        → simülasyon I/O (input/telemetri); şartname "input.py" muadili.
 - `inovasyonlu_j_v2.py` → sensör füzyonu / filtreleme / tahmin (GNSS temizleme + hız kestirimi).
-- `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + ARAMA→KILIT FSM).
+- `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + FSM: ARAMA→YAKLASMA→görsel fazlar).
 - `server.py`+`index.html` → görev arayüzü, telemetri, bozuk-GNSS görünürlüğü (video
   çıktıları). MERGE 2026-07-06: bizim arayüz BAZ; main'in kullanışlı ekleri (sahte
   tespit modu, poz gözlemci paneli vb.) bizim hatta taşınarak entegre edilir.
 - [FAZ 1-4 KOD TAMAM] görsel pipeline: `detection/` (kamera_model, takip=ByteTrack+gyro-CMC,
   algi_hatti, talon_pose_estimator=PnP, model_yonetici=registry) + `guidance/` (kilit_kurali
-  §6.1.4, gudum_yasasi APN+OIPN) + `iletisim/hakem_istemci`. FSM: ARAMA→TAKIP→GORSEL_GUDUM→
-  KILIT_BILDIR→ANGAJMAN. **Pose'suz TAM çalışır** (PnP/OIPN otomatik pasif → IBVS fallback;
+  §6.1.4, gudum_yasasi APN+OIPN) + `iletisim/hakem_istemci`. FSM: ARAMA→YAKLASMA→GORSEL_TAKIP→
+  KILIT_BILDIR→ANGAJMAN (adlar `arac/fsm_adlari.py` tek kaynağıyla uyumlu). **Pose'suz TAM çalışır** (PnP/OIPN otomatik pasif → IBVS fallback;
   regresyon: OIPN kapalı+pose'suz = eski hat birebir). ~91 birim testi. Sim borçları +
   "iyi model geldiğinde" runbook MEVCUT_DURUM'da. Teslim .zip bu modülleri + model .pt içerir.
 - MERGE 2026-07-06 (main→yarisma-pipeline): GPS güdümünde İKİ PROFİL bayrakla yaşar

@@ -8,7 +8,11 @@ Bu repo (avci-drone-yer-kontrol) TEKNOFEST avcı drone yer kontrol yazılımı. 
 
 **Sürüm notu (sim/SDK v0.0.5):** kamera tilt **25° yukarı** (v0.0.4'teki 0° geri alındı — FPV kamera burnu 25° yukarı eğik bakar), FOV **125° yatay (HFOV — convention netleşti)**, hedef GPS **5 Hz**, dropout 30. sn'den sonra her 10 sn'de 2 sn, gecikme değişken ve açıklanmıyor. Uçuş modeli Angle Mode: maks yatış 60°, toplam hız 120 km/h (dalışta aşılabilir), throttle dikey komut.
 
-**Başlamadan önce oku:** `CLAUDE.md`, `MEVCUT_DURUM.md`, `SDK_README.md` (v0.0.5 uçuş modeli, tilt, telemetri davranışı), `web/server.py`, `detection/gorsel_tespit.py`, `guidance/ana_kontrol.py`, `guidance/ibvs_guidance.py`, `sdk/drone_sdk.py` (attitude telemetrisinin alanları için), `web/index.html`. Mevcut convention'lara (Türkçe isimlendirme, Cfg deseni, thread yapısı) uy.
+> **SONUÇ NOTU (2026-07-06):** Bu spec büyük ölçüde UYGULANDI (tarihî belge). FSM durum
+> adları kodda sonradan yeniden adlandırıldı: `TAKIP`→`YAKLASMA`, `GORSEL_GUDUM`→`GORSEL_TAKIP`
+> (tek kaynak: `arac/fsm_adlari.py`); aşağıdaki tarihî adlar koda birebir uymaz.
+
+**Başlamadan önce oku:** `CLAUDE.md`, `MEVCUT_DURUM.md`, `sdk/SDK_README.md` (v0.0.5 uçuş modeli, tilt, telemetri davranışı), `web/server.py`, `detection/gorsel_tespit.py`, `guidance/ana_kontrol.py`, `guidance/ibvs_guidance.py`, `sdk/drone_sdk.py` (attitude telemetrisinin alanları için), `web/index.html`. Mevcut convention'lara (Türkçe isimlendirme, Cfg deseni, thread yapısı) uy.
 
 ---
 

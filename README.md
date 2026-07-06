@@ -14,7 +14,7 @@ Oyun (Unreal, TCP 127.0.0.1:12345)
 sdk/drone_sdk.py ──► web/server.py ◄── detection/ (pencere yakalama + tespit)
                         │                                   ▲ oyun penceresi karesi
                         ├─ fusion/inovasyonlu_j_v2.py  (GNSS temizleme + hız kestirimi)
-                        ├─ guidance/ana_kontrol.py     (GPS yaklaşma + GORSEL_GUDUM FSM)
+                        ├─ guidance/ana_kontrol.py     (GPS yaklaşma + GORSEL_TAKIP FSM)
                         ├─ guidance/ibvs_guidance.py   (bbox → angle-mode komut)
                         └─ web sunucusu ──► web/index.html (tarayıcı arayüzü, :8000)
 ```
@@ -45,7 +45,7 @@ Drive klasörü: **https://drive.google.com/drive/folders/1-7t80jf5uW446tsSB3JQX
 |---|---|---|
 | `Drones of War Teknofest` (zip) | Zip'i **repo kökünde** `Drones of War Teknofest` klasörü olacak şekilde çıkart → `avci-drone-yer-kontrol\Drones of War Teknofest\DronesOfWar.exe` | Klasör adı birebir böyle kalmalı (`1_Oyunu_Baslat.bat` ve pencere yakalama buna göre). Git'e girmez (gitignore'lu). |
 | `drone_sdk.py` | `sdk\drone_sdk.py` **üzerine yaz** | Repo zaten v2.2 içerir; Drive'da daha yeni sürüm yayınlanırsa güncelle. |
-| `README.md` (resmi SDK dokümanı) | `SDK_README.md` **üzerine yaz** | ⚠️ Repo kökündeki `README.md`'nin (bu dosyanın) üzerine YAZMA! |
+| `README.md` (resmi SDK dokümanı) | `sdk\SDK_README.md` **üzerine yaz** | ⚠️ Repo kökündeki `README.md`'nin (bu dosyanın) üzerine YAZMA! |
 
 ### 3) Python paketlerini kur
 **GPU'n varsa (önerilen)** — önce CUDA'lı torch, sonra kalanlar:
@@ -94,9 +94,10 @@ Son komut `best.pt siniflari (model.names): {0: 'talon'}` yazmalı.
 | **Orta** | FPV (Görüntüyü Bağla → oyun penceresi) + overlay: hedef bbox'ı, görüntü merkezi `+`, **turuncu REF çizgisi** (25° kamera tilt telafisi), ex/ey/conf, durum, **"GPS GÜDÜMÜ: KAPALI/AÇIK" rozeti** |
 | **Sağ** | Telemetri (avcı + hedef), İnovasyonlu J durumu, irtifa/Z ve mesafe göstergeleri |
 
-**Güdüm akışı:** ARAMA (GPS yaklaşma) → best.pt hedefi 5 ardışık karede görünce
-**GORSEL_GUDUM** (GPS yönelimi mimari olarak kesilir; yönelim yalnızca kamera) →
-hedef ~1.5 sn kaybedilirse GPS'e geri döner ve yeniden yakalar (OTO modda).
+**Güdüm akışı (FSM):** ARAMA → YAKLASMA (GPS yaklaşma) → hedef görsel olarak
+doğrulanınca **GORSEL_TAKIP** (GPS yönelimi mimari olarak kesilir; yönelim yalnızca
+kamera) → KILIT_BILDIR → ANGAJMAN. Hedef kaybedilirse GPS'e geri döner ve
+yeniden yakalar (OTO modda).
 
 ---
 
@@ -141,7 +142,7 @@ kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde ortalama/en kötü
 | `main.py` | Giriş noktası — **tek başlatma komutu:** `python main.py` |
 | `sdk/drone_sdk.py` | Resmi yarışma SDK'sı (v2.2; TCP telemetri/kontrol) |
 | `fusion/inovasyonlu_j_v2.py` | GNSS temizleme + hedef hız kestirimi (CT-EKF) |
-| `guidance/ana_kontrol.py` | Güdüm beyni: GPS yaklaşma, GORSEL_GUDUM FSM, Cfg (tüm ayarlar) |
+| `guidance/ana_kontrol.py` | Güdüm beyni: GPS yaklaşma, FSM (ARAMA→YAKLASMA→GORSEL_TAKIP→KILIT_BILDIR→ANGAJMAN), Cfg (tüm ayarlar) |
 | `guidance/ibvs_guidance.py` | DÜZ IBVS: bbox merkezi → throttle/pitch/roll/yaw |
 | `detection/gorsel_tespit.py` | YOLO best.pt sarmalayıcı (en yüksek conf bbox) |
 | `detection/pencere_yakala.py` | Oyun penceresi içeriği yakalama (occlusion-proof FPV) |
@@ -150,7 +151,8 @@ kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde ortalama/en kötü
 | `arac/` | Bağımsız analiz araçları (`analiz_ucus.py`: uçuş logu teşhisi) |
 | `veri/` | Çalışma çıktıları (loglar) — otomatik oluşur, git'e girmez |
 | `arsiv/` | Eski sürümler (referans) |
-| `SDK_README.md` | Resmi SDK dokümanı (birimler, angle-mode, bozulma türleri) |
+| `sdk/SDK_README.md` | Resmi SDK dokümanı (birimler, angle-mode, bozulma türleri) |
+| `docs/` | Rehberler + karar dokümanları (TUNE_REHBERI, POSE_REHBERI, TAKIP_NASIL_CALISIR, video anlatım kartları) |
 | `1_Oyunu_Baslat.bat` / `2_Arayuzu_Baslat.bat` | Tek tıkla başlatıcılar |
 
 ---
@@ -191,9 +193,9 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
      (Klasör adını değiştirme; zip içinden çift-klasör çıkarsa düzelt. Bu klasör
      .gitignore'dadır, commit edilmez.)
    - drone_sdk.py dosyasını sdk\drone_sdk.py ÜZERİNE kopyala.
-   - README.md dosyasını (resmi SDK dokümanı) SDK_README.md ÜZERİNE kopyala.
+   - README.md dosyasını (resmi SDK dokümanı) sdk\SDK_README.md ÜZERİNE kopyala.
      ÇOK ÖNEMLİ: repo kökündeki README.md'nin üzerine YAZMA — o proje dokümanıdır.
-     Kopyalamadan önce/sonra "git status" ile yalnız sdk/drone_sdk.py ve SDK_README.md'nin
+     Kopyalamadan önce/sonra "git status" ile yalnız sdk/drone_sdk.py ve sdk/SDK_README.md'nin
      değiştiğini doğrula; README.md değiştiyse "git checkout -- README.md" ile geri al.
 
 4) PYTHON PAKETLERİ
@@ -242,7 +244,7 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
    doğrulama sonuçları, oyun bağlantısı ve FPV durumu, arayüzü nasıl başlatacağım.
    Sonraki adımlar için beni yönlendir: ilk uçuş kalibrasyonu README'nin
    "İlk uçuş kalibrasyonu" bölümünde (VIS_EY_REF turuncu çizgi + işaretler);
-   GPS güdüm parametre ayarı için repodaki TUNE_REHBERI.md dosyası.
+   GPS güdüm parametre ayarı için repodaki docs/TUNE_REHBERI.md dosyası.
 ```
 
 ---

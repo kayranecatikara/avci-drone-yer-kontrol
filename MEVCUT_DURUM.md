@@ -58,7 +58,7 @@
 
 > **🔔 FAZ 1-4 KOD TAMAM (2026-07-04): pipeline uçtan uca kurulu, pose'suz TAM çalışır.**
 > takip (ByteTrack+gyro-CMC) → PnP → APN/OIPN → kilit_kurali (§6.1.4, kaçak toleransı
-> dahil) → FSM (ARAMA→TAKIP→GORSEL_GUDUM→KILIT_BILDIR→ANGAJMAN) → hakem stub → FAZ 4
+> dahil) → FSM (ARAMA→YAKLASMA→GORSEL_TAKIP→KILIT_BILDIR→ANGAJMAN) → hakem stub → FAZ 4
 > arayüz (kilit sayacı+AV çerçevesi+HEDEF GNSS rozeti+OIPN slider+CSV). **~91 birim testi.**
 > Regresyon kuralı kanıtlı: OIPN kapalı + pose'suz = mevcut IBVS birebir.
 >
@@ -89,7 +89,7 @@
 > sonuç tablosunu doldurur. **Kullanıcı rolü: yalnız "hazır" + (gerekirse) PLAY/FLY/E.**
 >
 > 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
->    İzle: FSM durumu ARAMA→TAKIP ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
+>    İzle: FSM durumu ARAMA→YAKLASMA ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
 >    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).
 >    **10 kalem tek kadrajda okunuyor mu → `docs/video_prova_kontrol.md` kontrol listesini
 >    işaretle** (özellikle kalem 7 kayıp/yeniden-tespit banner'ı, kalem 8 güdüm komutu, kalem
@@ -106,7 +106,10 @@
 >
 > ## 🏋️ EĞİTİM ZİNCİRİ (PLAN modundan çıkışa hazır; `arac/egitim/`)
 > **Dataset nereye:** ultralytics pose formatı (images/ + labels/ + data.yaml). data.yaml'da
-> **kpt_shape [6,3], flip_idx [0,1,3,2,5,4]** (sol/sağ çift!), names: talon, train/val yolları.
+> **kpt_shape [6,3], flip_idx [0,1,3,2,5,4]** (sol/sağ çift! — DİKKAT: bu değer YENİ eğitim
+şeması sırasına aittir [burun, kuyruk_ucu, sol/sag_vtail, sol/sag_kanat; `arac/egitim/dataset_dogrula.py
+BEKLENEN_SIRA`]; `pose/talon_keypoints.json`'daki berat_json sırasının flip_idx'i **[0,2,1,4,3,5]**'tir,
+iki sırayı KARIŞTIRMA), names: talon, train/val yolları.
 > **Komut (sırayla):**
 > ```
 > python arac/egitim/dataset_dogrula.py <data.yaml>        # kpt/flip/split kapısı; KRİTİK hata->eğitme
@@ -440,7 +443,7 @@ Bunlar yarışma kurallarından ve `CLAUDE.md`'den gelir; ihlal edilmez:
 
 **GPS güdümünün rolü (net sınır):** GPS güdümü **öldürücü faz DEĞİLDİR.** Görevi:
 (1) bozuk GNSS'i temizlemek + hedef hızını kestirmek, (2) araca öngörülü yönelmek (lead),
-(3) hedefle **kesintisiz görsel temas** kurmak, (4) görsel faza (YOLO/CV) **temiz devretmek** (ARAMA→KILIT).
+(3) hedefle **kesintisiz görsel temas** kurmak, (4) görsel faza (YOLO/CV) **temiz devretmek** (YAKLASMA→GORSEL_TAKIP devri).
 Terminal vuruş asıl olarak **görsel fazın** işidir.
 
 ---
@@ -451,7 +454,7 @@ Terminal vuruş asıl olarak **görsel fazın** işidir.
 |---|---|---|---|
 | `sdk/` | `drone_sdk.py` | Simülasyon I/O: oyunla TCP telemetri/kontrol. **Resmî yarışma SDK'sı (v2.2)** — bizim yazmadığımız, verilen dosya. | ✅ Hazır (verili) |
 | `fusion/` | `inovasyonlu_j_v2.py` | Sensör füzyonu: **GNSSDuzeltici** (CT-EKF) — bozuk GPS'i temizler + hedef hızını kestirir (+2 sn lead). **Tek üretim filtremiz.** | ✅ Çalışıyor |
-| `guidance/` | `ana_kontrol.py` | **Beyin.** `AvciKontrol`: ARAMA→KILIT→GORSEL_GUDUM FSM, PD yaklaşma, terminal vuruş, handoff, uçuş logu. | ✅ Çalışıyor, ⚙️ sim-tune bekliyor |
+| `guidance/` | `ana_kontrol.py` | **Beyin.** `AvciKontrol`: ARAMA→YAKLASMA→GORSEL_TAKIP FSM (eski adlar KILIT/GORSEL_GUDUM; bkz. `arac/fsm_adlari.py`), PD yaklaşma, terminal vuruş, handoff, uçuş logu. | ✅ Çalışıyor, ⚙️ sim-tune bekliyor |
 | `guidance/` | `ibvs_guidance.py` | **Görsel güdüm (düz IBVS):** bbox merkez hatası → angle-mode komut (yaw/throttle/pitch). | ✅ Yazıldı, ⚙️ canlı kalibrasyon bekliyor |
 | `detection/` | `gorsel_tespit.py` | **YOLO tespit:** `best.pt` inference sarmalayıcı; bir kareden en yüksek-conf bbox'ı döner. | ✅ Bağlı |
 | `detection/` | `pencere_yakala.py` | **Occlusion-proof FPV:** oyun penceresinin İÇERİĞİNİ yakalar (pencere arkada olsa bile doğru kare). | ✅ Çalışıyor |
@@ -465,9 +468,9 @@ Terminal vuruş asıl olarak **görsel fazın** işidir.
 | `arsiv/` | `inovasyonlu_j_v1.py`, `inovasyonlu_j_v2_4.py`, `avci_fsm/guidance/main ÜSTEN DALIŞ.py` | **[ODAK DIŞI]** Eskiden yazılmış, yedek olarak tutulan silinmemiş kodlar (eski J sürümleri + eski "üstten dalış" FSM/güdüm/main). Üretimde kullanılmaz. | Yedek |
 | kök | `main.py` | Tek giriş noktası: `from web.server import main`. `python main.py` → `http://127.0.0.1:8000`. | ✅ Çalışıyor |
 | kök | `README.md` | Proje genel tanıtımı + kurulum/çalıştırma özeti (teslim `.zip` içinde de gider). | ✅ Var |
-| kök | `SDK_README.md` | Resmî yarışma SDK'sının (v2.2) API/kullanım dokümanı — SDK ile birlikte verilen referans. | ✅ Var (verili) |
+| `sdk/` | `SDK_README.md` | Resmî yarışma SDK'sının (v2.2) API/kullanım dokümanı — SDK ile birlikte verilen referans (2026-07-06: kökten `sdk/` altına taşındı). | ✅ Var (verili) |
 | kök | `CLAUDE.md` | Değişmez çalışma kuralları (Kural 1–8); bu belge onun üstüne güncel durumu koyar. | ✅ Var |
-| kök | `requirements.txt` | Python bağımlılıkları (numpy, mss, Pillow, pygetwindow, ultralytics, opencv-python, windows-capture). | ✅ Var |
+| kök | `requirements.txt` | Python bağımlılıkları (numpy, mss, Pillow, pygetwindow, ultralytics, opencv-python; windows-capture bilinçli KAPALI/yorum satırında). | ✅ Var |
 | kök | `1_Oyunu_Baslat.bat`, `2_Arayuzu_Baslat.bat` | Çalıştırma kısayolları: oyunu aç / arayüzü (`python main.py`) başlat (bkz. §7). | ✅ Var |
 | kök | `MEVCUT_DURUM.md` | **Bu belge** — güncel durum brifingi. | ✅ Var |
 | kök | `.gitignore`, `.gitattributes`, `.claude/settings.local.json` | Repo/araç konfigürasyonu: yok sayılanlar (oyun dosyaları, büyük modeller, `veri/`), git öznitelikleri, Claude Code yerel izinleri. | Config |
@@ -488,7 +491,7 @@ Bozuk hedef GPS ──▶ İnovasyonlu J (temizle + hız kestir, +2sn lead)
                          │
    Kendi TEMİZ konumum ──┤
                          ▼
-             FSM durumu:  ARAMA ──(mesafe<HANDOFF)──▶ KILIT ──(N_LOCK conf'lu YOLO tespiti)──▶ GORSEL_GUDUM
+             FSM durumu:  ARAMA ──(mesafe<HANDOFF)──▶ YAKLASMA ──(N_LOCK conf'lu YOLO tespiti)──▶ GORSEL_TAKIP
                          │                                                                        │
              GPS güdümü (PD + öngörü)                                          IBVS (yalnızca kamera; GPS yönelimi KESİLİR)
 ```
@@ -498,8 +501,8 @@ Bozuk hedef GPS ──▶ İnovasyonlu J (temizle + hız kestir, +2sn lead)
   Koruma katmanları: mesafeye göre **hız tavanı** (overshoot guard), **rate-limit** (salınım önler),
   **dikey PID + integral** (ileri-uçuş taşıması yüzünden ~14 m yukarıda dengelenmeyi kapatır),
   **alçalma önceliği** (hedefin üstündeyken kovalamayı kısıp alçalmayı serbest bırakır).
-- **KILIT:** Handoff menziline (histerezisli: `HANDOFF_RANGE`/`HANDOFF_EXIT`) girince. Görüş devralabilir sinyali.
-- **GORSEL_GUDUM:** `conf ≥ VIS_CONF_MIN` kareler ard arda `VIS_N_LOCK` (5) olunca kilitlenir. Bu andan sonra
+- **YAKLASMA (eski adı KILIT):** Handoff menziline (histerezisli: `HANDOFF_RANGE`/`HANDOFF_EXIT`) girince. Görüş devralabilir sinyali.
+- **GORSEL_TAKIP (eski adı GORSEL_GUDUM):** `conf ≥ VIS_CONF_MIN` kareler ard arda `VIS_N_LOCK` (5) olunca kilitlenir. Bu andan sonra
   **GPS yönelimi mimari olarak kesilir** (yarışma kuralı: bir daha GPS'e dönme — OTO modda yalnızca uzun
   görsel kayıpta re-acquire için dönülür). Komut yalnızca bbox merkez hatasından üretilir.
 - **Terminal vuruş (COMMIT/RAM):** Çarpışma-rotası `v_des = v_hedef + v_close·LOS`. `v_close` mesafeyle

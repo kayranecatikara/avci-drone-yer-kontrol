@@ -17,7 +17,7 @@
 | İşlem yeri | Yer istasyonu (GPU'lu PC) | Ağır model mümkün; onboard kısıt yok |
 | Dil / model formatı | Python, `.pt` (organizatör YOLOv8/v11 bekliyor: `best.pt`, `TalonDetect.py`, `input.py`) | Detektör = YOLO ailesi |
 | Görüntü | ~60 FPS (~16 ms/kare); kalite düşük — FPV bozulmalı (çözünürlük teyitsiz) | Hafif detektör; kareler arası hareket küçük |
-| Kamera (sim) | Tilt 0 (gövdeye sabit) | Ego-hareket **faz-bağımlı**: seyir/arama fazında düşük, **terminal dalış/angajmanda şiddetli** → CMC/GMC dalışta kazanç sağlayabilir (varsayma, ölç) |
+| Kamera (sim) | 25° yukarı tilt, gövdeye sabit (ilk "tilt 0" gözlemi saha kalibrasyonuyla YANLIŞ çıktı; sim v0.0.5 finalle aynı) | Ego-hareket **faz-bağımlı**: seyir/arama fazında düşük, **terminal dalış/angajmanda şiddetli** → CMC/GMC dalışta kazanç sağlayabilir (varsayma, ölç) |
 | Kamera (final) | 25° **yukarı**, analog 1500 TVL, 125° FOV | Hedef gökyüzü zemininde (silüet), gerçek gürültü |
 | Hedef | X-UAV Talon (1718 mm), sim'de **düşük manevra** | Öngörülebilir/doğrusal hareket → doğrusal Kalman ideal |
 | FPV bozulmaları (sim, ekip gözlemi) | Pervane motion blur (kadraj kenarı/köşe), kromatik saçaklanma (kenarlarda R/C ayrışması, kenara doğru artan lateral CA), fıçı/barrel distorsiyon (kavisli ufuk, geniş FOV), güneş bloom + blown highlights, atmosferik pus/haze (uzak ufuk düşük kontrast), kenar hareket smearı, OSD/HUD bindirmesi (pixel-font telemetri: sinyal/süre/ALT/SPD/ARMED/TRIGGER/Mode), belirsiz: gökyüzü benekleri (gürültü/toz/artefakt), köşede hafif vinyet olası | Bozulmalar **appearance**'ı vuruyor (hareketi değil) → hareket-tabanlı ilişkilendirme + düşük-güven kurtarma; ReID'den kaçın |

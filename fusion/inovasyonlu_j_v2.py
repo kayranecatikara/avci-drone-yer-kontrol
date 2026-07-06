@@ -4,7 +4,7 @@
 # v2'den FARK: dropout_dt mekanizmasi TAMAMEN KALDIRILDI.
 #
 # NEDEN: Yarisma simulatoru (TalonGPSSpoof) canli ~50 Hz tiklarken
-# GPS'i 1 Hz veriyor (bLimitUpdateRate). Yani filtre saniyede ~49 kez AYNI
+# GPS'i 1 Hz veriyordu (<=v0.0.4 donemi; bLimitUpdateRate). Yani filtre saniyede ~49 kez AYNI
 # (rate-limit ile dondurulmus) paketi goruyor. v2'nin "donmus kareyi say"
 # mantigi bu normal tekrarlari DROPOUT saniyordu -> her taze pakette
 # dt_eff ~ 50s hesaplayip CT modelini 50 saniye ileri firlatip estimate'i

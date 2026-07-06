@@ -85,7 +85,7 @@ Her görüntü karesinde sırayla şunlar olur:
    ölür. Onaylı iz kaybolursa ~0.5 saniye "tahminle taşıma" (coast) yapılır — kısa
    bir bulanıklıkta iz kopmaz; süre aşılırsa iz silinir.
 
-Sonuç: FSM'e (ARAMA→TAKIP→GÖRSEL GÜDÜM→KİLİT) her an tek bir "en iyi onaylı iz"
+Sonuç: FSM'e (ARAMA→YAKLASMA→GORSEL_TAKIP→KILIT_BILDIR) her an tek bir "en iyi onaylı iz"
 sunulur; kilit kuralı ve güdüm bu izin üstünde çalışır.
 
 ---
@@ -361,5 +361,5 @@ Bu paragraf aynı zamanda video anlatımının "tracking" bölümünün iskeleti
   ortalaması.
 - **LOS (Line of Sight):** avcıdan hedefe bakış hattı; `lam_dot` bu hattın açısal
   dönme hızı (güdüm yasasının ana girdisi).
-- **FSM:** durum makinesi (ARAMA→TAKIP→GORSEL_GUDUM→KILIT_BILDIR→ANGAJMAN);
+- **FSM:** durum makinesi (ARAMA→YAKLASMA→GORSEL_TAKIP→KILIT_BILDIR→ANGAJMAN);
   takipçinin "CONFIRMED" bilgisini tüketen üst katman.

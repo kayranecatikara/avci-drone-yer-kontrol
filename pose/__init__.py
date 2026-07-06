@@ -1,1 +1,1 @@
-# pose paketi: Talon poz kestirimi (keypoint + PnP) — bkz. POSE_REHBERI.md
+# pose paketi: Talon poz kestirimi (keypoint + PnP) — bkz. docs/POSE_REHBERI.md
