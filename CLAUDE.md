@@ -30,8 +30,10 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 - `server.py`+`index.html` → görev arayüzü, telemetri, **10 video isterinin görünürlüğü**
   (aşağıdaki bölüm). Olay günlüğü + görev izleyici `server.py`'de; ID/faz/vuruş overlay'i
   index.html'de. GÜDÜM KODUNA DOKUNULMAZ (bkz. VİDEO ÇIKTILARI ARAYÜZÜ).
-- [YAPILACAK] görüntü işleme + hedef tespit + tracking (YOLOv8/v11 .pt) → görsel faz; şu an
-  `_kamera_kontrol` stub'ı yerine bağlanacak. Teslim .zip'i bu modülü + model dosyasını içermeli.
+- `detection/gorsel_tespit.py` (best.pt YOLO) → görsel tespit; `guidance/png_gorsel.py` →
+  görsel PNG güdüm (TEK görsel yasa). Teslim .zip'i bu modülleri + model dosyasını içermeli.
+- **GÜDÜM KODU HARİTASI: `guidance/GUDUM_HARITA.md`** (2026-07-06 temizliği: IBVS,
+  GPS terminal strike, `_kamera_kontrol`/`calistir`/`ozet` silindi; Cfg faz-bantlı).
 
 ## VİDEO ÇIKTILARI ARAYÜZÜ (10 zorunlu çıktı — 2026-07-04'te eklendi)
 Şartnamenin **videoda görünür 10 teknik çıktısı** arayüzde karşılanır. TEMEL KURAL:
@@ -108,10 +110,10 @@ birkaç piksel). "Video gibi kesintisiz" görünüm UI'daki 0.25 eşiğiyle geli
   minimum dokunuş; VİDEO ÇIKTILARI ARAYÜZÜ bölümündeki desen).
   → İLK ADIM ATILDI: poz kestirimi gözlemci modda entegre (üstteki bölüm). Sıradaki karar:
   poz çıktısı güdüme girsin mi (kamera-mesafeli angajman / hedef-yaw lead)?
-- **Otonom angajman/vuruş (İster 9/10) — güdüm bağımlılığı:** UI göstergeleri hazır ama drone
-  OTO uçuşta hedefe otonom VURMUYOR. Gerekli 3 iş: `Cfg.AUTO_VISUAL_HANDOFF=True`, kamera-
-  tabanlı terminal vuruş mantığı, `Cfg.GPS_TERMINAL_STRIKE` (şu an hepsi kapalı). Bunlar gelince
-  UI'da satır DEĞİŞMEZ (VURUŞ/BAŞARI latch'i mesafe eşiğinden otomatik tetiklenir). Şimdilik
-  test: manuel GÖRSEL switch veya `GPS_TERMINAL_STRIKE=True` + "Gerçek GPS" ram.
+- **Otonom angajman/vuruş (İster 9/10):** `Cfg.AUTO_VISUAL_HANDOFF=True` AÇIK — OTO uçuşta
+  yakınlık+YOLO kilidiyle görsel faza otonom geçiyor; terminal vuruş kamera verisiyle PNG
+  yasasında (`guidance/png_gorsel.py`). GPS_TERMINAL_STRIKE yolu 2026-07-06'da SİLİNDİ
+  (vuruş görsel fazın işi). Kalan iş: PNG tune ile ıskalamayı kapatmak (6 Tem log analizi:
+  handoff dikey açığı + kapanma hızı; `araclar/gorsel_episode_analiz.py` + TUNE_REHBERI §9).
 - Video anlatım metinleri (ilk 3 dk + son 3 dk) — kullanıcı EN SONDA isteyecek; tüm metinler
   takır takır verilecek.
