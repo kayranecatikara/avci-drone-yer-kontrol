@@ -212,8 +212,7 @@ class Cfg:
     # 6 sn'lik tutma penceresi 2 sn'lik kesintileri bol marjla kapatir; filtre
     # kestirimi lead'li oldugundan tasimak guvenli. Loiter yalnizca GERCEK uzun
     # kesintide devreye girer.
-    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut (2 sn kesintilere bol marj)
-    DROPOUT_TICKS = 300        # otesi: dropout -> loiter
+    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut; otesi dropout -> loiter
 
     # ================= [ORTAK] =================
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
@@ -330,14 +329,6 @@ def speed_cap(d_horiz):
         return Cfg.V_CAP_FAR
     t = d_horiz / Cfg.BRAKE_DIST                      # 0..1
     return Cfg.V_CAP_NEAR + (Cfg.V_CAP_FAR - Cfg.V_CAP_NEAR) * t
-
-
-# --- kamera devir esikleri (gorus fazi hook'u icin) ---
-# SDK v2.2: FOV 125 derece = YATAY (dogrulandi). 16:9'da dikey FOV ~94.5 derece
-# (yarim ~47.2); kamera ekseni +25 derece yukari -> dikey gorus bandi ufka gore
-# yaklasik -22..+72 derece (hedefin USTUNDE kalmak dikey temasi kaybettirir).
-KAMERA_FOV_YARIM = math.radians(62.5)   # 125/2 (YATAY yarim aci)
-KAMERA_MENZIL    = 5000.0               # cm (50 m)
 
 
 # Guduum kaynagi -> filtre fabrikasi. "gercek" filtre kullanmaz (truth'a gider).
@@ -495,28 +486,6 @@ class AvciKontrol:
         else:
             self._fresh = False               # ratelimit ile donmus kare (yeni bilgi yok)
         return self.son_temiz                  # None olabilir (isinma)
-
-    # ----------------------------------------------------------------
-    #  Kamera: hedef goruus alaninda mi?  (STUB — GORUS FAZI HOOK'U)
-    #  >>> GERCEK SISTEM: burayi YOLO ile degistir. YOLO Talon'u kutu icine
-    #      alirsa (gordu=True) ve goruntuden bagil konum cikarirsa onu dondur.
-    #      Debug truth SADECE testte var; yarismada YOLO sart. FAZ-1 handoff
-    #      proximity-tabanlidir; gorus fazi devraldiginda bu hook kullanilacak.
-    # ----------------------------------------------------------------
-    def _kamera_kontrol(self, drone_pos, drone_yaw):
-        dbg = self.drone.get_debug_truth()
-        if not dbg.get("available"):
-            return False, None                 # Gercek yarisma: YOLO buraya baglanir
-        hedef_gercek = np.array(dbg["target"]["position"])
-        v = hedef_gercek[:2] - drone_pos[:2]
-        mesafe = np.linalg.norm(hedef_gercek - drone_pos)
-        if mesafe > KAMERA_MENZIL:
-            return False, None
-        bearing = math.atan2(v[1], v[0])
-        aci = abs(wrap_pi(bearing - drone_yaw))
-        if aci < KAMERA_FOV_YARIM:
-            return True, hedef_gercek
-        return False, None
 
     # ----------------------------------------------------------------
     #  EMA-filtreli hata turevi (degisken update-rate'e dayanikli)
@@ -1105,34 +1074,3 @@ class AvciKontrol:
                 "drone_pos": drone_pos, "drone_yaw": drone_yaw,   # _log: truth + nose_off_true icin
             })
 
-    # ----------------------------------------------------------------
-    #  Gercek oyun ana donguusu
-    # ----------------------------------------------------------------
-    def calistir(self):
-        if not self.drone.connect():
-            print("Baglanti kurulamadi (oyun acik ve Play modunda mi?)")
-            return
-        self.drone.set_arm(True)
-        print("FAZ 1: GNSS ile yaklasma basladi. (Filtre warm-up'inda hover eder.)")
-        try:
-            while True:
-                self.adim()
-                time.sleep(Cfg.DT)   # 50 Hz
-        except KeyboardInterrupt:
-            self.drone.set_control_surfaces(0.0, 0.0, 0.0, 0.0, True)   # hover ile birak
-            self.drone.disconnect()
-
-    # ----------------------------------------------------------------
-    #  Debug ozet (test sonrasi)
-    # ----------------------------------------------------------------
-    def ozet(self):
-        if not self.ham_hatalar:
-            return "Debug olcum yok."
-        h = np.array(self.ham_hatalar)/100; j = np.array(self.j_hatalar)/100
-        s = []
-        s.append(f"Ham hedef hatasi : {h.mean():.1f} m")
-        s.append(f"J hedef hatasi   : {j.mean():.1f} m")
-        s.append(f"J kazanci        : %{100*(h.mean()-j.mean())/h.mean():.0f}  "
-                 f"({'J IYI' if j.mean()<h.mean() else 'J KOTU!'})")
-        s.append(f"Aktif bozukluklar: {self.bozukluk_sayac}")
-        return "\n".join(s)
