@@ -273,9 +273,8 @@ gorev_aktif = False
 #  (server yeniden baslatmaya gerek YOK). Guvenlik icin sadece bu allowlist.
 # ----------------------------------------------------------
 TUNE_ALLOW = {
-    # terminal vurus / carpma
-    "V_CLOSE", "V_CLOSE_MIN", "KP_CLOSE", "KV_STRIKE", "STRIKE_TILT",
-    "STRIKE_RANGE", "COMMIT_RANGE",
+    # (GPS terminal vurus/strike parametreleri 2026-07-06 temizliginde kaldirildi —
+    #  vurus gorsel PNG fazinin isi; PNG tunable'lari asagida)
     # komut yumusakligi
     "MAX_DELTA",
     # yaw / burun
@@ -410,18 +409,6 @@ def _mesafe_olc():
     return None, None
 
 
-def _yatay_mesafe_cm():
-    """Avci <-> hedef YATAY mesafe (cm): temiz kestirim, yoksa ham. Panel/angajman icin."""
-    dp = drone.get_drone_location()
-    if beyin.son_xy_anlik is not None:
-        tx, ty = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1])
-    elif beyin.son_ham is not None:
-        tx, ty = float(beyin.son_ham[0]), float(beyin.son_ham[1])
-    else:
-        return None
-    return ((dp[0] - tx) ** 2 + (dp[1] - ty) ** 2) ** 0.5
-
-
 def _gorev_izle():
     """kontrol_dongusu icinde, beyin_lock ALTINDA, her tik (~50 Hz). GUDUME DOKUNMAZ:
     beyin'in alanlarini okuyup olay/durum turetir. Kesinti gorev pasifken de izlenir."""
@@ -496,11 +483,8 @@ def _gorev_izle():
         if _gorev["en_yakin_m"] is None or mesafe < _gorev["en_yakin_m"]:
             _gorev["en_yakin_m"] = mesafe
 
+    # ANGAJMAN: gorsel faz aktif + takip canli (GPS-strike test kipi 2026-07-06'da kaldirildi)
     angajman = (durum == "GORSEL_GUDUM" and _takip["aktif"])
-    if Cfg.GPS_TERMINAL_STRIKE:                        # test kipi: GPS ram menzilinde de angajman
-        dh = _yatay_mesafe_cm()
-        if dh is not None and dh < Cfg.STRIKE_RANGE:
-            angajman = True
 
     if _gorev["basari"]:
         _gorev["faz"] = "BASARI"
