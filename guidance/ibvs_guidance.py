@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 HAMIDIYE - GORSEL GUDUM (DUZ IBVS: image-based visual servoing)
-================================================================================
+
 Gorsel temas sonrasi YONELIM komutu YALNIZCA kameradan uretilir (yarisma kurali:
 bu asamada GPS yonelimi KULLANILMAZ). Tek hata sinyali: best.pt bbox MERKEZININ
-goruntu merkezinden sapmasi. PnP / derinlik / poz / ROLL YOK (roll=0; sonraki asama).
+goruntu merkezinden sapmasi. PnP / derinlik / poz / ROLL YOK (roll=0).
 
 Goruntu ekseni: sol-ust orijin, x -> SAGA, y -> ASAGI.
   ex = (cx - W/2) / (W/2)   [-1..1]  (+ = hedef SAGDA)
@@ -12,21 +12,15 @@ Goruntu ekseni: sol-ust orijin, x -> SAGA, y -> ASAGI.
 
 EKSEN ESLEME (SDK fizigi ile TUTARLI):
   SDK'da  pitch/roll = YATAY ivme (ileri/sag),  throttle = DIKEY hiz (tirman/alc).
-  Kullanicinin niyeti "hedefi ortala + yaklas". Fizige gore dogru eslesme:
     yaw      <- ex            : hedefi YATAYDA ortala (burnu/govdeyi dondur)
-    throttle <- (ey - EY_REF) : hedefi DIKEY REFERANSTA tut. SDK v2.2: kamera 25
-                                derece YUKARI tilt'li -> ayni irtifadaki hedef
-                                merkezin ALTINDA gorunur; referans cizgisi
-                                (VIS_EY_REF~0.43) o noktadir. Tam merkeze ortalamak
-                                drone'u hedefin ALTINA oturturdu (tilt telafisi).
+    throttle <- (ey - EY_REF) : hedefi DIKEY REFERANSTA tut. Kamera 25 derece YUKARI
+                                tilt'li -> ayni irtifadaki hedef merkezin ALTINDA
+                                gorunur; referans cizgisi VIS_EY_REF~0.43 o noktadir.
     pitch    <- ILERI         : referansa yakinsa YAKLAS (bbox buyudukce yavasla)
-    roll     = 0              : bu asamada kapali (agility/sonraki asama)
-  (Kullanici spec'inde pitch<-ey yaziyordu; SDK'da pitch=YATAY oldugundan dikey
-   ortalama throttle'a takaslandi. SIGN_* + canli tune ile dogrulanir.)
+    roll     = 0              : bu asamada kapali
 
-Rate-limit BURADA yapilmaz; AvciKontrol._send() zaten yapar (komut surekliligi).
-Parametreler (SIGN_*, K_*, ...) disaridan `p` (Cfg) ile gelir -> canli tune bedava,
-dongusel import yok (bu dosya ana_kontrol'u import ETMEZ).
+Rate-limit BURADA yapilmaz; AvciKontrol._send() zaten yapar. Parametreler (SIGN_*,
+K_*, ...) disaridan `p` (Cfg) ile gelir -> canli tune; dongusel import yok.
 """
 
 
@@ -34,7 +28,7 @@ def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
 
-class AvciGorselGuduum:
+class AvciGorselGudum:
 
     def __init__(self):
         self.ex_f = None            # EMA-yumusatilmis yatay hata (tek-kare yanlis tespiti bastirir)
