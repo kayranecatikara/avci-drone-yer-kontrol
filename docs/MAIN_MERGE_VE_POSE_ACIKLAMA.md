@@ -6,6 +6,17 @@ sade dille cevaplamak.*
 
 Tarih: 2026-07-05 · Branch'ler: `main` (takım) ↔ `yarisma-pipeline` (benim)
 
+> **✅ SONUÇ (2026-07-06): MERGE UYGULANDI** (commit `6a39c09`), aşağıdaki karar
+> tablosundaki "bayrakla koru" stratejisiyle — hiçbir tarafın işi silinmedi:
+> - Güdüm: `GPS_TERMINAL_STRIKE=False`→serhadcan standoff (VARSAYILAN) /
+>   `True`→bizim intercept+ram; `AUTO_VISUAL_HANDOFF` + yeni `HANDOFF_YAKINLIK_SART`
+>   görsel devir kapıları. Hepsi canlı-tune'da.
+> - Pose: karar tablosundaki gibi **Berat baz** — `talon_keypoints.json` tek 3B kaynak,
+>   bizim PnP `berat_json` şemasıyla okuyucu (EGITIM_SIRASI + MESH_PIVOT uygulanır).
+> - Arayüz: bizim arayüz baz; main'in olay günlüğü/mini-harita/görev izleyici/sahte
+>   tespit modu taşındı. main'in çitsiz truth blokları (kıyas/GPS-log) alınmadı (SERT AYRIM).
+> - Güncel durum özeti: `MEVCUT_DURUM.md` en üst blok.
+
 ---
 
 ## 0) Tek cümlelik özet
