@@ -12,22 +12,26 @@ Goruntu ekseni: sol-ust orijin, x -> SAGA, y -> ASAGI.
 
 EKSEN ESLEME (SDK fizigi ile TUTARLI):
   SDK'da  pitch/roll = YATAY ivme (ileri/sag),  throttle = DIKEY hiz (tirman/alc).
-  Kullanicinin niyeti "hedefi ortala + yaklas". Fizige gore dogru eslesme:
+  Niyet: "TIKLANAN/TESPIT EDILEN noktaya UC" (LOS = bakis hatti guduumu):
     yaw      <- ex            : hedefi YATAYDA ortala (burnu/govdeyi dondur)
-    throttle <- (ey - EY_REF) : hedefi DIKEY REFERANSTA tut. SDK v2.2: kamera 25
-                                derece YUKARI tilt'li -> ayni irtifadaki hedef
-                                merkezin ALTINDA gorunur; referans cizgisi
-                                (VIS_EY_REF~0.43) o noktadir. Tam merkeze ortalamak
-                                drone'u hedefin ALTINA oturturdu (tilt telafisi).
-    pitch    <- ILERI         : referansa yakinsa YAKLAS (bbox buyudukce yavasla)
+    throttle <- LOS dikey acisi: bbox merkezi bir BAKIS YONU'dur. Kamera TILT
+                derece YUKARI egik oldugundan pikselin ufka gore gercek acisi
+                  elev = TILT - atan(ey * tan(vFOV/2))
+                throttle = K_VZ * tan(elev)  (+ = tirman; SDK: thr = dikey hiz).
+                elev=0 cizgisi (ey = tan(TILT)/tan(vFOV/2) ~ 0.43, turuncu REF)
+                = ayni-irtifa duz ucus -> eski REF davranisiyla birebir uyumlu,
+                ama artik alcalma/tirmanma SIMETRIK ve geometrik olarak dogru.
+    pitch    <- ILERI         : yatayda hizalanmissa YAKLAS (bbox buyudukce
+                                yavasla). Kapi YALNIZ |ex| — dikey hata ileriyi
+                                BLOKLAMAZ (dikey, throttle ile eszamanli cozulur).
     roll     = 0              : bu asamada kapali (agility/sonraki asama)
-  (Kullanici spec'inde pitch<-ey yaziyordu; SDK'da pitch=YATAY oldugundan dikey
-   ortalama throttle'a takaslandi. SIGN_* + canli tune ile dogrulanir.)
 
 Rate-limit BURADA yapilmaz; AvciKontrol._send() zaten yapar (komut surekliligi).
-Parametreler (SIGN_*, K_*, ...) disaridan `p` (Cfg) ile gelir -> canli tune bedava,
+Parametreler (TILT, K_*, ...) disaridan `p` (Cfg) ile gelir -> canli tune bedava,
 dongusel import yok (bu dosya ana_kontrol'u import ETMEZ).
 """
+
+import math
 
 
 def clamp(x, lo, hi):
@@ -85,14 +89,21 @@ class AvciGorselGuduum:
     def _komut(self, exf, eyf, area, p):
         # YATAY ortala: burnu/govdeyi hedefe dondur (yaw hiz komutu)
         yaw = clamp(p.VIS_SIGN_YAW * p.VIS_K_YAW * exf, -1.0, 1.0)
-        # DIKEY: hedefi REFERANS cizgisinde tut (kamera 25 derece tilt telafisi).
-        # eyd = referansa gore hata; referans=0 ise eski "tam merkeze ortala" davranisi.
-        eyd = eyf - float(getattr(p, "VIS_EY_REF", 0.0))
-        throttle = clamp(p.VIS_SIGN_VZ * p.VIS_K_VZ * eyd, -1.0, 1.0)
+        # DIKEY (LOS): bbox merkezi bir BAKIS YONU'dur; ufka gore gercek dikey aci:
+        #   elev = TILT - atan(eyf * tan(vFOV/2))
+        # (piksel ofseti aciya LINEER degil, tan-uzayinda baglidir). elev>0 ->
+        # nokta ufkun ustunde -> TIRMAN (+thr); elev<0 -> ALCAL. elev=0 cizgisi
+        # ey~0.43 (turuncu REF) = ayni-irtifa duz ucus (eski davranisla uyumlu).
+        # tan(elev): dikey/ileri hiz orani -> tiklanan LOS boyunca ucus.
+        elev = (math.radians(float(getattr(p, "VIS_TILT_DEG", 25.0)))
+                - math.atan(eyf * math.tan(math.radians(float(getattr(p, "VIS_VFOV_YARIM_DEG", 47.2))))))
+        throttle = clamp(p.VIS_K_VZ * math.tan(elev), -1.0, 1.0)
         roll = 0.0                                             # bu asamada kapali
-        # ILERI yaklas: SADECE hedef makul hizalandiysa (kapi REFERANSA gore) ve bbox
-        # kucukse (uzak). bbox buyudukce (area -> AREA_STOP) yaklasma hizi 0'a iner.
-        if abs(exf) < p.VIS_CENTER_GATE and abs(eyd) < p.VIS_CENTER_GATE:
+        # ILERI yaklas: kapi YALNIZ YATAY hiza (|ex|) bakar — dikey hata ileriyi
+        # BLOKLAMAZ (dikey, throttle ile eszamanli cozuluyor; eski eyd kosulu
+        # "asagi tikla -> ileri kesiliyor" hatasina yol aciyordu). bbox buyudukce
+        # (area -> AREA_STOP) yaklasma hizi 0'a iner.
+        if abs(exf) < p.VIS_CENTER_GATE:
             fwd = max(0.0, p.VIS_K_FWD * (1.0 - area / max(p.VIS_AREA_STOP, 1e-6)))  # >=0: geri gitme YOK, sadece yavasla
             pitch = clamp(p.VIS_SIGN_PITCH * fwd, -p.VIS_FWD_MAX, p.VIS_FWD_MAX)
         else:

@@ -17,9 +17,11 @@ pygetwindow; platform_system == "Windows"
 ultralytics
 opencv-python
 
-# --- windows-capture: SU AN KULLANILMIYOR (kurma) ---
-# Pencere-icerigi yakalama motoru bazi Windows surumlerinde (orn. Win10 LTSC)
-# kararsiz oldugundan bilincli KAPALI (web/server.py: PENCERE_YAKALA_AKTIF=False).
-# FPV goruntusu tarayici ekran paylasimiyla (Goruntuyu Bagla), YOLO karesi mss ile
-# alinir. Win11'de denemek istersen: pip install windows-capture + bayragi True yap.
-# windows-capture
+# --- windows-capture: dedektorun kare kaynagi (pencere ICERIGI, occlusion-proof) ---
+# ACIK (2026-07-06): mss ekran-bolgesi, oyun penceresi tarayicinin arkasinda kalinca
+# dedektore masaustu/tarayici pikselini besliyordu (canli gorevde tespit yok).
+# windows-capture pencere icerigini yakalar; pencere arkada olsa bile dogru kare.
+# Kurulamazsa / eski Windows'ta kararsizsa sistem mss'e zarif duser
+# (web/server.py: PENCERE_YAKALA_AKTIF bayragi; o durumda oyun ONDE tutulmali).
+windows-capture; platform_system == "Windows"
+psutil; platform_system == "Windows"

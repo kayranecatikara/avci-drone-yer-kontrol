@@ -64,6 +64,25 @@ Otonomi: manuel hedef seçimi/işaretleme YOK; tespit ve tracking otonom devreye
 Teslim .zip: input, hedef tespit, tracking, füzyon/filtre, güdüm, ana çalıştırma, config,
 bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod tutarlı olmalı.
 
+## CANLI TESPİT HATTI (2026-07-06 — kök neden analizi + 4 düzeltme)
+Canlı görevde dedektör kördü (87.6 sn'de 1 tespit; aynı görüntüde offline %62.5
+kilit-eşiği-üstü). Kök neden: mss EKRAN yakalar; oyun penceresi Chrome'un arkasında
+kalınca dedektöre masaüstü/tarayıcı pikseli gitti (FPV paylaşımı pencere-İÇERİĞİ
+gösterdiğinden kullanıcı fark etmez). Kanıt/teşhis: `veri/ucus_log_*.csv`'de
+`vis_gordu/vis_conf` + gerçek-mesafe binleme; dedektör gözü = `/api/frame`.
+Düzeltmeler (server.py):
+1. `PENCERE_YAKALA_AKTIF=True` — windows-capture pencere-içeriği (occlusion-proof).
+   Sorun çıkarsa False → mss fallback (o zaman oyun penceresi ÖNDE tutulmalı).
+2. Dedektör kareyi DOĞAL çözünürlükte alır; `CAM_MAX_WIDTH=960` küçültme yalnızca
+   FPV JPEG akışında (`fpv_jpeg`). (960→1280 çift örnekleme uzak hedefi öldürüyordu.)
+3. `UI_CONF_MIN=0.25` predict eşiği; **güdüm kapısı**: `det_beyin` yalnız
+   conf≥`VIS_CONF_MIN` beyne gider (kilit/takip/güdüm davranışı DEĞİŞMEDİ).
+   Zayıf tespit arayüzde TURUNCU kesikli çizilir (`gorsel.conf_esik` telemetride).
+4. `POZ_HER_N=3` — poz inference'i seyrek (gözlemci-only özellik GPU'nun yarısını
+   yiyip dedektörü ~5-7 Hz'e düşürüyordu → takip delikleri).
+Beklenti (mesafeye bağlı, normal): 0-10 m ~%70-80, 15-20 m ~%45+, 60 m+ %0 (hedef
+birkaç piksel). "Video gibi kesintisiz" görünüm UI'daki 0.25 eşiğiyle gelir.
+
 ## POZ KESTİRİMİ (2026-07-04'te eklendi — GÖZLEMCİ modda)
 `models/talon_pose.pt` (yolo11m-pose, 6 keypoint) + PnP artık pipeline'da:
 - `detection/poz_tespit.py` (PozDedektor) + `pose/poz_cozucu.py` (PnP+EMA; **EGITIM_SIRASI
@@ -72,18 +91,12 @@ bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod t
   (best.pt bbox akışı aynen). Telemetri: `gorsel.poz` + `gorsel.poz_hazir`.
 - Arayüz: FPV'de iskelet + "MESAFE (KAM) / HEDEF YAW" satırları + 📐 POZ KESTİRİMİ kartı
   (kamera vs gerçek kıyas). Video isteri "GNSS bağımlılığının azalması" kanıtına birebir.
-- Kalite (eğitim karelerinde İYİMSER): mesafe medyan %8 / yaw medyan 6° (<10 m iyi);
-  15 m+ mesafe şişer; %27 kare tespitsiz → **yalnız terminal faz (≈4-12 m) aracı**.
-  Güdüme besleme (dalış zamanlaması / lead) modeli kullanıcı onaylarsa SONRAKİ adım.
-
-## SAHTE TESPİT MODU (2026-07-04 — güdüm geliştirme aracı)
-YZ modeli hazır olmadan görsel güdüm algoritması geliştirmek için: arayüzdeki
-**"🖱️ Sahte Tespit (Mouse)"** butonu açıkken, görev sırasında FPV'de mouse BASILI
-TUTULAN nokta `/api/sahte` üzerinden server'a akar ve `dedektor_dongusu`'nde gerçek
-model çıktısının YERİNE geçer (aynı det sözlüğü → `beyin.set_gorsel_tespit`; güdüm
-için gerçek tespitten ayırt edilemez). Failsafe: mesaj 0.6 s kesilirse otomatik düşer.
-Overlay'de MACENTA bbox + "[SAHTE/MOUSE]" etiketi (yeşil = gerçek model). Yeni model
-gelince hiçbir şey sökülmez — buton kapalıyken sistem tamamen eskisi gibi.
+- Model: **v3 (5 Tem 2026)**, models/best.pt ile AYNI dosya (talon_pose.pt kopyası;
+  bbox+poz iki ayrı inference — tekleştirme ileriki optimizasyon). imgsz=1280.
+  EGITIM_SIRASI=[0,1,2,5,3,4] sira_bul.py ile YENİDEN doğrulandı (5 Tem).
+- Kalite v3 (eğitim karelerinde İYİMSER, degerlendir_foto): PnP çözüm %61, tespitsiz
+  %10; mesafe MAE 0.84 m / medyan |hata| %6.1 / BIAS −0.37 m; yaw MAE 12° (medyan 3.7°).
+  15-20 m bini artık %7 (eski model %89'du). Güdüme besleme SONRAKİ adım (kullanıcı onayı).
 
 ## BEKLEYEN İŞ
 - **Görsel güdüm fazı — YZ modelleri / ekstra özellikler:** görsel güdüm algoritmasına yapay
