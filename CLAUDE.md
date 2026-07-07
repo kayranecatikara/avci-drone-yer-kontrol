@@ -179,19 +179,23 @@ Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 v
   15-20 m bini artık %7 (eski model %89'du). Güdüme besleme SONRAKİ adım (kullanıcı onayı).
 
 ## BEKLEYEN İŞ
-- **MERGE 2026-07-07 KALANLARI (sırayla):**
-  1. **SERT AYRIM temizliği (paket_kontrol şartı):** main'den gelen `ana_kontrol.py`'de
-     "gercek" kaynak yolu GÜDÜM İÇİNDE truth okuyor (`get_debug_truth`, `_gercek_hedef_hiz`,
-     `true_*` debug alanları) → bizim `set_hedef_kaynagi`/dev_truth dikişine çevrilecek;
-     `server.py`+`index.html`'deki çitsiz truth/gercek noktaları DEV-ONLY çite alınacak.
-  2. **Kilit §6.1.4 taşıma:** main'in kilit/ATIS kuralı şartnameyle kıyaslanacak; eksikse
-     bizim `guidance/kilit_kurali.py` + `iletisim/hakem_istemci` main FSM'ine bağlanacak.
-  3. **ByteTrack kararı (ölçerek):** main tek-kutu argmax (A/B'de 72 kayıp kenarı/30 ID);
-     bizim `detection/takip.py` (ByteTrack+gyro-CMC) aday.
-  4. **Test uyumu:** FSM/faz testleri main güdümüne göre güncellenecek (eski hat testleri
-     TAŞINACAK-ADAY modülleriyle yaşamaya devam eder).
-  5. **ab_kiyas regresyonu:** merge sonrası ≥ main'in bugünkü seviyesi (1/3) doğrulanacak.
-  6. **Kayra onayı → push** (merge yerel; `docs/AB_KIYAS_KARAR_20260707.md` ile birlikte).
+- **MERGE 2026-07-07 KALANLARI (kullanıcı kararlarıyla güncel):**
+  1. **SERT AYRIM temizliği — TESLİM ÖNCESİNE ERTELENDİ (kullanıcı kararı 2026-07-07):**
+     Kayra'dan gelen kodda şimdilik DEĞİŞİKLİK YAPILMAZ. Video/teslim paketi hazırlanmadan
+     hemen önce: `ana_kontrol`'deki "gercek" truth yolu dev_truth dikişine çevrilecek +
+     `server/index` çitlenecek. O güne dek `arac/paket_kontrol.py` paketi bilerek REDDEDER
+     (bekçi). **Video koşusu paketi bu temizlikten SONRA çıkar — unutma.**
+  2. **Kilit §6.1.4 (şartname: 5 sn kilit + hakem bildirimi; +400 / yanlış −30):** bizim
+     `guidance/kilit_kurali.py` + `iletisim/hakem_istemci` hazır; main hattına bağlanması
+     Kayra kodunda değişiklik gerektirir → Kayra ile koordine (teslim öncesi ZORUNLU).
+  3. **ByteTrack: PUSH'landı — Kayra kendi hattında deneyecek (kullanıcı kararı):**
+     modüller `detection/takip.py` + `gorsel_tespit.tespit_hepsi` (çok-kutu; `tespit_et`
+     argmax geriye-uyumlu). Bağlama tarifi: `docs/BYTETRACK_ENTEGRASYON_NOTU.md`.
+  4. **Test uyumu:** test_dev_kaynak + test_fsm_faz3 eski hatta göre düşüyor (bilinen);
+     güncelleme kilit/SERT AYRIM işleriyle birlikte yapılacak.
+  5. **Regresyon koşusu:** entegrasyonlardan sonra `arac/ab_kiyas.py` ile 3 görev koşusu —
+     birleşik hat ≥ main'in A/B seviyesi (1/3 başarı, en-yakın ~4 m) teyidi
+     ("birleştirirken bir şey bozmadık mı" testi).
 - **PNG tune ile ıskalamayı kapatmak** (İster 9/10; main 6 Tem log analizi: handoff dikey
   açığı + kapanma hızı; `araclar/gorsel_episode_analiz.py` + TUNE_REHBERI §9). A/B bulgusu:
   ana başarı kaldıracı MODEL (HUD-FP + uzak menzil conf — `docs/AB_KIYAS_KARAR_20260707.md` §7).
