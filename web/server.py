@@ -256,7 +256,7 @@ def _bgr_jpeg(bgr):
 #  Tarayici kapali + gorev pasifken yakalama da durur (bosuna CPU yok).
 # ----------------------------------------------------------
 KARE_FPS = 25.0              # yakalama temposu (PrintWindow ~20-40 ms -> surdurulebilir)
-_kare = {"bgr": None, "jpeg": None, "seq": 0, "ts": 0.0}
+_kare = {"bgr": None, "jpeg": None, "seq": 0, "ts": 0.0, "tp": 0.0}
 _kare_cond = threading.Condition()
 _fpv_talep_ts = 0.0          # son /api/frame ani (tarayici FPV izliyor mu?)
 
@@ -280,6 +280,7 @@ def kare_uretici_dongusu():
             bgr, _w, _h = grab_frame_bgr()
         except Exception:
             bgr = None
+        tp = time.perf_counter()               # yakalama ani (tespit yasi bundan olculur)
         # Tarayici izlemiyorsa (kareyi yalniz dedektor tuketiyor) JPEG encode'a girme.
         jpeg = _bgr_jpeg(bgr) if (bgr is not None and _fpv_talep_var()) else None
         with _kare_cond:
@@ -287,6 +288,7 @@ def kare_uretici_dongusu():
             _kare["jpeg"] = jpeg
             _kare["seq"] += 1
             _kare["ts"] = time.time()
+            _kare["tp"] = tp
             _kare_cond.notify_all()
         if bgr is None:
             time.sleep(0.25)                       # kaynak yok -> CPU'yu bosalt
@@ -297,16 +299,17 @@ def kare_uretici_dongusu():
 
 
 def kare_bekle_yeni(son_seq, timeout):
-    """son_seq'ten YENI yayin gelene kadar bekler; (bgr, guncel_seq) doner.
-    Timeout'ta (None, son_seq); yayin var ama kare alinamadiysa (None, yeni_seq)."""
+    """son_seq'ten YENI yayin gelene kadar bekler; (bgr, guncel_seq, tp) doner
+    (tp = karenin yakalanma ani, perf_counter; tespit yasi bundan olculur).
+    Timeout'ta (None, son_seq, None); yayin var ama kare alinamadiysa (None, yeni_seq, tp)."""
     bitis = time.monotonic() + timeout
     with _kare_cond:
         while _kare["seq"] == son_seq:
             kalan = bitis - time.monotonic()
             if kalan <= 0:
-                return None, son_seq
+                return None, son_seq, None
             _kare_cond.wait(kalan)
-        return _kare["bgr"], _kare["seq"]
+        return _kare["bgr"], _kare["seq"], _kare["tp"]
 
 
 # ----------------------------------------------------------
@@ -729,6 +732,25 @@ def _normalize_tespit(det):
     return n
 
 
+def _ui_hiz_damgala(ui_det, t_det, onceki):
+    """UI tespitine yakalama-ani (t_det) + normalize hiz (vx,vy [1/s]) damgalar
+    (merge 2026-07-07: main 152a7bc mekanizmasinin bizim hatta portu). Arayuz
+    kutuyu tespit YASI kadar ILERI cizer (/api/gorsel tasir) -> yakalama +
+    inference + aktarim gecikmesi telafi edilir. Hiz yalniz AYNI track_id'den
+    ardisik iki olcumle hesaplanir (ID degisiminde sicrama-hizi uretilmez).
+    -> yeni onceki-durum (cx, cy, t, track_id) | None."""
+    if ui_det is None:
+        return None
+    t_det = float(t_det) if t_det else time.perf_counter()
+    ui_det["t_det"] = t_det
+    tid = ui_det.get("track_id")
+    if onceki is not None and onceki[3] == tid and 0.0 < (t_det - onceki[2]) < 0.5:
+        dt = t_det - onceki[2]
+        ui_det["vx"] = (ui_det["cx"] - onceki[0]) / dt
+        ui_det["vy"] = (ui_det["cy"] - onceki[1]) / dt
+    return (ui_det["cx"], ui_det["cy"], t_det, tid)
+
+
 def _pnp_ui_ozet(pnp):
     """PnP sonucundan arayuz ozeti (mesafe cm->m; None->None)."""
     if not pnp:
@@ -773,6 +795,7 @@ def _algi_kur():
 def dedektor_dongusu():
     global _son_tespit_ui, _son_pnp_ui
     kare_seq = 0               # kare_uretici'den tuketilen son yayin sirasi
+    onceki_ui = None           # (cx, cy, t, track_id) — UI bbox hizi (vx,vy) kestirimi
     while True:
         # Sadece OTONOM gorev sirasinda algi yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
@@ -794,10 +817,12 @@ def dedektor_dongusu():
                    "w": 0.06 * W_, "h": 0.05 * H_,    # nominal bbox (guduum ex/ey merkezi kullanir)
                    "conf": 1.0, "cls": -1, "sahte": True,
                    "W": W_, "H": H_, "t": time.perf_counter()}
+            ui_det = _normalize_tespit(det)
+            onceki_ui = _ui_hiz_damgala(ui_det, det["t"], onceki_ui)
             with beyin_lock:                          # enjeksiyon (kilit ICINDE)
                 beyin.set_gorsel_tespit(det)
                 beyin._algi_pnp = None                # bayat PnP OIPN'e sizmasin
-                _son_tespit_ui = _normalize_tespit(det)
+                _son_tespit_ui = ui_det
                 _son_pnp_ui = None
             time.sleep(0.03)                          # ~30 Hz enjeksiyon temposu
             continue
@@ -815,17 +840,21 @@ def dedektor_dongusu():
             model_yon.conf = float(Cfg.VIS_CONF_MIN)  # canli-tune predict esigi (yalniz gorsel/metrik)
             # Kareyi kare_uretici'den TUKET (kendi PrintWindow cagrisi YOK -> FPV ile
             # ayni kare; cift yakalama yarisi bitti). Yeni yayin yoksa kisa bekler.
-            bgr, kare_seq = kare_bekle_yeni(kare_seq, timeout=0.3)
+            bgr, kare_seq, kare_tp = kare_bekle_yeni(kare_seq, timeout=0.3)
             att = drone.get_drone_rotation()          # gyro-CMC icin attitude (temiz/tam-hizli)
-            cikti = algi.adim(bgr, att) if bgr is not None else None
+            # t=kare_tp: takip dt'si + PnP low-pass + UI tespit-yasi AYNI yakalama
+            # anini kullanir (t=None olsaydi adim kendi saatini basardi).
+            cikti = algi.adim(bgr, att, t=kare_tp) if bgr is not None else None
         except Exception:
-            bgr, cikti = None, None
+            bgr, cikti, kare_tp = None, None, None
         # AlgiCiktisi.hedef eski det sozlesmesiyle uyumlu (cx,cy,w,h,conf,W,H) ->
         # beyin.set_gorsel_tespit geriye uyumlu (FSM tracker sorgusu FAZ 3'te).
         hedef = cikti.hedef if cikti else None
+        ui_det = _normalize_tespit(hedef)
+        onceki_ui = _ui_hiz_damgala(ui_det, kare_tp, onceki_ui)
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_algi(cikti)                     # AlgiCiktisi snapshot (hedef + PnP + turevler)
-            _son_tespit_ui = _normalize_tespit(hedef)
+            _son_tespit_ui = ui_det
             _son_pnp_ui = (cikti.pnp if cikti else None)
         # Kare yoksa kare_bekle_yeni timeout'u zaten bekletti (spin yok); kare varsa
         # bir sonraki yayini bekleyerek inference dogal pace'lenir (ayni kare iki kez
@@ -1061,6 +1090,17 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/telemetry":
             payload = json.dumps(build_telemetry()).encode("utf-8")
             self._send(200, payload, "application/json")
+        elif self.path == "/api/gorsel":
+            # HIZLI GORSEL KANAL (~15 Hz istemci; merge 2026-07-07, main 152a7bc port):
+            # yalniz son tespit (keypoints dahil) — telemetri tick'ini beklemeden taze
+            # bbox. yas_s = tespitin SU ANKI yasi (kare yakalama anindan); istemci
+            # kutuyu vx,vy ile yas kadar ILERI cizer -> kutu hedefin simdiki yerine oturur.
+            with beyin_lock:
+                det = dict(_son_tespit_ui) if _son_tespit_ui is not None else None
+            if det is not None and "t_det" in det:
+                det["yas_s"] = round(max(0.0, time.perf_counter() - det.pop("t_det")), 3)
+            self._send(200, json.dumps({"tespit": det}).encode("utf-8"),
+                       "application/json")
         elif self.path == "/api/tune":
             # Mevcut tune parametre degerlerini dondur (slider'lari baslatmak icin).
             vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}

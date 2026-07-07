@@ -104,6 +104,13 @@ DEĞİŞMEZ (kural 8: izleyici "durum değişti mi?" karşılaştırmasından ib
 - **VURUŞ latch mesafesi:** J-temiz kestirim; DEV koşusunda (DEV-ONLY çit içinde,
   `dev_truth.mesafe_m` üzerinden) gerçek 3B; **ham ASLA** (sahte vuruş). SERT AYRIM korunur:
   paketlenmiş kodda çit söküldüğünden latch daima J-temizdir.
+- **Overlay gecikmesi (2026-07-07, main 152a7bc bizim hatta PORT):** bbox/keypoint overlay'i
+  hızlı **`/api/gorsel`** kanalından (~15 Hz `gorselTick`) beslenir; server tespite
+  yakalama-anı yaşı (`yas_s`, `kare_uretici`'nin `tp` damgasından) + normalize hız
+  (`vx,vy` 1/s, `_ui_hiz_damgala`: aynı track_id şartı) ekler; istemci kutu+iskeleti yaş
+  kadar İLERİ çizer (≤300 ms lead). Kanal düşerse telemetri tespitine geri düşer.
+  `algi.adim(t=kare_tp)` ile takip dt + PnP low-pass da yakalama saatine geçti. Güdüm
+  kodu DEĞİŞMEDİ (yalnız UI yolu).
 
 ## VİDEO İSTERLERİ (karşılanması zorunlu — özet)
 İlk 3 dk (hızlandırma YOK, sesli teknik anlatım): sistem mimarisi; bozuk GNSS'in girdi
@@ -146,6 +153,16 @@ YASAK) yarışma/video koşusunda KULLANILMAZ; teslim öncesi komiteye giden pak
 kaldırılır** (kullanıcı kararı 2026-07-06).
 
 ## BEKLEYEN İŞ
+- **main'in PNG güdüm hattı (2026-07-07, merge BEKLEMEDE — karar: A/B uçuş kıyası):**
+  Kayra main'de 9 commit ile IBVS + GPS-strike'ı SİLİP `guidance/png_gorsel.py`'yi tek
+  görsel yasa yaptı (+`png_sim/` PN simülatörü, +yeni best.pt, +bbox-gecikme fix'i).
+  Düz merge bizim hatta `ibvs_guidance.py` ve `models/talon_pose.pt`'yi otomatik siliyor
+  (git: bizde değişmeyen dosyaya karşı taraf silmesi) → merge İPTAL edildi. Bu turda yalnız
+  bbox-fix PORT'u + yeni best.pt (bc1e0b3) alındı; **talon_pose.pt ve ibvs bizde DURUYOR.**
+  Plan: iki branch AYRI AYRI aynı senaryo setinde uçurulup (görev başarı, kilit süresi,
+  en yakın mesafe, GNSS-kesinti toleransı) KAZANAN görsel yasa seçilecek; merge o karara
+  göre karar dokümanıyla yapılacak (kaybedenin şartname-zorunlu parçaları — ör. kilit
+  §6.1.4 — kazanana taşınır).
 - **Merge sonrası sim regresyonu:** iki profil de sim'de uçurulup teyit edilecek —
   (a) varsayılan standoff (GPS_TERMINAL_STRIKE=False): 5 m arkada/altta pace + kamera
   çerçeveleme; (b) GPS_TERMINAL_STRIKE=True: eski intercept+ram birebir; (c) sahte

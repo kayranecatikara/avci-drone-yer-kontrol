@@ -758,6 +758,10 @@
     const s=Math.min(cw/vw, ch/vh), w=vw*s, h=vh*s;
     return {x:(cw-w)/2, y:(ch-h)/2, w:w, h:h};
   }
+  // HIZLI GORSEL KANAL durumu (merge 2026-07-07, main 152a7bc bizim hatta port):
+  // hizliGorsel = /api/gorsel'in son yaniti {tespit, alinan(ms)}; sonGorsel = son
+  // telemetri "gorsel" nesnesi (gorselTick, panel verisi degismeden overlay'i tazeler).
+  let hizliGorsel=null, sonGorsel=null;
   function drawOverlay(gs){
     const ov=$("overlay"), camEl=aktifFpv();
     if(!ov || !camEl) return;
@@ -791,12 +795,26 @@
     ctx.setLineDash([]);
     ctx.font="11px monospace"; ctx.fillStyle="rgba(255,170,60,.95)";
     ctx.fillText("REF", mcx+33, refY+4);
-    const det=gs.tespit;
+    // TESPIT: hizli kanaldan (/api/gorsel ~15 Hz) — telemetri tick'ini beklemez. YAS
+    // TELAFISI: server tespit hizi (vx,vy [1/s]) + yas verir; kutu+keypoint'ler tespit
+    // yasi kadar ILERI cizilir (<=300 ms) -> kutu hedefin SIMDIKI konumuna oturur.
+    // Kanal dusmusse telemetri tespitine geri duser (eski davranis).
+    let det=gs.tespit, coastKaynak=(gs.track && gs.track.tespit_mi===false);
+    if(hizliGorsel){
+      det=hizliGorsel.tespit;
+      coastKaynak=(det && det.tespit_mi===false);      // coast rozeti de taze kanaldan
+      if(det && det.vx!=null){
+        const yas=(det.yas_s||0)+(performance.now()-hizliGorsel.alinan)/1000;
+        const ek=Math.min(Math.max(yas,0),0.30);
+        det={...det, cx:det.cx+det.vx*ek, cy:det.cy+det.vy*ek,
+             keypoints:det.keypoints ? det.keypoints.map(k=>[k[0]+det.vx*ek, k[1]+det.vy*ek, k[2]]) : det.keypoints};
+      }
+    }
     if(det){
       // COAST AYRIMI (olcumsuz tahmin): KESIKLI kenar + turuncu + "TAHMİN (coast)";
       // conf gosterilmez, "son conf" olarak isaretlenir (video kalem-7 gorsellestirmesi).
       // SAHTE (mouse) tespit: MACENTA — asil model ciktisiyla karistirilmasin.
-      const coast = !!(gs.track && gs.track.tespit_mi===false);
+      const coast = !!coastKaynak;
       const renk = det.sahte ? "#ff52ff" : (coast ? "#ffb454" : "#25e0a0");
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       ctx.strokeStyle=renk; ctx.lineWidth=coast?2:2.5;             // bbox
@@ -1125,14 +1143,34 @@
       // >>> DEV-ONLY >>>
       if(window.devGuncelle) devGuncelle(t.dev);
       // <<< DEV-ONLY <<<
+      sonGorsel=t.gorsel;      // gorselTick overlay'i bununla tazeler (paneller ayni kalir)
       drawOverlay(t.gorsel);   // FPV overlay: bbox/merkez/durum/GPS rozeti
     }catch(e){
       setConn("bad"); dash();
+      sonGorsel=null;
       drawOverlay(null);       // hata: overlay'i temizle
     }
   }
   setInterval(tick, 100);   // 10 Hz: overlay (bbox/rozet) akici FPV ile uyumlu tazelensin
   tick();
+
+  // ---- HIZLI GORSEL KANAL (~15 Hz; merge 2026-07-07, main 152a7bc bizim hatta port):
+  // yalniz son tespiti ceker, overlay'i HEMEN yeniden cizer (rozet/kilit/faz paneli son
+  // telemetriden). Ana telemetri 100 ms'de kalir; kanal dusen durumda drawOverlay
+  // telemetri tespitine geri duser (eski davranis).
+  let gorselMesgul=false;
+  async function gorselTick(){
+    if(gorselMesgul) return;                    // yanit gecikirse istek biriktirme
+    gorselMesgul=true;
+    try{
+      const r = await fetch("/api/gorsel",{cache:"no-store"});
+      const g = await r.json();
+      hizliGorsel = { tespit:g.tespit, alinan:performance.now() };
+    }catch(e){ hizliGorsel=null; }              // kanal yok -> telemetri fallback
+    gorselMesgul=false;
+    if(sonGorsel) drawOverlay(sonGorsel);
+  }
+  setInterval(gorselTick, 66);
 
   // ---- Canlı görüntü: tarayıcının ekran/pencere paylaşımı (getDisplayMedia) ----
   // Butona bas → açılan listeden OYUN PENCERESİNİ seç. Overlay (bbox/rozet/REF)
