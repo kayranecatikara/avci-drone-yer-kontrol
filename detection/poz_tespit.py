@@ -23,7 +23,7 @@ class PozDedektor:
         self.hazir = False
         self.model = None
         self.conf = float(conf)
-        self.imgsz = int(imgsz)          # egitim imgsz=960 (checkpoint train_args)
+        self.imgsz = int(imgsz)          # egitim imgsz'ine esitle (v3 model: 1280; cagiran verir)
         self.device = device
         self.hata = None
         try:

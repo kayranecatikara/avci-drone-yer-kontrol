@@ -72,21 +72,22 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 ## SİSTEM MİMARİSİ (modül → şartname teslim eşlemesi)
 - `drone_sdk.py`        → simülasyon I/O (input/telemetri); şartname "input.py" muadili.
 - `inovasyonlu_j_v2.py` → sensör füzyonu / filtreleme / tahmin (GNSS temizleme + hız kestirimi).
-- `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + FSM: ARAMA→YAKLASMA→görsel fazlar).
-- `server.py`+`index.html` → görev arayüzü, telemetri, bozuk-GNSS görünürlüğü (video
-  çıktıları). MERGE 2026-07-06: bizim arayüz BAZ; main'in kullanışlı ekleri (sahte
-  tespit modu, poz gözlemci paneli vb.) bizim hatta taşınarak entegre edilir.
-- [FAZ 1-4 KOD TAMAM] görsel pipeline: `detection/` (kamera_model, takip=ByteTrack+gyro-CMC,
-  algi_hatti, talon_pose_estimator=PnP, model_yonetici=registry) + `guidance/` (kilit_kurali
-  §6.1.4, gudum_yasasi APN+OIPN) + `iletisim/hakem_istemci`. FSM: ARAMA→YAKLASMA→GORSEL_TAKIP→
-  KILIT_BILDIR→ANGAJMAN (adlar `arac/fsm_adlari.py` tek kaynağıyla uyumlu). **Pose'suz TAM çalışır** (PnP/OIPN otomatik pasif → IBVS fallback;
-  regresyon: OIPN kapalı+pose'suz = eski hat birebir). ~91 birim testi. Sim borçları +
-  "iyi model geldiğinde" runbook MEVCUT_DURUM'da. Teslim .zip bu modülleri + model .pt içerir.
-- MERGE 2026-07-06 (main→yarisma-pipeline): GPS güdümünde İKİ PROFİL bayrakla yaşar
-  (`GPS_TERMINAL_STRIKE=False`→serhadcan standoff [varsayılan], `True`→bizim intercept+ram;
-  `AUTO_VISUAL_HANDOFF`/`HANDOFF_YAKINLIK_SART` görsel devir kapıları) — HİÇBİR TARAF
-  SİLİNMEZ. Pose'da 3B keypoint TEK KAYNAĞI `pose/talon_keypoints.json` (Berat, doğrulanmış);
-  bizim `talon_pose_estimator` onu OKUR (gömülü tablo bayrakla yedek).
+- `ana_kontrol.py`      → güdüm ve karar mekanizması — **MERGE 2026-07-07: main BAZ**
+  (A/B kararı: `docs/AB_KIYAS_KARAR_20260707.md`). Öngörülü yönelim + ARAMA→KILIT FSM;
+  görsel yasa TEK: `guidance/png_gorsel.py` (PNG). Bizim IBVS/OIPN + GPS_TERMINAL_STRIKE
+  yolu bu merge ile devre dışı (IBVS dosyası silindi; main 2026-07-06 temizliği).
+- `server.py`+`index.html` → görev arayüzü, telemetri, **10 video isterinin görünürlüğü**;
+  MERGE 2026-07-07: main'in server+arayüzü BAZ (olay günlüğü + görev izleyici server'da;
+  ID/faz/vuruş overlay'i index'te). GÜDÜM KODUNA DOKUNULMAZ deseni geçerli.
+- `detection/gorsel_tespit.py` (best.pt YOLO @1280) → görsel tespit.
+  **GÜDÜM KODU HARİTASI: `guidance/GUDUM_HARITA.md`**.
+- **Bizim hat (TAŞINACAK-ADAY; runtime dışı ama repoda + testli):** `detection/`
+  (takip=ByteTrack+gyro-CMC, algi_hatti, model_yonetici=registry, talon_pose_estimator=PnP),
+  `guidance/kilit_kurali.py` (**§6.1.4 ZORUNLU taşınacak**), `iletisim/hakem_istemci`,
+  `guidance/gudum_yasasi.py` (APN+OIPN — emekli aday). Taşıma planı karar dokümanında.
+- Pose 3B keypoint TEK KAYNAĞI `pose/talon_keypoints.json` (Berat, doğrulanmış);
+  koşu-zamanı üçlüsü paketlenir. `models/talon_pose.pt` merge'de KORUNDU (main silmişti;
+  gözlemci/terminal aracı olarak duruyor).
 
 ## VİDEO ÇIKTILARI ARAYÜZÜ (10 zorunlu çıktı — main'den 2026-07-06 merge ile taşındı)
 Şartnamenin **videoda görünür 10 teknik çıktısı** arayüzde karşılanır. TEMEL KURAL:
@@ -124,59 +125,80 @@ Otonomi: manuel hedef seçimi/işaretleme YOK; tespit ve tracking otonom devreye
 Teslim .zip: input, hedef tespit, tracking, füzyon/filtre, güdüm, ana çalıştırma, config,
 bağımlılıklar (requirements), README, eğitilmiş model (.pt). Video↔kod tutarlı olmalı.
 
-## POZ KESTİRİMİ (merge 2026-07-06 sonrası TEK HAT)
-`models/talon_pose.pt` (Berat, yolo11m-pose, 6 keypoint) bizim algı hattına bağlandı:
-- **3B keypoint TEK KAYNAĞI: `pose/talon_keypoints.json`** (sim'de doğrulanmış, flip_idx'li).
-  `detection/talon_pose_estimator.sema_berat_yukle()` bunu okur ve **`berat_json`
-  şemasını** kurar: sıra = `pose/poz_cozucu.EGITIM_SIRASI` (model çıktı sırası, 87 karede
-  deneysel; **pred[k]→json[EGITIM_SIRASI[k]]**), pivot = `MESH_PIVOT_OFFSET_CM`
-  (+11.76 cm ileri → tvec = kamera→actor origin = `get_target_location`, telemetriyle
-  doğrudan kıyaslanır). Gömülü şemalar (`kuyruk_ucu`/`motor`) SİLİNMEDİ — yaml `sema`
-  bayrağıyla seçilebilir yedek (JSON okunamazsa da düşülür).
-- `models/talon_pose.yaml`: `sema: berat_json`, `conf: 0.35` (main canlı testi: 0.20'de boş
-  gökyüzüne uyduruyor). Model registry'den (arayüz 🧠 MODEL paneli) hot-swap ile aktifleşir;
-  aktif olunca bbox+keypoints AYNI ağdan gelir → ByteTrack + PnP + OIPN zinciri çalışır.
-- main'in gözlemci hattı (`detection/poz_tespit.py` + `pose/` araçları) repo'da DURUYOR
-  (silinmedi); bizim server bunları çağırmaz — tek aktif model mimarisi bizde registry'dir.
-- Kalite (Berat ölçümü, eğitim karelerinde İYİMSER): mesafe medyan %8 / yaw medyan 6°
-  (<10 m iyi); 15 m+ şişer → **terminal faz (≈4-12 m) aracı**.
+## POZ KESTİRİMİ — BİZİM PnP HATTI (TAŞINACAK-ADAY; runtime dışı)
+Registry tabanlı hat (`talon_pose_estimator` + ByteTrack + OIPN zinciri) merge 2026-07-07
+ile runtime dışı kaldı; PNG'ye kamera-mesafe girdisi gerektiğinde taşınacak aday budur:
+- **3B keypoint TEK KAYNAĞI: `pose/talon_keypoints.json`** — `berat_json` şeması:
+  sıra **pred[k]→json[EGITIM_SIRASI[k]]** (`pose/poz_cozucu.EGITIM_SIRASI`), pivot
+  `MESH_PIVOT_OFFSET_CM` (+11.76 cm → tvec = `get_target_location` ile kıyaslanır).
+- `models/talon_pose.yaml`: `sema: berat_json`, `conf: 0.35`. Kalite (Berat ölçümü,
+  İYİMSER): mesafe medyan %8 / yaw 6° (<10 m iyi) → **terminal faz (≈4-12 m) aracı**.
 
-## SAHTE TESPİT MODU (main'den 2026-07-06 merge ile taşındı — güdüm geliştirme aracı)
-YZ modeli olgun değilken görsel güdüm algoritması geliştirmek için: arayüzdeki
-**"🖱️ Sahte Tespit (Mouse)"** butonu açıkken, görev sırasında FPV'de mouse BASILI
-TUTULAN nokta `/api/sahte` üzerinden server'a akar ve `dedektor_dongusu`'nde asıl algı
-çıktısının YERİNE geçer (aynı det sözlüğü → `beyin.set_gorsel_tespit`; o döngüde
-inference koşulmaz, ByteTrack sahteyle kirlenmez). Failsafe: mesaj 0.6 s kesilirse
-otomatik düşer. Overlay'de MACENTA bbox + "[SAHTE/MOUSE]" etiketi (yeşil = model).
-Buton kapalıyken sistem tamamen eskisi gibi. **Video isteri gereği (manuel işaretleme
-YASAK) yarışma/video koşusunda KULLANILMAZ; teslim öncesi komiteye giden paketten
-kaldırılır** (kullanıcı kararı 2026-07-06).
+## SAHTE TESPİT MODU (main'in aracı — güdüm geliştirme)
+YZ modeli olgun değilken görsel güdüm testi: arayüzdeki **"🖱️ Sahte Tespit (Mouse)"**
+açıkken FPV'de mouse BASILI TUTULAN nokta `/api/sahte` ile asıl algı çıktısının YERİNE
+geçer; 0.6 s failsafe; MACENTA bbox + "[SAHTE/MOUSE]". **Video isteri gereği (manuel
+işaretleme YASAK) yarışma/video koşusunda KULLANILMAZ; teslim paketinden kaldırılır**
+(kullanıcı kararı 2026-07-06).
+
+## CANLI TESPİT HATTI (main 2026-07-06 — kök neden analizi + 4 düzeltme; AKTİF HAT)
+Canlı görevde dedektör kördü (87.6 sn'de 1 tespit; aynı görüntüde offline %62.5
+kilit-eşiği-üstü). Kök neden: mss EKRAN yakalar; oyun penceresi Chrome'un arkasında
+kalınca dedektöre masaüstü/tarayıcı pikseli gitti (FPV paylaşımı pencere-İÇERİĞİ
+gösterdiğinden kullanıcı fark etmez). Kanıt/teşhis: `veri/ucus_log_*.csv`'de
+`vis_gordu/vis_conf` + gerçek-mesafe binleme; dedektör gözü = `/api/frame`.
+Düzeltmeler (server.py):
+1. `PENCERE_YAKALA_AKTIF=True` — windows-capture pencere-içeriği (occlusion-proof).
+   Sorun çıkarsa False → mss fallback (o zaman oyun penceresi ÖNDE tutulmalı).
+2. Dedektör kareyi DOĞAL çözünürlükte alır; `CAM_MAX_WIDTH=960` küçültme yalnızca
+   FPV JPEG akışında (`fpv_jpeg`). (960→1280 çift örnekleme uzak hedefi öldürüyordu.)
+3. `UI_CONF_MIN=0.25` predict eşiği; **güdüm kapısı**: `det_beyin` yalnız
+   conf≥`VIS_CONF_MIN` beyne gider (kilit/takip/güdüm davranışı DEĞİŞMEDİ).
+   Zayıf tespit arayüzde TURUNCU kesikli çizilir (`gorsel.conf_esik` telemetride).
+4. `POZ_HER_N=3` — poz inference'i seyrek (gözlemci-only özellik GPU'nun yarısını
+   yiyip dedektörü ~5-7 Hz'e düşürüyordu → takip delikleri).
+Beklenti (mesafeye bağlı, normal): 0-10 m ~%70-80, 15-20 m ~%45+, 60 m+ %0 (hedef
+birkaç piksel). "Video gibi kesintisiz" görünüm UI'daki 0.25 eşiğiyle gelir.
+Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280).
+Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
+(640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
+
+## POZ KESTİRİMİ (2026-07-04'te eklendi — GÖZLEMCİ modda)
+`models/talon_pose.pt` (yolo11m-pose, 6 keypoint) + PnP artık pipeline'da:
+- `detection/poz_tespit.py` (PozDedektor) + `pose/poz_cozucu.py` (PnP+EMA; **EGITIM_SIRASI
+  ve MESH_PIVOT_OFFSET kritik** — POSE_REHBERI "EĞİTİM SIRASI" bölümü).
+- `server.py` dedektör döngüsü best.pt'ye İLAVE koşar; **beyin/güdüm girdisi DEĞİŞMEDİ**
+  (best.pt bbox akışı aynen). Telemetri: `gorsel.poz` + `gorsel.poz_hazir`.
+- Arayüz: FPV'de iskelet + "MESAFE (KAM) / HEDEF YAW" satırları + 📐 POZ KESTİRİMİ kartı
+  (kamera vs gerçek kıyas). Video isteri "GNSS bağımlılığının azalması" kanıtına birebir.
+- Model: **v3 (5 Tem 2026)**, models/best.pt ile AYNI dosya (talon_pose.pt kopyası;
+  bbox+poz iki ayrı inference — tekleştirme ileriki optimizasyon). imgsz=1280.
+  EGITIM_SIRASI=[0,1,2,5,3,4] sira_bul.py ile YENİDEN doğrulandı (5 Tem).
+- Kalite v3 (eğitim karelerinde İYİMSER, degerlendir_foto): PnP çözüm %61, tespitsiz
+  %10; mesafe MAE 0.84 m / medyan |hata| %6.1 / BIAS −0.37 m; yaw MAE 12° (medyan 3.7°).
+  15-20 m bini artık %7 (eski model %89'du). Güdüme besleme SONRAKİ adım (kullanıcı onayı).
 
 ## BEKLEYEN İŞ
-- **main'in PNG güdüm hattı (2026-07-07, merge BEKLEMEDE — karar: A/B uçuş kıyası):**
-  Kayra main'de 9 commit ile IBVS + GPS-strike'ı SİLİP `guidance/png_gorsel.py`'yi tek
-  görsel yasa yaptı (+`png_sim/` PN simülatörü, +yeni best.pt, +bbox-gecikme fix'i).
-  Düz merge bizim hatta `ibvs_guidance.py` ve `models/talon_pose.pt`'yi otomatik siliyor
-  (git: bizde değişmeyen dosyaya karşı taraf silmesi) → merge İPTAL edildi. Bu turda yalnız
-  bbox-fix PORT'u + yeni best.pt (bc1e0b3) alındı; **talon_pose.pt ve ibvs bizde DURUYOR.**
-  **A/B YAPILDI (2026-07-07) → KARAR: main'in PNG hattı BAZ.** Ölçüm (aynı model
-  best_son@1280, eşik 0.45, gerçek-3B mesafe): main 1/3 görev başarısı (213 sn, 1.79 m
-  vuruş) + en-yakın medyan 4.4 m; bizim standoff 0/3 (25.4 m) ve strike 0/2 (12.0 m),
-  görsel faza HİÇ giremedi. Kök teşhis: eski best.pt HUD-OVERFIT (HUD yazısını talon
-  sanıyor; kanıt `veri/ab/tani2/kareler/`); best_son 640'ta kör → @1280 bağlandı
-  (`models/best_kayra_son.yaml`). Ortak 1 no'lu borç: MODEL (HUD-FP + uzak menzil).
-  Ayrıntı + TAŞINACAKLAR (kilit §6.1.4, SERT AYRIM çiti — main'de truth ÇİTSİZ!,
-  ByteTrack, testler) + merge planı: **`docs/AB_KIYAS_KARAR_20260707.md`**.
-  Merge AYRI OTURUMDA, Kayra onayıyla (bizim IBVS/OIPN + GPS-strike o zaman silinir).
-  Düzenek: `arac/ab_kiyas.py`; main ölçüm worktree'si `../avci-ab-main`.
-- **Merge sonrası sim regresyonu:** iki profil de sim'de uçurulup teyit edilecek —
-  (a) varsayılan standoff (GPS_TERMINAL_STRIKE=False): 5 m arkada/altta pace + kamera
-  çerçeveleme; (b) GPS_TERMINAL_STRIKE=True: eski intercept+ram birebir; (c) sahte
-  tespitle GORSEL_TAKIP zinciri; (d) talon_pose.pt hot-swap ile PnP/berat_json canlı doğrulama
-  (reproj_err ~makul, mesafe telemetriyle uyumlu mu).
-- **Poz çıktısı güdüme girsin mi?** (kamera-mesafeli angajman / hedef-yaw lead) — talon_pose.pt
-  canlıda doğrulanınca kararlaştırılacak (OIPN zaten PnP-geçerliyken devrede).
-- **Arayüz deseni:** yeni sinyaller `server.py` `_gorev_izle()`den türetilip `build_telemetry`
-  payload'ına eklenir + `index.html`'de kart/overlay (güdüm koduna dokunmadan).
+- **MERGE 2026-07-07 KALANLARI (sırayla):**
+  1. **SERT AYRIM temizliği (paket_kontrol şartı):** main'den gelen `ana_kontrol.py`'de
+     "gercek" kaynak yolu GÜDÜM İÇİNDE truth okuyor (`get_debug_truth`, `_gercek_hedef_hiz`,
+     `true_*` debug alanları) → bizim `set_hedef_kaynagi`/dev_truth dikişine çevrilecek;
+     `server.py`+`index.html`'deki çitsiz truth/gercek noktaları DEV-ONLY çite alınacak.
+  2. **Kilit §6.1.4 taşıma:** main'in kilit/ATIS kuralı şartnameyle kıyaslanacak; eksikse
+     bizim `guidance/kilit_kurali.py` + `iletisim/hakem_istemci` main FSM'ine bağlanacak.
+  3. **ByteTrack kararı (ölçerek):** main tek-kutu argmax (A/B'de 72 kayıp kenarı/30 ID);
+     bizim `detection/takip.py` (ByteTrack+gyro-CMC) aday.
+  4. **Test uyumu:** FSM/faz testleri main güdümüne göre güncellenecek (eski hat testleri
+     TAŞINACAK-ADAY modülleriyle yaşamaya devam eder).
+  5. **ab_kiyas regresyonu:** merge sonrası ≥ main'in bugünkü seviyesi (1/3) doğrulanacak.
+  6. **Kayra onayı → push** (merge yerel; `docs/AB_KIYAS_KARAR_20260707.md` ile birlikte).
+- **PNG tune ile ıskalamayı kapatmak** (İster 9/10; main 6 Tem log analizi: handoff dikey
+  açığı + kapanma hızı; `araclar/gorsel_episode_analiz.py` + TUNE_REHBERI §9). A/B bulgusu:
+  ana başarı kaldıracı MODEL (HUD-FP + uzak menzil conf — `docs/AB_KIYAS_KARAR_20260707.md` §7).
+- **Görsel güdüm fazı — YZ modelleri / ekstra özellikler:** güçlü tespit/tracking, poz/mesafe
+  kestirimi, kamera-tabanlı terminal vuruş eklendikçe arayüz de genişler. Desen HAZIR:
+  yeni sinyal `server.py` `_gorev_izle()` → `build_telemetry` → `index.html` kart/overlay
+  (güdüm koduna minimum dokunuş). Sıradaki karar: poz çıktısı güdüme girsin mi
+  (kamera-mesafeli angajman / hedef-yaw lead)?
 - Video anlatım metinleri (ilk 3 dk + son 3 dk) — kullanıcı EN SONDA isteyecek; tüm metinler
   takır takır verilecek.
