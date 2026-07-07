@@ -18,15 +18,13 @@ ndarray dondurdugunden dogrudan gecmek DOGRU renktir (PIL RGB de kabul edilir).
 
 class HedefDedektor:
 
-    def __init__(self, model_path, conf=0.35, imgsz=640, device=None, cls_id=-1):
+    def __init__(self, model_path, conf=0.35, imgsz=640, device=None):
         self.hazir = False
         self.model = None
         self.names = {}
         self.conf = float(conf)
         self.imgsz = int(imgsz)
         self.device = device
-        self.cls_id = int(cls_id)      # >=0: yalniz bu sinifin kutulari (cok-sinifli modelde
-                                       # decoy'a kilitlenme onlenir); -1 = filtre kapali
         self.hata = None
         try:
             from ultralytics import YOLO
@@ -69,14 +67,7 @@ class HedefDedektor:
             return None
         try:
             confs = boxes.conf
-            cid = int(getattr(self, "cls_id", -1))
-            if cid >= 0 and boxes.cls is not None:        # sinif filtresi (Cfg.VIS_CLS_ID)
-                adaylar = [k for k in range(len(boxes)) if int(boxes.cls[k]) == cid]
-                if not adaylar:
-                    return None
-                i = max(adaylar, key=lambda k: float(confs[k]))
-            else:
-                i = int(confs.argmax())                   # EN-YUKSEK-conf kutu (sinif-agnostik)
+            i = int(confs.argmax())                       # EN-YUKSEK-conf kutu (sinif-agnostik)
             x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
             cls = int(boxes.cls[i]) if boxes.cls is not None else -1
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
