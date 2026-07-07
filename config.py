@@ -29,4 +29,7 @@ WEB_PORT = 8000            # arayuz portu; baska bir ornek calisiyorsa degistir
 
 # --- Baslangic model secimi (registry ilk tercih; models/ altindaki .pt adi) ---
 # Ayrinti: detection/model_yonetici.py canli hot-swap yapar; bu yalniz baslangic.
-VIS_MODEL_ADI = "best"     # models/<ad>.pt (yoksa ilk bulunan .pt'ye duser)
+# 2026-07-07: "best" HUD-OVERFIT cikti (HUD yazilarini talon saniyor; kanit:
+# veri/ab/tani2/kareler/*_KUTULU.jpg + canli kosuda FP kovalayip 500 m acildi).
+# Aktif model Kayra'nin best_son'u @1280 (yaml'i imgsz/conf tasir).
+VIS_MODEL_ADI = "best_kayra_son"   # models/<ad>.pt (yoksa ilk bulunan .pt'ye duser)
