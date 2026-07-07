@@ -15,6 +15,7 @@ ZARIF BOZULMA: windows-capture yoksa / pencere bulunamazsa hazir=False, get_late
 -> server.py mss'e geri duser (mevcut davranis korunur, sistem cokmez).
 """
 import threading
+import time
 
 
 GAME_PROC_HINTS = ("dronesofwar",)      # oyun exe/surec adi bunu icermeli (kucuk harf)
@@ -99,6 +100,10 @@ class PencereYakala:
         self._lock = threading.Lock()
         self._baslat_lock = threading.Lock()   # baslat() cift-cagri yarisini onler
         self._control = None
+        # --- WATCHDOG durumu (bayat-kare / yanlis-pencere yeniden baglama) ---
+        self._latest_t = 0.0      # son KARE geldigi an (monotonic); 0 = hic kare gelmedi
+        self._baglama_t = 0.0     # yakalama basladigi an (ilk-kare beklerken bayatlik icin)
+        self._bagli_hwnd = None   # su an BAGLI oldugumuz pencere handle'i (degisirse yeniden bagla)
         try:
             from windows_capture import WindowsCapture
             self._WindowsCapture = WindowsCapture
@@ -162,6 +167,7 @@ class PencereYakala:
                         bgr = np.ascontiguousarray(frame.convert_to_bgr().frame_buffer)
                         with self._lock:
                             self._latest = bgr
+                        self._latest_t = time.monotonic()   # WATCHDOG: taze kare damgasi
                     except Exception:
                         pass
 
@@ -175,6 +181,9 @@ class PencereYakala:
                 try:
                     self._control = cap.start_free_threaded()
                     self.aktif_pencere = ad if ad else ("hwnd:%s" % hwnd)
+                    self._bagli_hwnd = hwnd                 # WATCHDOG: bagli pencere
+                    self._baglama_t = time.monotonic()
+                    self._latest_t = 0.0                    # ilk kareyi bekle
                     print("[PENCERE_YAKALA] yakalama basladi: %s" % self.aktif_pencere)
                     return True
                 except Exception as e:
@@ -192,6 +201,8 @@ class PencereYakala:
     def durdur(self):
         c = self._control
         self._control = None
+        self._latest_t = 0.0
+        self._bagli_hwnd = None
         with self._lock:
             self._latest = None
         if c is not None:
@@ -199,6 +210,32 @@ class PencereYakala:
                 c.stop()
             except Exception:
                 pass
+
+    def yeniden_baglanmali(self, stale_s=2.0):
+        """WATCHDOG: yakalama 'calisyor' gorunuyor AMA gercekte bozuk mu?
+        Oyun penceresi yeniden yaratildiginda / WGC dondugunda / baslangicta YANLIS
+        pencereye baglandiginda on_closed TETIKLENMEZ -> _control dolu kalir ama kare
+        gelmez/bayatlar; sistem mss'e duser (oyun arkadaysa yanlis piksel). Bu durumlari
+        yakalar; connection_manager durdur()+baslat() ile TAZE pencereye yeniden baglanir.
+        True = yeniden baglan. (Calismyorsa veya saglikliysa False.)"""
+        if self._control is None:
+            return False
+        simdi = time.monotonic()
+        # (a) KARE geldi ama BAYATLADI (WGC dondu / pencere oldu)
+        if self._latest_t > 0.0 and (simdi - self._latest_t) > stale_s:
+            return True
+        # (b) Baglandi ama HIC kare gelmedi (yanlis/gorunmez pencereye baglanma) — makul sure gecti
+        if self._latest_t == 0.0 and self._baglama_t > 0.0 and (simdi - self._baglama_t) > stale_s:
+            return True
+        # (c) BAGLI oldugumuz pencere artik gecerli oyun penceresi DEGIL (handle degisti)
+        if self.window_name is None and self.window_hwnd is None and self._bagli_hwnd is not None:
+            try:
+                _, hwnd = pencere_bul(self.title_hints)
+                if hwnd is not None and int(hwnd) != int(self._bagli_hwnd):
+                    return True
+            except Exception:
+                pass
+        return False
 
     def get_latest_bgr(self):
         with self._lock:

@@ -490,6 +490,21 @@
           <div class="row"><span class="k">Yeniden tespit</span><span class="v mono" id="tkYeniden">—</span></div>
         </div>
 
+        <!-- KİLİTLENME (şartname 6.1.2/6.1.4): 10 sn pencerede ≥5 sn kümülatif kilit.
+             Kilit = hedef merkezi vuruş alanında (yatay %25-75, dikey %10-90) + bbox
+             en az bir eksende ≥ eşik. İster dolmadan TERMİNAL (vuruş) açılmaz. -->
+        <div class="card" style="border-color:#452525">
+          <div class="title" style="color:#ff6b6b">🔒 KİLİTLENME İSTERİ <small style="color:var(--muted);font-weight:400">(5 sn / 10 sn pencere)</small></div>
+          <div class="row"><span class="k">Görsel faz</span><span class="v" id="klFaz"><span class="rozet pasif">—</span></span></div>
+          <div class="row"><span class="k">Kilit (anlık)</span><span class="v" id="klAnlik"><span class="rozet pasif">YOK</span></span></div>
+          <div class="row"><span class="k">bbox ekseni</span><span class="v mono" id="klBoyut">—</span></div>
+          <div class="row"><span class="k">Pencere (kümülatif)</span><span class="v mono" id="klSure">—</span></div>
+          <div style="height:8px;background:#141a26;border:1px solid #26314a;border-radius:4px;margin:4px 0 6px;overflow:hidden">
+            <div id="klBar" style="height:100%;width:0%;background:#ffcd19;transition:width .15s"></div>
+          </div>
+          <div class="row"><span class="k">Kilit isteri</span><span class="v" id="klOk"><span class="rozet pasif">BEKLİYOR</span></span></div>
+        </div>
+
         <!-- POZ KESTİRİMİ: talon_pose.pt 6-nokta + PnP → KAMERADAN mesafe/yönelim.
              Gözlemci akış (güdüme girmez); "gerçek" satırları sim/debug kıyası. -->
         <div class="card" style="border-color:#1f3a45">
@@ -523,6 +538,7 @@
           <div class="row"><span class="k">Menzil (kamera)</span><span class="v mono" id="pnR">—</span></div>
           <div class="row"><span class="k">Kapanma hızı Vc</span><span class="v mono" id="pnVc">—</span></div>
           <div class="row"><span class="k">LOS dönme |Ω|</span><span class="v mono" id="pnOmega">—</span></div>
+          <div class="row"><span class="k">LOS yükseliş (look-up)</span><span class="v mono" id="pnElev">—</span></div>
           <div class="row"><span class="k">Faz</span><span class="v mono" id="pnCommit">—</span></div>
         </div>
 
@@ -682,31 +698,32 @@
   function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
 
   // ===== CANLI TUNE: slider'lar Cfg'yi ANINDA degistirir (server restart YOK) =====
+  // Sade set: en çok etki eden knob'lar önce. Yapısal/kalibrasyon sabitleri (filtre
+  // EMA'ları, işaretler, FSM zamanlamaları, GPS PD) panelden çıkarıldı — Cfg'de sabit
+  // (gerekirse dosyadan). Sıra = ayarlama sırası; ★ = etki büyüklüğü.
   const TUNE_DEFS = [
-    ["GENEL KOMUT AYARLARI", [
-      ["YAW_MAX","Burun donus hizi   (artir=kamera hedefte kalir)",0.05,0.60,0.05],
-      ["MAX_DELTA","Komut yumusakligi   (dusur=yumusak, artir=hizli/sert tepki)",0.02,0.30,0.01],
+    ["GÖRSEL GÜDÜM · ANA AYARLAR (önce bunlar — sırayla)", [
+      ["VIS_TAKIP_VC","★★★ Takip yaklaşma hızı (cm/s)   (yavaş/yaklaşamıyorsa ARTIR; kilit menzilinde dalıp kaçırıyorsa DÜŞÜR)",100,1500,25],
+      ["VIS_TRACK_TILT","★★★ Yatış (bank) sınırı   (yalnız ROLL — savruluyor/yatıyorsa DÜŞÜR; ileri hızı ETKİLEMEZ)",0.10,0.80,0.025],
+      ["VIS_K_YAW_LEAD","★★ Öngörülü yaw   (hedef yatayda GERİDE/sağ-sol kenarda kalıyorsa ARTIR)",0,1.0,0.025],
+      ["VIS_DH_TARGET","★★ Hedefin altında uçma mesafesi (cm)   (aracın üstüne çıkıp zemin arka plan oluyorsa ARTIR — hep alttan yaklaşır)",100,800,25],
+      ["VIS_SOFTSTART_S","★★ Geçiş yumuşatma (s)   (görsel faza geçince sert manevra/masayı deviriyorsa ARTIR)",0,3,0.05],
     ]],
-    ["GPS YAKLAŞMA — GELİŞMİŞ (gerekmedikçe dokunma; rehberdeki aşamalara göre)", [
-      ["KP_YAW","Burun kazancı   (burun tembelse artır, sağlı-sollu vuruyorsa azalt)",0.3,2.0,0.05],
-      ["V_CAP_FAR","Uzak yaklaşma hız tavanı (cm/s)",1000,3300,100],
-      ["V_CAP_NEAR","Handoff'a giriş hız tavanı (cm/s)   (savruluyorsan düşür)",200,1500,50],
-      ["BRAKE_DIST","Frenleme başlangıç mesafesi (cm)   (yanından geçip savruluyorsa artır)",3000,12000,500],
-    ]],
-    ["GÖRSEL GÜDÜM — PNG (görsel temas sonrası — yalnızca kamera)", [
-      ["VIS_KP_CLOSE","1) Kapanma hızı talebi   (düşür=daha çok düzeltme zamanı, ıskalıyorsa İLK bunu düşür)",0.1,1.2,0.05],
-      ["VIS_PN_N","2) Navigasyon sabiti N   (3-5; artır=daha atak rota düzeltme)",2.0,6.0,0.25],
-      ["VIS_PN_TILT","3) Manevra yetkisi   (PN ivmesinin pitch/roll'a çarpanı)",0.3,1.0,0.05],
-      ["VIS_TAU_Z","4) Dikey ataklık (s)   (artır=dikey açığı daha hızlı kapatır)",0.1,1.5,0.1],
-      ["VIS_SIGN_YAW","Yön: burun sağ/sol   (hedef ters yöne kaçıyorsa −1/+1 çevir)",-1,1,2],
-      ["VIS_K_YAW","Yatay ortalama gücü   (artır=hızlı döner, çok artırma salınım)",0,1.5,0.05],
-      ["VIS_EY_REF","Dikey referans — 25° tilt telafisi   (yalnız turuncu REF çizgisi; güdüme girmez)",-0.8,0.8,0.01],
-      ["VIS_CONF_MIN","Tespit güven eşiği   (artır=az yanlış tespit, geç kilit)",0.10,0.90,0.05],
-      ["VIS_EMA","Titreşim yumuşatma   (küçük=pürüzsüz ama yavaş)",0.10,1.0,0.05],
+    ["GÖRSEL GÜDÜM · İNCE AYAR (ana yetmezse)", [
+      ["VIS_KP_CLOSE","★ Kapanma hızı talebi   (ıskalıyorsa düşür=daha çok düzeltme zamanı)",0.10,1.20,0.025],
+      ["VIS_PN_N","★ Navigasyon sabiti N (3-5)   (titreşim/salınım varsa DÜŞÜR)",2.0,6.0,0.1],
+      ["VIS_K_YAW","★ Yatay ortalama gücü   (artır=hızlı döner; çok artırma=salınım)",0,1.5,0.025],
+      ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
+      ["VIS_DH_BAND","Dikey ayrım hassasiyeti (cm)   (küçük=hedef mesafesinde sıkı tutar; dikey titriyorsa ARTIR)",50,600,25],
+      ["VIS_LOOKUP_VZ","Dikey düzeltme hızı (cm/s)   (dikey sert/zıplıyorsa DÜŞÜR; alttan kaçış geç düzeliyorsa ARTIR)",0,800,25],
+      ["VIS_HOLD_PCT","Takip mesafe bandı   (artır=daha yakın park eder)",0.06,0.15,0.0025],
+      ["VIS_CONF_MIN","Tespit güven eşiği   (artır=az yanlış tespit ama geç kilit)",0.10,0.90,0.025],
     ]],
   ];
   let tuneAcik=false;
-  function tuneFmt(v,st){ v=Number(v); return st<0.001? v.toFixed(5) : (st<0.1? v.toFixed(2) : v.toFixed(0)); }
+  // Ondalik basamak sayisini ADIM'dan tureti (0.1->1, 0.05->2, 0.005->3, 0.00005->5, 1/2->0).
+  function tuneFmt(v,st){ v=Number(v); const s=String(st); const d=s.indexOf('.');
+    return v.toFixed(Math.min(d<0?0:(s.length-d-1),5)); }
   async function tuneKur(){
     let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
     const list=$("tuneList"); list.innerHTML="";
@@ -803,6 +820,19 @@
     const AV_SARI="rgba(255,205,25,.95)", AK_YESIL="rgba(70,220,120,.95)", AH_KIRMIZI="#ff4d4d";
     const avX0=rc.x+0.25*rc.w, avX1=rc.x+0.75*rc.w, avY0=rc.y+0.10*rc.h, avY1=rc.y+0.90*rc.h;
     ctx.setLineDash([]);
+    // PERVANE MASKESİ: bu bölgelerdeki tespitler ELENİR (kendi pervanemiz hedef sanılmasın).
+    // Kırmızı tarama + "PERVANE" etiketi → kullanıcı canlı FPV'de kapsamı doğrular/rafine eder.
+    const pmask=(gs.prop_maske||[]);
+    for(const r of pmask){
+      const mx=rc.x+r[0]*rc.w, my=rc.y+r[1]*rc.h, mw=(r[2]-r[0])*rc.w, mh=(r[3]-r[1])*rc.h;
+      ctx.save();
+      ctx.fillStyle="rgba(220,40,40,.14)"; ctx.fillRect(mx,my,mw,mh);
+      ctx.strokeStyle="rgba(220,40,40,.6)"; ctx.setLineDash([5,4]); ctx.lineWidth=1.5;
+      ctx.strokeRect(mx,my,mw,mh); ctx.setLineDash([]);
+      ctx.fillStyle="rgba(255,120,120,.95)"; ctx.font="10px monospace";
+      ctx.fillText("PERVANE (elenir)", mx+4, my+13);
+      ctx.restore();
+    }
     ctx.strokeStyle=AK_YESIL; ctx.lineWidth=2; ctx.strokeRect(rc.x+1, rc.y+1, rc.w-2, rc.h-2);   // Ak
     ctx.strokeStyle=AV_SARI;  ctx.lineWidth=2; ctx.strokeRect(avX0, avY0, avX1-avX0, avY1-avY0);  // Av
     // pay ölçü çizgileri (kesikli, Şekil 2'deki oklar gibi)
@@ -821,14 +851,15 @@
     halo("%100 dikey", rc.x+rc.w-8, mcy, AK_YESIL, "right");
     halo("Ak: Kamera Görüş Alanı", rc.x+8, rc.y+rc.h-10, AK_YESIL, "left");
     halo("Av: Hedef Vuruş Alanı", mcx, avY1-10, AV_SARI, "center");
-    // DİKEY REFERANS çizgisi (kamera 25° yukarı tilt telafisi): güdüm hedefi bu
-    // TURUNCU çizgide tutar; kalibrasyon = hedef aynı irtifadayken bbox buraya otursun.
-    const refY = mcy + (Number(gs.ey_ref)||0)*rc.h/2;
-    ctx.strokeStyle="rgba(255,170,60,.85)"; ctx.lineWidth=1.5; ctx.setLineDash([6,4]);
-    ctx.beginPath(); ctx.moveTo(mcx-28,refY); ctx.lineTo(mcx+28,refY); ctx.stroke();
-    ctx.setLineDash([]);
-    ctx.font="11px monospace"; ctx.fillStyle="rgba(255,170,60,.95)";
-    ctx.fillText("REF", mcx+33, refY+4);
+    // DİKEY AYRIM göstergesi: araç hedefin ne kadar ALTINDA (alttan yaklaşma kanıtı).
+    // + = altta (İYİ, gökyüzü arka plan); ≤0 = hedefle aynı/üstünde (ZEMİN arka plan riski).
+    if(gs.durum==="GORSEL_GUDUM" && gs.lookup && gs.lookup.dh_below_m!=null){
+      const dh=Number(gs.lookup.dh_below_m), hed=Number(gs.lookup.hedef_m||4);
+      const iyi=dh>0.5;
+      ctx.font="bold 13px monospace"; ctx.fillStyle=iyi?"#37e0a0":"#ff6b6b";
+      ctx.fillText("HEDEF ALTINDA: "+(dh>=0?"+":"")+dh.toFixed(1)+" m  (hedef "+hed.toFixed(1)+" m)"
+                   +(iyi?"":"  ⚠ ÜSTE ÇIKIYOR"), rc.x+10, rc.y+rc.h-30);
+    }
     // TESPİT: hızlı kanaldan (/api/gorsel, ~15 Hz) — 200ms telemetri döngüsünü beklemez.
     // YAŞ TELAFİSİ: server tespit hızını (vx,vy [1/s]) verir; kutu, tespitin yaşı kadar
     // İLERİ çizilir → inference+aktarım gecikmesine rağmen kutu hedefin ŞİMDİKİ konumuna
@@ -845,37 +876,49 @@
     if(det){
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       const wPct=(det.w||0)*100, hPct=(det.h||0)*100;
-      const inAV = det.cx>=0.25&&det.cx<=0.75&&det.cy>=0.10&&det.cy<=0.90;
-      const boyOK = wPct>=6 || hPct>=6;                          // ekran ekseni ≥ %6 (şartname ≥%5 + tolerans)
-      const kilit = inAV && boyOK;
-      // ZAYIF tespit (güdüm eşiği altı): güdüm/kilit GÖRMEZ, yalnızca gösterim → TURUNCU kesikli
-      const esik = (gs.conf_esik!=null ? gs.conf_esik : 0.45);
-      const zayif = Number(det.conf) < esik;
-      const AH = zayif ? "#ffb01f" : (kilit ? "#37e0a0" : AH_KIRMIZI); // kilitliyken yeşil vurgusu
-      // Ah: Kilitlenme Dörtgeni (hedef bbox)
-      ctx.setLineDash(zayif?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=2.5;
-      ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
-      ctx.setLineDash([]);
-      ctx.fillStyle=AH; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();
-      // NİŞAN ÇİZGİSİ: ekran merkezinden hedefe (nereye kilitlendiği)
-      ctx.strokeStyle="rgba(255,77,77,.6)"; ctx.lineWidth=1; ctx.setLineDash([3,3]);
-      ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke(); ctx.setLineDash([]);
-      // kenar ölçü etiketleri (Şekil 2 gibi)
-      halo("≥ %5 yatay", bx, by-bh/2-15, AH, "center", "10px monospace");
-      halo("≥ %5 dikey", bx+bw/2+6, by, AH, "left", "10px monospace");
-      // HEDEF ID (üstte)
+      const lockPct=((gs.kilit&&gs.kilit.esik_pct!=null)?gs.kilit.esik_pct:0.06)*100; // Cfg.VIS_LOCK_PCT (slider)
+      // KİLİT RENKLENDİRMESİ (kırmızı/yeşil) YALNIZ GÖRSEL GÜDÜM fazında. GPS güdümüyle
+      // giderken (ARAMA/KİLİT) hedef SADE bir kutuya alınır — kilit ancak görsel fazda
+      // sayılır (backend _kilit_degerlendir de yalnız GORSEL_GUDUM'da çalışır).
+      const gorselFaz = (gs.durum==="GORSEL_GUDUM");
       const idTxt = (det.id!=null ? "ID:"+det.id+" " : "") + (det.sinif||"hedef")
                     + " " + Number(det.conf).toFixed(2);
-      ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
-      ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-33, itw+10, 15);
-      ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-22);
-      // Ah legend + canlı kaplama + kilit durumu (altta)
-      halo("Ah: Kilitlenme Dörtgeni", bx, by+bh/2+14, AH, "center", "10px monospace");
-      halo("yatay %"+wPct.toFixed(0)+" · dikey %"+hPct.toFixed(0)+"  ("+(boyOK?"≥%6 ✓":"<%6 ✗")+")",
-           bx, by+bh/2+28, boyOK?"#37e0a0":"#ff6b6b", "center", "10px monospace");
-      halo(zayif?("zayıf tespit — güdüm eşiği ("+Number(esik).toFixed(2)+") altı")
-                :(kilit?"KİLİTLİ ✓":(inAV?"boyut yetersiz":"merkez AV dışında ✗")),
-           bx, by+bh/2+42, zayif?"#ffb01f":(kilit?"#37e0a0":"#ff6b6b"), "center", "bold 11px monospace");
+      if(!gorselFaz){
+        // --- GPS GÜDÜM FAZI: sade nötr bbox (kırmızı/yeşil YOK) ---
+        ctx.setLineDash([]); ctx.strokeStyle="rgba(150,200,235,.92)"; ctx.lineWidth=2;
+        ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
+        ctx.fillStyle="rgba(150,200,235,.92)"; ctx.beginPath(); ctx.arc(bx,by,3.5,0,6.2832); ctx.fill();
+        ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
+        ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 15);
+        ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-7);
+      } else {
+        // --- GÖRSEL GÜDÜM FAZI: şartname kilitlenme dörtgeni + AV/boyut etiketleri ---
+        const inAV = det.cx>=0.25&&det.cx<=0.75&&det.cy>=0.10&&det.cy<=0.90;
+        const boyOK = wPct>=lockPct || hPct>=lockPct;           // ekran ekseninde ≥ eşik (şartname ≥%5 + tolerans)
+        const kilit = inAV && boyOK;
+        const esik = (gs.conf_esik!=null ? gs.conf_esik : 0.45);
+        const zayif = Number(det.conf) < esik;
+        // ŞARTNAME: kilit anlarında kilitlenme dörtgeni KIRMIZI #FF0000, ≤3 px, kesiksiz.
+        const AH = zayif ? "#ffb01f" : (kilit ? "#FF0000" : "rgba(200,210,225,.9)");
+        ctx.setLineDash(zayif?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=kilit?3:2.5;
+        ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
+        ctx.setLineDash([]);
+        ctx.fillStyle=AH; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();
+        // NİŞAN ÇİZGİSİ: ekran merkezinden hedefe (nereye kilitlendiği)
+        ctx.strokeStyle="rgba(255,77,77,.6)"; ctx.lineWidth=1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke(); ctx.setLineDash([]);
+        halo("≥ %"+lockPct.toFixed(0)+" yatay", bx, by-bh/2-15, AH, "center", "10px monospace");
+        halo("≥ %"+lockPct.toFixed(0)+" dikey", bx+bw/2+6, by, AH, "left", "10px monospace");
+        ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
+        ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-33, itw+10, 15);
+        ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-22);
+        halo("Ah: Kilitlenme Dörtgeni", bx, by+bh/2+14, AH, "center", "10px monospace");
+        halo("yatay %"+wPct.toFixed(1)+" · dikey %"+hPct.toFixed(1)+"  ("+(boyOK?("≥%"+lockPct.toFixed(0)+" ✓"):("<%"+lockPct.toFixed(0)+" ✗"))+")",
+             bx, by+bh/2+28, boyOK?"#37e0a0":"#ff6b6b", "center", "10px monospace");
+        halo(zayif?("zayıf tespit — güdüm eşiği ("+Number(esik).toFixed(2)+") altı")
+                  :(kilit?"KİLİTLİ ✓":(inAV?"boyut yetersiz":"merkez AV dışında ✗")),
+             bx, by+bh/2+42, zayif?"#ffb01f":(kilit?"#37e0a0":"#ff6b6b"), "center", "bold 11px monospace");
+      }
     }
     // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
     // kp REF sırada gelir (0 burun,1 solK,2 sağK,3 solKuy,4 sağKuy,5 kuyArk);
@@ -907,10 +950,25 @@
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
+    const gfazTxt = (gs.durum==="GORSEL_GUDUM" && gs.faz) ? " · "+gs.faz : "";
     const fazTxt = gorev.faz ? "  · FAZ: "+gorev.faz : "";
-    ctx.fillText("DURUM: "+dur+modTxt+fazTxt, rc.x+10, rc.y+22);
+    ctx.fillText("DURUM: "+dur+gfazTxt+modTxt+fazTxt, rc.x+10, rc.y+22);
+    // KARE KAYNAĞI uyarısı: dedektör mss'e düşerse (oyun penceresi arkada) yanlış yeri
+    // görebilir → sağ-üstte turuncu uyarı. windows-capture ise sessiz (occlusion-proof).
+    if(gs.kare_kaynak && /mss/i.test(gs.kare_kaynak)){
+      ctx.font="bold 11px monospace"; ctx.fillStyle="rgba(255,176,31,.95)";
+      const wt="⚠ KAMERA: mss — oyun penceresini ÖNE al";
+      ctx.fillText(wt, rc.x+rc.w-ctx.measureText(wt).width-10, rc.y+rc.h-48);
+    }
     if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
       ctx.fillStyle="#8aa"; ctx.fillText("KİLİT: "+(gs.pos_count||0)+"/"+gs.n_lock, rc.x+10, rc.y+40);
+    }
+    // KİLİT PENCERESİ (şartname 5/10 sn) — görsel fazda sayaç FPV'de de görünür (video kanıtı)
+    if(gs.durum==="GORSEL_GUDUM" && gs.kilit){
+      const k=gs.kilit;
+      ctx.fillStyle = k.ok ? "#37e0a0" : "#ffcd19";
+      ctx.fillText("KİLİT PENCERESİ: "+Number(k.sure||0).toFixed(1)+"/"+Number(k.gerek||5).toFixed(0)
+                   +" sn"+(k.ok?"  ✓ İSTER SAĞLANDI":""), rc.x+10, rc.y+40);
     }
     // SAĞ-ÜST rozetler: GPS güdümü + TAKİP (aktif/pasif)
     const pad=8;
@@ -996,6 +1054,29 @@
     $("tkKayip").innerHTML  = (tk.kayip_s!=null && tk.kayip_s>0.05) ? f1(tk.kayip_s)+' <small>s</small>' : '0.0 <small>s</small>';
     $("tkYeniden").textContent = (tk.yeniden!=null) ? tk.yeniden : "—";
   }
+  // KİLİTLENME kartı (şartname 6.1.2/6.1.4): görsel alt-faz + 5/10 sn pencere sayacı
+  function guncelleKilit(gs){
+    gs = gs || {};
+    const k = gs.kilit || {};
+    const gorselde = gs.durum === "GORSEL_GUDUM";
+    const fazRenk = {YAKLASMA:"pasif", TAKIP:"ok", TERMINAL:"kes"};
+    $("klFaz").innerHTML = gorselde && gs.faz
+      ? '<span class="rozet '+(fazRenk[gs.faz]||"pasif")+'">'+gs.faz+'</span>'
+      : '<span class="rozet pasif">GPS FAZI</span>';
+    $("klAnlik").innerHTML = k.anlik
+      ? '<span class="rozet ok">KİLİT ✓</span>' : '<span class="rozet pasif">YOK</span>';
+    $("klBoyut").textContent = (k.boyut_pct!=null)
+      ? ("%"+(k.boyut_pct*100).toFixed(1)+" / eşik %"+((k.esik_pct||0.06)*100).toFixed(0)) : "—";
+    const sure=Number(k.sure||0), gerek=Number(k.gerek||5);
+    $("klSure").textContent = gorselde
+      ? (sure.toFixed(1)+" / "+gerek.toFixed(0)+" sn  (pencere "+Number(k.pencere||10).toFixed(0)+" sn)") : "—";
+    const bar=$("klBar");
+    bar.style.width = Math.min(100, 100*sure/Math.max(gerek,0.1)).toFixed(0)+"%";
+    bar.style.background = k.ok ? "var(--accent)" : "#ffcd19";
+    $("klOk").innerHTML = k.ok
+      ? '<span class="rozet ok">SAĞLANDI ✓ — vuruş izni açık</span>'
+      : '<span class="rozet pasif">BEKLİYOR</span>';
+  }
   // POZ KESTİRİMİ kartı: kamera-PnP mesafe/yaw + gerçekle kıyas (fark renklenir)
   function _aciFark(a,b){ return Math.abs(((a-b+540)%360)-180); }
   function guncellePoz(gs, gercekM){
@@ -1056,9 +1137,18 @@
       ? '<span style="color:'+(pn.Vc_ms>=0?"var(--accent)":"var(--warn)")+'">'+f1(pn.Vc_ms)+' <small>m/s</small></span>' : "—";
     $("pnOmega").innerHTML = pn.omega_rads!=null
       ? (pn.omega_rads*57.2958).toFixed(1)+' <small>°/s</small>' : "—";
+    // LOS yükseliş açısı (look-up): + = hedef üstte (gökyüzü silueti, iyi); eşik altı = uyarı
+    if(pn.elev_deg!=null){
+      const ok=(pn.lookup_ok!==false);
+      $("pnElev").innerHTML='<span style="color:'+(ok?"var(--accent)":"var(--warn)")+'">'
+        +(pn.elev_deg>=0?"+":"")+Number(pn.elev_deg).toFixed(1)+'°'
+        +(ok?" ✓":" ⬇ alçalıyor")+'</span>';
+    } else $("pnElev").textContent="—";
     $("pnCommit").innerHTML = pn.commit
       ? '<span style="color:var(--danger);font-weight:600">COMMIT · dalış</span>'
-      : '<span style="color:var(--muted)">güdüm</span>';
+      : (pn.vurus_izin===false
+         ? '<span style="color:var(--warn)">MENZİL TUTMA · kilit isteri bekleniyor</span>'
+         : '<span style="color:var(--muted)">güdüm</span>');
   }
 
   // ---- Görev olay günlüğü (dedup: sadece yeni id'ler DOM'a; renk sınıfı sv'den) ----
@@ -1265,6 +1355,7 @@
       guncelleGorev(t.gorev);
       guncelleGnss(t.gnss);
       guncelleTakip(t.takip, t.gorsel && t.gorsel.tespit);
+      guncelleKilit(t.gorsel);                    // KİLİTLENME kartı: 5/10 sn pencere + faz
       guncellePoz(t.gorsel, t.gercek_mesafe_m);   // POZ kartı: kamera-PnP vs gerçek
       guncelleGudum(t.gudum);
       sonTelemetri=t;            // ATIŞ DURUMU 100ms motoru en taze telemetriyi okur

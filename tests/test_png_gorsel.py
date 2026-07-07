@@ -160,6 +160,34 @@ def test_hesapla_komut_sinirlari_ve_yon():
     assert yaw > 0.0, f"hedef sagda ama yaw={yaw:.3f} (SIGN_YAW yonu?)"
 
 
+def test_takip_fazi_dusuk_manevra_yetkisi():
+    """Takip (vurus_izin=False) roll/pitch, terminal (True) komutundan KUCUK (bank siniri);
+    oran ~ VIS_TRACK_TILT/VIS_PN_TILT. Yaw iki fazda AYNI (cerceveleme bozulmaz)."""
+    drone_pos = np.array([0.0, 0.0, 1000.0]); rot = (0.0, 0.0, 0.0)
+    cam_pos, R_cam = geometri.kamera_pozu(drone_pos, rot, tilt_deg=TILT)
+    # yandan gecen hedef -> yanal PN (roll) uretsin
+    p0 = cam_pos + R_cam @ np.array([2000.0, 300.0, 0.0])
+    p1 = cam_pos + R_cam @ np.array([2000.0, 900.0, 0.0])   # saga kayiyor -> Omega != 0
+
+    def _kos(vurus_izin):
+        g = AvciPNGGuduum(); t = 0.0; komut = None
+        for p_k in (p0, p1, p1):                             # Omega/EMA otursun
+            det, _ = _det_yap(p_k, drone_pos, rot, t=t)
+            komut = g.hesapla(det, drone_pos, rot, np.zeros(2), Cfg, vurus_izin=vurus_izin)
+            t += 0.05
+        return komut, g._tilt
+
+    k_takip, tilt_takip = _kos(False)
+    k_term, tilt_term = _kos(True)
+    assert abs(tilt_takip - Cfg.VIS_TRACK_TILT) < 1e-9
+    assert abs(tilt_term - Cfg.VIS_PN_TILT) < 1e-9
+    # roll/pitch takip < terminal (bank/dalis kisildi)
+    assert abs(k_takip[2]) < abs(k_term[2]) + 1e-12, "takip roll terminalden kucuk olmali"
+    assert abs(k_takip[2]) <= Cfg.VIS_TRACK_TILT + 1e-9, "takip roll bank sinirini asmamali"
+    # yaw AYNI (VIS_TRACK_TILT yaw'a dokunmaz)
+    assert abs(k_takip[3] - k_term[3]) < 1e-9, "yaw iki fazda ayni olmali (cerceveleme)"
+
+
 def test_kor_devam_hicbir_tespit_yoksa_hover():
     g = AvciPNGGuduum()
     assert g.kor_devam(Cfg, Cfg.DT) == (0.0, 0.0, 0.0, 0.0)
