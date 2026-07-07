@@ -159,13 +159,16 @@ kaldırılır** (kullanıcı kararı 2026-07-06).
   Düz merge bizim hatta `ibvs_guidance.py` ve `models/talon_pose.pt`'yi otomatik siliyor
   (git: bizde değişmeyen dosyaya karşı taraf silmesi) → merge İPTAL edildi. Bu turda yalnız
   bbox-fix PORT'u + yeni best.pt (bc1e0b3) alındı; **talon_pose.pt ve ibvs bizde DURUYOR.**
-  Plan: iki branch AYRI AYRI aynı senaryo setinde uçurulup (görev başarı, kilit süresi,
-  en yakın mesafe, GNSS-kesinti toleransı) KAZANAN görsel yasa seçilecek; merge o karara
-  göre karar dokümanıyla yapılacak (kaybedenin şartname-zorunlu parçaları — ör. kilit
-  §6.1.4 — kazanana taşınır). **Düzenek HAZIR:** `arac/ab_kiyas.py` (kos+rapor;
-  her koşu taze oyun + ilgili kökün GERÇEK server'ı, ~5 Hz JSONL kayıt; metrikler
-  branch-bağımsız adapter'la). main ölçüm worktree'si: `../avci-ab-main` (@152a7bc).
-  Truth açıkken iki tarafta da vuruş/en-yakın GERÇEK 3B ölçülür (kaynak raporda).
+  **A/B YAPILDI (2026-07-07) → KARAR: main'in PNG hattı BAZ.** Ölçüm (aynı model
+  best_son@1280, eşik 0.45, gerçek-3B mesafe): main 1/3 görev başarısı (213 sn, 1.79 m
+  vuruş) + en-yakın medyan 4.4 m; bizim standoff 0/3 (25.4 m) ve strike 0/2 (12.0 m),
+  görsel faza HİÇ giremedi. Kök teşhis: eski best.pt HUD-OVERFIT (HUD yazısını talon
+  sanıyor; kanıt `veri/ab/tani2/kareler/`); best_son 640'ta kör → @1280 bağlandı
+  (`models/best_kayra_son.yaml`). Ortak 1 no'lu borç: MODEL (HUD-FP + uzak menzil).
+  Ayrıntı + TAŞINACAKLAR (kilit §6.1.4, SERT AYRIM çiti — main'de truth ÇİTSİZ!,
+  ByteTrack, testler) + merge planı: **`docs/AB_KIYAS_KARAR_20260707.md`**.
+  Merge AYRI OTURUMDA, Kayra onayıyla (bizim IBVS/OIPN + GPS-strike o zaman silinir).
+  Düzenek: `arac/ab_kiyas.py`; main ölçüm worktree'si `../avci-ab-main`.
 - **Merge sonrası sim regresyonu:** iki profil de sim'de uçurulup teyit edilecek —
   (a) varsayılan standoff (GPS_TERMINAL_STRIKE=False): 5 m arkada/altta pace + kamera
   çerçeveleme; (b) GPS_TERMINAL_STRIKE=True: eski intercept+ram birebir; (c) sahte
