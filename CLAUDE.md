@@ -162,7 +162,10 @@ kaldırılır** (kullanıcı kararı 2026-07-06).
   Plan: iki branch AYRI AYRI aynı senaryo setinde uçurulup (görev başarı, kilit süresi,
   en yakın mesafe, GNSS-kesinti toleransı) KAZANAN görsel yasa seçilecek; merge o karara
   göre karar dokümanıyla yapılacak (kaybedenin şartname-zorunlu parçaları — ör. kilit
-  §6.1.4 — kazanana taşınır).
+  §6.1.4 — kazanana taşınır). **Düzenek HAZIR:** `arac/ab_kiyas.py` (kos+rapor;
+  her koşu taze oyun + ilgili kökün GERÇEK server'ı, ~5 Hz JSONL kayıt; metrikler
+  branch-bağımsız adapter'la). main ölçüm worktree'si: `../avci-ab-main` (@152a7bc).
+  Truth açıkken iki tarafta da vuruş/en-yakın GERÇEK 3B ölçülür (kaynak raporda).
 - **Merge sonrası sim regresyonu:** iki profil de sim'de uçurulup teyit edilecek —
   (a) varsayılan standoff (GPS_TERMINAL_STRIKE=False): 5 m arkada/altta pace + kamera
   çerçeveleme; (b) GPS_TERMINAL_STRIKE=True: eski intercept+ram birebir; (c) sahte
