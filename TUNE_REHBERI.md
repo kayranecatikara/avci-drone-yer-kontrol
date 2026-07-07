@@ -195,3 +195,25 @@ değerlerini Cfg'ye yapıştırmamak. 5. Hedefin üstünde süzülmek. 6. `STRIK
 `YAW_MAX=0.35 · KP_YAW=1.0 · MAX_DELTA=0.05 · STRIKE_RANGE=6000 · V_CLOSE=1200 ·
 KP_CLOSE=0.6 · V_CLOSE_MIN=850 · KV_STRIKE=2.0 · STRIKE_TILT=0.45 · COMMIT_RANGE=600`
 + dikey varsayılan.
+
+---
+
+## 9) GÖRSEL TUNE MODU (PNG çarpışma rotası — 2026-07-06)
+
+Görsel güdümü (PNG, `guidance/png_gorsel.py`) **GPS yaklaşma mekaniklerine
+takılmadan** izole test etmenin yolu:
+
+1. Oyun + arayüzü başlat; **kaynak = GERÇEK GPS** seç (J filtre sapması denklemden çıkar).
+2. Görev başlat; drone hedefe yaklaşsın (veya manuel uçur).
+3. Güdüm modunu **GORSEL**'e al (OTO/GPS/GORSEL anahtarı) → FSM anında
+   `GORSEL_GUDUM`: kalkış kapısı, standoff, ALT_OFFSET, fren/speed_cap, None
+   yönetimi **tamamen atlanır**; komutlar yalnız kameradan üretilir. Kayıpta
+   GPS'e geri DÖNMEZ (zorlanmış mod) — hover'da bekler.
+4. PNG parametrelerini tune et (öncelik sırası: `VIS_KP_CLOSE` kapanma hızı,
+   `VIS_PN_N` navigasyon sabiti, `VIS_PN_TILT` yetki, `VIS_TAU_Z` dikey ataklık).
+5. Her koşudan sonra: `python araclar/gorsel_episode_analiz.py` → ÖZET satırındaki
+   **minR medyanı** kıyas metriğin (düşüyorsa iyileşiyorsun). Tek koşuda TEK
+   parametre değiştir.
+
+OTO uçtan-uca doğrulama (handoff dahil): kaynak V2 + mod OTO ile tam görev;
+`ARAMA→KILIT→GORSEL_GUDUM` zinciri konsolda `[GORSEL]` satırıyla izlenir.

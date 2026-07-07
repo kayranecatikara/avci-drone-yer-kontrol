@@ -37,7 +37,8 @@ from pose import geometri
 from pose.poz_cozucu import PozCozucu, EGITIM_SIRASI
 from pose.sira_bul import gt_noktalar, REF_SIRA
 
-MODEL_YOL = os.path.join(_KOK, "talon_yolo11m_pose_2_best.pt")
+MODEL_YOL = os.path.join(_KOK, "models", "talon_pose.pt")   # aktif poz modeli (v3, imgsz=1280)
+IMGSZ = 1280                                                 # egitim imgsz'i (v3; eski model 960 idi)
 DATASET = r"C:\talon_pose_data\dataset"
 CIKTI = r"C:\talon_pose_data\pnp_degerlendirme"
 
@@ -116,7 +117,7 @@ def main():
         gt_cm = float(np.linalg.norm([tal["x"] - cam["x"], tal["y"] - cam["y"],
                                       tal["z"] - cam["z"]]))
 
-        res = model.predict(png, imgsz=960, conf=args.conf, verbose=False)[0]
+        res = model.predict(png, imgsz=IMGSZ, conf=args.conf, verbose=False)[0]
         H, W = res.orig_shape
         secilen = None
         if res.keypoints is not None and len(res.boxes) > 0:
