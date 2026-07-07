@@ -15,7 +15,7 @@ sdk/drone_sdk.py ──► web/server.py ◄── detection/ (pencere yakalama 
                         │                                   ▲ oyun penceresi karesi
                         ├─ fusion/inovasyonlu_j_v2.py  (GNSS temizleme + hız kestirimi)
                         ├─ guidance/ana_kontrol.py     (GPS yaklaşma + GORSEL_GUDUM FSM)
-                        ├─ guidance/ibvs_guidance.py   (bbox → angle-mode komut)
+                        ├─ guidance/ibvs_gorsel.py     (merkez→bbox çizgisi → komut)
                         └─ web sunucusu ──► web/index.html (tarayıcı arayüzü, :8000)
 ```
 
@@ -142,7 +142,7 @@ kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde ortalama/en kötü
 | `sdk/drone_sdk.py` | Resmi yarışma SDK'sı (v2.2; TCP telemetri/kontrol) |
 | `fusion/inovasyonlu_j_v2.py` | GNSS temizleme + hedef hız kestirimi (CT-EKF) |
 | `guidance/ana_kontrol.py` | Güdüm beyni: GPS yaklaşma, GORSEL_GUDUM FSM, Cfg (tüm ayarlar) |
-| `guidance/ibvs_guidance.py` | DÜZ IBVS: bbox merkezi → throttle/pitch/roll/yaw |
+| `guidance/ibvs_gorsel.py` | BASİT IBVS: görüntü merkezi→bbox merkezi çizgisi (açı+büyüklük) → throttle/pitch/roll/yaw |
 | `detection/gorsel_tespit.py` | YOLO best.pt sarmalayıcı (en yüksek conf bbox) |
 | `detection/pencere_yakala.py` | Oyun penceresi içeriği yakalama (occlusion-proof FPV) |
 | `web/server.py` + `web/index.html` | Web sunucusu + tarayıcı arayüzü |
@@ -206,7 +206,7 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
 5) DOĞRULAMA (hepsi repo kökünden; herhangi biri hata verirse önce onu çöz)
    - python -c "import torch; print(torch.__version__, 'CUDA:', torch.cuda.is_available())"
      (GPU'lu kurulumda CUDA: True görmelisin.)
-   - python -m py_compile main.py web/server.py guidance/ana_kontrol.py guidance/ibvs_guidance.py detection/gorsel_tespit.py detection/pencere_yakala.py fusion/inovasyonlu_j_v2.py sdk/drone_sdk.py
+   - python -m py_compile main.py web/server.py guidance/ana_kontrol.py guidance/ibvs_gorsel.py detection/gorsel_tespit.py detection/pencere_yakala.py fusion/inovasyonlu_j_v2.py sdk/drone_sdk.py
    - python -c "import sys; sys.path.insert(0,'.'); import web.server; print('IMPORT OK')"
    - python detection\gorsel_tespit.py
      Beklenen çıktı: best.pt siniflari (model.names): {0: 'talon'}

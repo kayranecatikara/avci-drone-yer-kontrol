@@ -1,32 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-KILITLENME/TAKIP alt-FSM dogrulama (oyunsuz) — sartname 6.1.2 / 6.1.4.
+KILITLENME ISTERI SAYACI + gorsel kayip yonetimi dogrulama (oyunsuz) — sartname 6.1.2/6.1.4.
+
+2026-07-07: eski PN/alt-FSM testleri (TAKIP menzil-tutma, commit-freeze, yapiskan
+kayip, soft-start) yasayla birlikte SILINDI. Kalanlar basit-IBVS mimarisine gore:
 
 Test edilenler:
   1) Kilit kosulu: hedef merkezi AV icinde (yatay %25-75, dikey %10-90) VE bbox
      EN AZ BIR eksende >= VIS_LOCK_PCT (tek eksen yeter).
   2) 10 sn pencere aritmetigi: kumulatif >= 5 sn (kesintili sayilir; sartname
      ornegi 1+2+2 sn), pencere disina dusen eski kilitler SAYILMAZ.
-  3) png_gorsel vurus_izin=False (TAKIP modu): commit-freeze tetiklenmez;
-     kapanma kanali MENZIL TUTMA (R > R_hold iken ileri, R < R_hold iken geri).
-     vurus_izin=True: eski davranis (commit-freeze calisir).
-  4) Uctan uca alt-FSM: YAKLASMA -> TAKIP (bbox >= esik) -> 5 sn kilit ->
-     kilit_ok -> TERMINAL.
+  3) Sayac SALT GOZLEM: kilit_ok latch'i olsun olmasin AYNI tespit AYNI komutu
+     uretir (tek yasa; vurus fazi/izin kapisi yok).
+  4) Kayip yonetimi: tespit yokken HOVER; VIS_LOST_TO_GPS_S asilinca (yalniz
+     revert_izin=True/OTO) GPS'e doner (None + durum=ARAMA); manuel GORSEL'de
+     asla donmez; revert'te kilit_ok latch'i KORUNUR.
 
 Calistirma:  python tests/test_kilit_takip.py     (pytest de calisir)
 """
 import os
 import sys
-import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from pose import geometri
-from guidance.png_gorsel import AvciPNGGuduum
 from guidance.ana_kontrol import AvciKontrol, Cfg
 
 W, H = 1920.0, 1080.0
-FX = geometri.fx_from_hfov(W)
 
 
 def _beyin():
@@ -106,155 +105,62 @@ def test_pencere_eski_kilitler_dusuyor():
 
 
 # ---------------------------------------------------------------------------
-#  3) png_gorsel TAKIP modu (vurus_izin=False)
+#  3) Sayac SALT GOZLEM (gudume karismaz)
 # ---------------------------------------------------------------------------
-def _hesapla_iki_kare(png, R_cm, vurus_izin, area_buyuk=False):
-    """Duz onde, sabit R'de hedef: iki kare besle (R_f/Vc kurulsun), son komutu dondur.
-    area_buyuk=True: bbox alan orani > 0.5 (commit-freeze alan kosulu)."""
-    if area_buyuk:
-        wp, hp = 0.9, 0.7                      # alan 0.63 > 0.5
-    else:
-        wp = (FX * Cfg.VIS_SPAN_CM / R_cm) / W  # pinhole'a tutarli genislik
-        hp = wp * 0.4
-    drone_pos = np.zeros(3); rot = (0.0, 0.0, 0.0)
-    # hedef pikseli merkezde: cy'yi tilt'e gore merkeze koymak sart degil,
-    # LOS yonu sabit oldugundan Omega~0 kalir (ayni piksel her karede).
-    komutlar = []
-    for i, t in enumerate((0.0, 0.1, 0.2)):
-        d = _det(cxn=0.5, cyn=0.5, wp=wp, hp=hp, t=t)
-        komutlar.append(png.hesapla(d, drone_pos, rot, np.zeros(2), Cfg,
-                                    vurus_izin=vurus_izin))
-    return komutlar
-
-
-def test_takip_modu_commit_freeze_yok():
-    # R ~2.5 m (300 cm alti) + buyuk alan: TERMINAL'de donardi; TAKIP'te DONMAZ.
-    png = AvciPNGGuduum()
-    _hesapla_iki_kare(png, 250.0, vurus_izin=False, area_buyuk=True)
-    assert png._commit is False, "TAKIP modunda commit-freeze tetiklenmemeli"
-    assert png.durum()["vurus_izin"] is False
-
-    # ayni kurulum TERMINAL'de (vurus_izin=True) commit-freeze'e girer (eski davranis)
-    png2 = AvciPNGGuduum()
-    k = _hesapla_iki_kare(png2, 250.0, vurus_izin=True, area_buyuk=True)
-    assert png2._commit is True, "TERMINAL'de commit-freeze eski haliyle calismali"
-    assert k[1] == k[2], "commit-freeze son komutu dondurmali"
-
-
-def test_takip_modu_menzil_tutma_isaret():
-    """R >> R_hold -> ileri kapanma; R << R_hold -> geri acilma (pitch isaretleri zit)."""
-    r_hold = float(geometri.fx_from_hfov(1.0)) * float(Cfg.VIS_SPAN_CM) / float(Cfg.VIS_HOLD_PCT)
-    uzak = AvciPNGGuduum()
-    k_uzak = _hesapla_iki_kare(uzak, r_hold * 4.0, vurus_izin=False)[-1]
-    yakin = AvciPNGGuduum()
-    k_yakin = _hesapla_iki_kare(yakin, r_hold * 0.4, vurus_izin=False)[-1]
-    p_uzak, p_yakin = k_uzak[1], k_yakin[1]     # pitch kanali (ileri/geri)
-    assert p_uzak != 0.0 and p_yakin != 0.0
-    assert (p_uzak > 0) != (p_yakin > 0), (
-        "menzil tutma calismiyor: uzakta pitch=%.3f, yakinda pitch=%.3f "
-        "(zit isaret bekleniyor)" % (p_uzak, p_yakin))
+def test_kilit_salt_gozlem_komutu_degistirmez():
+    """kilit_ok latch'i olsun olmasin ayni tespit AYNI komutu uretmeli (tek yasa)."""
+    d = _det(cxn=0.7, cyn=0.4, wp=0.10, hp=0.05, t=1.0)
+    b1 = _beyin(); b1.durum = "GORSEL_GUDUM"
+    k1 = b1._gorsel_guduum(dict(d), 1.0)
+    b2 = _beyin(); b2.durum = "GORSEL_GUDUM"; b2.kilit_ok = True
+    k2 = b2._gorsel_guduum(dict(d), 1.0)
+    assert k1 == k2, "kilit_ok komutu degistirdi (salt gozlem olmali): %s vs %s" % (k1, k2)
 
 
 # ---------------------------------------------------------------------------
-#  4) Uctan uca alt-FSM: YAKLASMA -> TAKIP -> kilit_ok -> TERMINAL
+#  4) Kayip yonetimi: hover -> GPS revert
 # ---------------------------------------------------------------------------
-def test_alt_fsm_zinciri():
-    b = _beyin()
-    b.durum = "GORSEL_GUDUM"
-    drone_pos = np.zeros(3); rot = (0.0, 0.0, 0.0)
-
-    # (a) kucuk bbox (%3): YAKLASMA'da kalir, vurus izni yok
-    b._gorsel_guduum(_det(wp=0.03, hp=0.02, t=0.0), 0.0, drone_pos, rot, np.zeros(2))
-    assert b.gorsel_faz == "YAKLASMA"
-    assert b.png_tlm.get("vurus_izin") is False
-
-    # (b) bbox esigi asar (%8): TAKIP'e gecer, henuz TERMINAL degil
-    b._gorsel_guduum(_det(wp=0.08, hp=0.04, t=0.02), 0.02, drone_pos, rot, np.zeros(2))
-    assert b.gorsel_faz == "TAKIP"
-    assert b.kilit_ok is False
-
-    # (c) 5+ sn merkezde/esik-ustu kilit -> kilit_ok -> TERMINAL + vurus izni
-    t = 0.02
-    for i in range(280):                        # 5.6 sn @ 50 Hz
-        t += 0.02
-        b._gorsel_guduum(_det(wp=0.08, hp=0.04, t=t), t, drone_pos, rot, np.zeros(2))
-    assert b.kilit_ok is True, "5+ sn surekli kilit isteri saglamali"
-    assert b.gorsel_faz == "TERMINAL"
-    assert b.png_tlm.get("vurus_izin") is True
-
-    # (d) latch kalici: tespit kaybolsa da kilit_ok dusmez
-    b._gorsel_guduum(None, t + 0.02, drone_pos, rot, np.zeros(2))
-    assert b.kilit_ok is True
-
-
-# ---------------------------------------------------------------------------
-#  5) YAKIN-MENZIL YAPISKANLIGI (#2): kilit menzilinde tespit kopunca GPS'e DONME
-# ---------------------------------------------------------------------------
-def _kayip_kos(b, drone, rot, t_bas, sure_s):
-    """t_bas'tan itibaren sure_s boyunca None (kayip) besle; GPS'e dondu mu (None) dondur."""
+def _kayip_kos(b, t_bas, sure_s, revert_izin=True):
+    """t_bas'tan itibaren sure_s boyunca None (kayip) besle; GPS'e dondu mu dondur."""
     t = t_bas
-    for _ in range(int(sure_s / 0.02) + 1):
-        t += 0.02
-        r = b._gorsel_guduum(None, t, drone, rot, np.zeros(2), revert_izin=True)
+    for _ in range(int(sure_s / Cfg.DT) + 1):
+        t += Cfg.DT
+        r = b._gorsel_guduum(None, t, revert_izin=revert_izin)
         if r is None:
             return True, t - t_bas          # GPS'e dondu
     return False, t - t_bas
 
 
-def test_yakin_menzilde_yapiskan_kayip():
-    """R_f < VIS_STICKY_R iken 2.0 sn kayipta GPS'e DONMEMELI (eski esik 1.0'i asar,
-    yeni yakin esik 3.0'i asmaz -> kapanma ilerlemesi korunur, kilit dolabilir)."""
+def test_kayipta_hover_sonra_gps_revert():
     b = _beyin(); b.durum = "GORSEL_GUDUM"
-    drone = np.zeros(3); rot = (0.0, 0.0, 0.0)
-    for i in range(5):                          # yakin tespit -> R_f kucuk kurulsun
-        tt = i * 0.05
-        b._gorsel_guduum(_det(wp=0.12, hp=0.06, t=tt), tt, drone, rot, np.zeros(2), revert_izin=True)
-    assert b.pngg.R_f is not None and b.pngg.R_f < Cfg.VIS_STICKY_R, \
-        "yakin R_f kurulmadi: %s" % b.pngg.R_f
-    reverted, _ = _kayip_kos(b, drone, rot, 0.25, 2.0)
-    assert not reverted, "yakin menzilde 2.0 sn kayipta GPS'e DONMEMELIYDI (yapiskan)"
+    b._gorsel_guduum(_det(t=0.0), 0.0)
+    # kisa kayip: HOVER komutu (0,0,0,0), GPS'e donmez
+    r = b._gorsel_guduum(None, 0.02)
+    assert r == (0.0, 0.0, 0.0, 0.0), "kisa kayipta hover bekleniyordu: %s" % (r,)
+    assert b.durum == "GORSEL_GUDUM"
+    # uzun kayip: VIS_LOST_TO_GPS_S asilinca None + ARAMA
+    reverted, sure = _kayip_kos(b, 0.02, Cfg.VIS_LOST_TO_GPS_S + 1.0)
+    assert reverted, "uzun kayipta GPS'e donmeliydi"
+    assert b.durum == "ARAMA"
+    assert sure > Cfg.VIS_LOST_TO_GPS_S - 0.1, "cok erken revert: %.2f s" % sure
+
+
+def test_manuel_gorselde_gps_revert_yok():
+    """revert_izin=False (manuel GORSEL switch): kayip ne kadar uzarsa uzasin hover."""
+    b = _beyin(); b.durum = "GORSEL_GUDUM"
+    b._gorsel_guduum(_det(t=0.0), 0.0)
+    reverted, _ = _kayip_kos(b, 0.0, Cfg.VIS_LOST_TO_GPS_S + 2.0, revert_izin=False)
+    assert not reverted, "manuel GORSEL'de GPS'e DONMEMELIYDI"
     assert b.durum == "GORSEL_GUDUM"
 
 
-def test_uzak_menzilde_normal_revert():
-    """R_f > VIS_STICKY_R iken eski (kisa) esikle ~1.5 sn sonra GPS'e doner (hizli re-acquire)."""
-    b = _beyin(); b.durum = "GORSEL_GUDUM"
-    drone = np.zeros(3); rot = (0.0, 0.0, 0.0)
-    for i in range(5):                          # uzak tespit (kucuk bbox -> buyuk R_f)
-        tt = i * 0.05
-        b._gorsel_guduum(_det(wp=0.02, hp=0.01, t=tt), tt, drone, rot, np.zeros(2), revert_izin=True)
-    assert b.pngg.R_f is not None and b.pngg.R_f > Cfg.VIS_STICKY_R, \
-        "uzak R_f kurulmadi: %s" % b.pngg.R_f
-    reverted, sure = _kayip_kos(b, drone, rot, 0.25, 2.5)
-    assert reverted, "uzak menzilde GPS'e donmeliydi"
-    assert sure < 2.0, "uzak revert cok gec (%.2f s); yakin esik yanlislikla uygulanmis olabilir" % sure
-
-
-# ---------------------------------------------------------------------------
-#  6) YUMUSAK BASLANGIC (soft-start): handoff transiyentini ehlilestir
-# ---------------------------------------------------------------------------
-def test_softstart_yetki_rampasi():
-    b = _beyin()
-    b._gorsel_giris_t = 100.0
-    mn = float(Cfg.VIS_SOFTSTART_MIN); s = float(Cfg.VIS_SOFTSTART_S)
-    assert abs(b._softstart_gain(100.0) - mn) < 1e-6, "giris aninda yetki MIN olmali"
-    assert abs(b._softstart_gain(100.0 + s) - 1.0) < 1e-6, "ramp sonunda tam yetki"
-    assert abs(b._softstart_gain(100.0 + s/2) - (mn + (1.0-mn)*0.5)) < 1e-6, "yarida dogrusal"
-    b._gorsel_giris_t = None
-    assert b._softstart_gain(100.0) == 1.0, "gorselde degilken (giris None) tam yetki"
-
-
-def test_softstart_komutu_kucultur():
-    """Ayni tespit: giris aninda komut ~MIN carpanli, ramp sonrasi tam."""
-    drone = np.zeros(3); rot = (0.0, 0.0, 0.0)
-    det = _det(cxn=0.75, cyn=0.5, wp=0.10, hp=0.05, t=0.0)   # sagda -> yaw != 0
-    b1 = _beyin(); b1.durum = "GORSEL_GUDUM"; b1._gorsel_giris_t = 0.0       # giris ani -> MIN
-    k_ilk = b1._gorsel_guduum(dict(det), 0.0, drone, rot, np.zeros(2))
-    b2 = _beyin(); b2.durum = "GORSEL_GUDUM"; b2._gorsel_giris_t = -10.0     # cok once -> tam
-    k_tam = b2._gorsel_guduum(dict(det), 0.0, drone, rot, np.zeros(2))
-    assert abs(k_tam[3]) > 1e-6, "kurulum: yaw sifir olmamali (hedef sagda)"
-    assert abs(k_ilk[3]) < abs(k_tam[3]), "giris aninda komut kuculmus olmali"
-    assert abs(k_ilk[3] - float(Cfg.VIS_SOFTSTART_MIN) * k_tam[3]) < 1e-6, "carpani MIN olmali"
+def test_revert_kilit_ok_latch_korunur():
+    """GPS'e donuste kilit penceresi temizlenir ama kilit_ok latch'i KORUNUR."""
+    b = _beyin(); b.durum = "GORSEL_GUDUM"; b.kilit_ok = True
+    _kayip_kos(b, 0.0, Cfg.VIS_LOST_TO_GPS_S + 1.0)
+    assert b.durum == "ARAMA"
+    assert b.kilit_ok is True, "revert kilit_ok latch'ini dusurmemeli"
+    assert b.kilit_sure == 0.0 and len(b.kilit_win) == 0
 
 
 if __name__ == "__main__":
