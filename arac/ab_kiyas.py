@@ -206,6 +206,12 @@ def kosu_kaydet(dosya, sure_s):
 def kos(arg):
     import kosu_yonetici as ky
     kok = os.path.abspath(arg.kok)
+    tunlar = []                                       # [(param, float)] — kosu basinda POST edilir
+    for parca in (arg.tune or "").split(","):
+        parca = parca.strip()
+        if parca:
+            ad, _, deger = parca.partition("=")
+            tunlar.append((ad.strip(), float(deger)))
     cikti = os.path.join(AB_DIR, arg.etiket)
     os.makedirs(cikti, exist_ok=True)
     print("=" * 68)
@@ -227,6 +233,9 @@ def kos(arg):
         try:
             if play_bekle(oto_play=not arg.oto_play_kapali):
                 _http_post("/api/command", {"cmd": "start"})
+                for ad, deger in tunlar:              # kosu-basi profil/esik ayarlari
+                    y = _http_post("/api/tune", {"param": ad, "value": deger})
+                    print("[AB] tune %s=%s -> %s" % (ad, deger, "ok" if y.get("ok") else "RED"))
                 print("[AB] Gorev basladi; kayit: %s" % os.path.basename(dosya))
                 durum = kosu_kaydet(dosya, arg.sure)
                 try:
@@ -433,6 +442,9 @@ def main():
                    help="ILK kosuda oyun zaten acik/PLAY'de (baslatma)")
     k.add_argument("--oto-play-kapali", action="store_true",
                    help="menu klavye otomasyonunu deneme (elle PLAY'e bas)")
+    k.add_argument("--tune", default="",
+                   help='kosu basinda /api/tune ile uygulanacak Cfg ayarlari: "AD=deger,AD2=deger2" '
+                        '(or. profil secimi: "GPS_TERMINAL_STRIKE=1")')
     r = alt.add_parser("rapor", help="iki etiketin kiyas tablosu")
     r.add_argument("--a", required=True, help="birinci etiket")
     r.add_argument("--b", required=True, help="ikinci etiket")
