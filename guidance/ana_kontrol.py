@@ -113,8 +113,15 @@ class Cfg:
     TAKEOFF_THR = 0.6           # tirmanma throttle
 
     # --- HANDOFF (histerezisli) ---
-    HANDOFF_RANGE = 4000.0      # cm; tespit menziline gore TUNE et (genis tut)
-    HANDOFF_EXIT  = 5000.0      # bu mesafenin disina cikinca handoff iptal
+    # 40m -> 20m (2026-07-07 log analizi, ucus_log_20260707_200927): 40m'de OTO
+    # gorsele devredince PNG aralikli tespitle (~%32 @30m) kararli carpisma rotasi
+    # kuramiyordu -> hedefi eksen disi birakip UZAKLASIYORDU (her blokta mesafe artti,
+    # 17->86m; |nose_off| 89°'ye) -> GPS'e donup ZIPLIYORDU. GPS mukemmel nisan aliyor;
+    # gorsel o mesafede tutamiyor. Cozum: GPS hedefi 20m'ye kadar merkezde GETIRSIN
+    # (bbox ~%2.2, tespit yogun), SONRA gorsel devralsin. self.durum GPS komutunu
+    # DEGISTIRMEZ (KILIT==ARAMA yaklasma; sadece rozet/handoff kapisi).
+    HANDOFF_RANGE = 2000.0      # cm (20m); tespit menziline gore TUNE et
+    HANDOFF_EXIT  = 3000.0      # cm (30m); bu mesafenin disina cikinca handoff iptal (10m band)
     # OTOMATIK GORSEL DEVRI (YOLO kilidi + yakinlik -> GORSEL_GUDUM).
     # ACIK (2026-07-06): gorsel faz olgunlasti (PNG carpisma-rotasi + kamera-menzil).
     # Yakinlik (d_h<HANDOFF_RANGE) + ard arda VIS_N_LOCK gecerli tespit saglaninca
