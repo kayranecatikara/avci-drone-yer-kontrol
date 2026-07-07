@@ -51,9 +51,27 @@ class HedefDedektor:
         except Exception:
             pass
 
-    def tespit_et(self, frame):
+    @staticmethod
+    def _maskede(cxn, cyn, maske):
+        """Normalize merkez (cxn,cyn) verilen dikdortgenlerden birinin ICINDE mi?
+        maske: [(x0,y0,x1,y1), ...] normalize (0..1). None/bos -> False."""
+        if not maske:
+            return False
+        for r in maske:
+            try:
+                x0, y0, x1, y1 = r
+            except Exception:
+                continue
+            if x0 <= cxn <= x1 and y0 <= cyn <= y1:
+                return True
+        return False
+
+    def tespit_et(self, frame, maske=None):
         """frame: PIL Image (RGB, tercih) veya ndarray. -> en-yuksek-conf bbox dict | None.
-        dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi)."""
+        dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi).
+        maske: PERVANE bolgeleri [(x0,y0,x1,y1),...] normalize; MERKEZI icinde olan
+        kutular ELENIR (argmax ONCESI) -> kendi pervanemiz hedef sanilmaz. Tum kutular
+        maskeliyse None doner (o kare tespit yok)."""
         if not self.hazir:
             return None
         import time as _t
@@ -66,15 +84,30 @@ class HedefDedektor:
         if boxes is None or len(boxes) == 0:
             return None
         try:
-            confs = boxes.conf
-            i = int(confs.argmax())                       # EN-YUKSEK-conf kutu (sinif-agnostik)
-            x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
-            cls = int(boxes.cls[i]) if boxes.cls is not None else -1
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
+            confs = boxes.conf
+            xyxy = boxes.xyxy
+            cls_t = boxes.cls
+            # PERVANE MASKESI: merkezi maskede olan kutulari ele, kalanlardan en-yuksek conf.
+            en_i, en_c = -1, -1.0
+            for j in range(len(confs)):
+                x1, y1, x2, y2 = [float(v) for v in xyxy[j]]
+                if maske and W > 0 and H > 0:
+                    cxn = ((x1 + x2) / 2.0) / W
+                    cyn = ((y1 + y2) / 2.0) / H
+                    if self._maskede(cxn, cyn, maske):
+                        continue                          # kendi pervanemiz -> atla
+                c = float(confs[j])
+                if c > en_c:
+                    en_c, en_i = c, j
+            if en_i < 0:                                   # tum kutular maskeli -> tespit yok
+                return None
+            x1, y1, x2, y2 = [float(v) for v in xyxy[en_i]]
+            cls = int(cls_t[en_i]) if cls_t is not None else -1
             return {
                 "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
                 "w": (x2 - x1), "h": (y2 - y1),
-                "conf": float(confs[i]), "cls": cls,
+                "conf": float(confs[en_i]), "cls": cls,
                 "W": W, "H": H, "t": _t.perf_counter(),
             }
         except Exception:

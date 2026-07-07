@@ -1,3 +1,45 @@
+# GÖRSEL GÜDÜM — HIZLI AYAR REHBERİ (2026-07-07, sade panel)
+
+> Arayüzdeki tune paneli 12 knob'a indirildi (yapısal sabitler Cfg'de kaldı). Aşağıdaki
+> **belirti → çözüm** tablosuna göre ayarla. **ALTIN KURAL: tek seferde TEK slider değiştir,
+> bir görev uç, `python araclar/gorsel_episode_analiz.py` ile ölç, karşılaştır.** Panel canlı
+> (restart yok). Sıra = önce ANA grup (★ çok etkili), yetmezse İNCE AYAR.
+
+**Etki büyüklüğü:** ★★★ davranışı kökten değiştirir · ★★ belirgin · ★ ince.
+
+| Belirti (videoda/logda gördüğün) | Knob | Yön | Etki |
+|---|---|---|---|
+| Görsel faza geçince araç **sert yatıyor/savruluyor** (bank), kamera yere bakıp clutter | `VIS_TRACK_TILT` | **DÜŞÜR** (yalnız ROLL; ileri hızı ETKİLEMEZ) | ★★★ |
+| **Çok yavaş / hiç yaklaşamıyor** | `VIS_TAKIP_VC` | **ARTIR** (asıl hız knob'u; pitch tam yetkili — tilt'e takılmaz) | ★★★ |
+| **Kilit menziline varıp** tam orada hedefi kaçırıyor / kilit dolmuyor | `VIS_TAKIP_VC` | **DÜŞÜR** | ★★★ |
+| Hedef **yatayda** (sağ/sol kenar) geride kalıyor, kamera kovalıyor | `VIS_K_YAW_LEAD` | **ARTIR** (0.30→0.45) | ★★ |
+| Yatay hâlâ kaçıyor + yaw doygunlukta | `YAW_MAX` sonra `VIS_K_YAW` | **ARTIR** | ★ |
+| Araç hedefin **ÜSTÜNE çıkıyor** → arka plan zemin → tespit kopuyor | `VIS_DH_TARGET` | **ARTIR** (400→550) = daha altta uç | ★★ |
+| Araç çok altta, hedef üst kenardan kaçıyor | `VIS_DH_TARGET` | **DÜŞÜR** | ★★ |
+| Dikeyde sert/salınım/titreme | `VIS_DH_BAND` **ARTIR** veya `VIS_LOOKUP_VZ` **DÜŞÜR** | | ★ |
+| Geçiş anında hâlâ sert manevra ("masayı deviriyor") | `VIS_SOFTSTART_S` | **ARTIR** (1.5→2.5) | ★★ |
+| Genel **titreşim/salınım** (sarkaç gibi) | `VIS_PN_N` sonra `VIS_K_YAW` | **DÜŞÜR** | ★ |
+| Iskalıyor (hedefi geçiyor) | `VIS_KP_CLOSE` | **DÜŞÜR** | ★ |
+| Geç kilit / yanlış tespit | `VIS_CONF_MIN` | yanlış çoksa ARTIR / geç ise DÜŞÜR | ★ |
+| Takipte fazla uzak/yakın park ediyor | `VIS_HOLD_PCT` | yakın için ARTIR | ★ |
+
+**DİKEY = HEDEF ALTINDA SABİT MESAFE (7 Tem v4):** dikey artık kadraj pozisyonu değil, **dünya
+dikey ayrımı** ile kontrol edilir — araç hedefin irtifasından `VIS_DH_TARGET` (cm) kadar ALTTA
+tutulur. (Kadraj-çizgisi = sabit AÇI idi; kapanınca dünya-ayrımı küçülüp araç hedefin üstüne
+çıkıyordu → zemin arka plan → tespit kopuyordu.) Artık kapandıkça araç HEP altta kalır, hedef
+kadrajda yukarı kayar (alttan yaklaşma), gökyüzü arka plan korunur, TERMINAL'de alttan vuruş.
+FPV'de **"HEDEF ALTINDA: X.X m"** göstergesi (+ = altta iyi; ≤0 = üste çıkıyor uyarısı). İrtifa
+J kestiriminden (magnitude; yön kameradan). `VIS_DH_BAND` = mesafede ne kadar sıkı tutulacağı.
+
+**Tipik ayarlama akışı:** (1) `VIS_TRACK_TILT` ile savrulmayı kes → (2) `VIS_TAKIP_VC` ile
+kilit menzilinde nazik park → (3) `VIS_K_YAW_LEAD` (yatay) + `VIS_DH_TARGET` (dikey altta-kal) ile
+hedefi çerçevele → (4) `VIS_SOFTSTART_S` ile geçişi yumuşat. Kilit penceresi (5/10 sn) dolup
+TERMINAL/vuruş açılana kadar tekrarla. Panelden çıkarılan sabitler (filtre EMA'ları, işaretler,
+FSM zamanlamaları, GPS PD, GPS handoff açısı `LOOKUP_ELEV_DEG`) nadiren gerekir —
+gerekirse `guidance/ana_kontrol.py` Cfg'den.
+
+---
+
 # GPS GÜDÜM TUNE REHBERİ — "kontrollü yaklaş, hep bak, tekte vur"
 
 > Amaç: hedef araca **kontrollü** yaklaşmak, kamerayı **her an hedefte** tutmak
