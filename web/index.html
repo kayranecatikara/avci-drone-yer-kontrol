@@ -829,7 +829,19 @@
     ctx.setLineDash([]);
     ctx.font="11px monospace"; ctx.fillStyle="rgba(255,170,60,.95)";
     ctx.fillText("REF", mcx+33, refY+4);
-    const det=gs.tespit;
+    // TESPİT: hızlı kanaldan (/api/gorsel, ~15 Hz) — 200ms telemetri döngüsünü beklemez.
+    // YAŞ TELAFİSİ: server tespit hızını (vx,vy [1/s]) verir; kutu, tespitin yaşı kadar
+    // İLERİ çizilir → inference+aktarım gecikmesine rağmen kutu hedefin ŞİMDİKİ konumuna
+    // oturur (en çok 300 ms lead; hız yoksa olduğu gibi çizilir).
+    let det=gs.tespit;
+    if(hizliGorsel){
+      det=hizliGorsel.tespit;
+      if(det && det.vx!=null){
+        const yas=(det.yas_s||0)+(performance.now()-hizliGorsel.alinan)/1000;
+        const ek=Math.min(Math.max(yas,0),0.30);
+        det={...det, cx:det.cx+det.vx*ek, cy:det.cy+det.vy*ek};
+      }
+    }
     if(det){
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       const wPct=(det.w||0)*100, hPct=(det.h||0)*100;
@@ -868,7 +880,7 @@
     // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
     // kp REF sırada gelir (0 burun,1 solK,2 sağK,3 solKuy,4 sağKuy,5 kuyArk);
     // renkler pose/onizle.py ile aynı aile. Mesafe/yaw KAMERADAN (GNSS bağımsız).
-    const pz = gs.poz;
+    const pz = hizliGorsel ? hizliGorsel.poz : gs.poz;   // poz da hızlı kanaldan (taze iskelet)
     if(pz && pz.kp){
       const PK=["#ff4646","#3dff7a","#ffc400","#3f9dff","#ff52ff","#2ee6e6"];
       const KE=[[0,5],[1,2],[0,1],[0,2],[3,5],[4,5],[3,4]];
@@ -1271,6 +1283,19 @@
   setInterval(tick, 200);
   tick();
 
+  // ---- HIZLI GÖRSEL KANAL (~15 Hz): yalnız tespit+poz çeker, overlay'i hemen yeniden
+  // çizer. Ana telemetri 200ms'de kalır (yük artmaz); bbox gecikmesi ~50-70ms'e iner.
+  // (hizliGorsel drawOverlay içinde kullanılır; yaş telafisiyle kutu İLERİ çizilir.)
+  async function gorselTick(){
+    try{
+      const r = await fetch("/api/gorsel",{cache:"no-store"});
+      const g = await r.json();
+      hizliGorsel = { tespit:g.tespit, poz:g.poz, alinan:performance.now() };
+    }catch(e){ hizliGorsel = null; }                 // kanal yoksa telemetri tespiti kullanılır
+    if(sonTelemetri) drawOverlay(sonTelemetri);      // rozet/faz son telemetriden, bbox taze
+  }
+  setInterval(gorselTick, 66);
+
   // ---- Canlı görüntü: tarayıcının ekran/pencere paylaşımı (getDisplayMedia) ----
   // Butona bas → açılan listeden OYUN PENCERESİNİ seç. Overlay (bbox/rozet/REF)
   // telemetriden canvas'a çizilir; normalize koordinat kullandığından çözünürlük
@@ -1442,6 +1467,7 @@
   //  Skor 100 ms sabit adımla güncellenir (titreme azaltma).
   // =========================================================================
   let sonTelemetri=null;
+  let hizliGorsel=null;   // /api/gorsel hızlı kanalının son yanıtı {tespit,poz,alinan}
   const ATIS_STEP=100, ATIS_N_KUR=2, ATIS_M_KOP=3;   // 100ms adım; kilit 200ms'de kurulur, 300ms'de kopar (≈200ms köprü)
   const ATIS_PENCERE=10000, ATIS_ESIK_S=5.0;         // 10 sn kayan pencere, 5 sn eşik
   let atisAralik=[], atisAcik=null, atisSonKilit=null;

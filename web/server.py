@@ -723,6 +723,7 @@ def dedektor_dongusu():
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
     from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
     poz_sayac = 0                                        # POZ_HER_N seyreklestirme sayaci
+    onceki_ui = None                                     # (cx, cy, t) — UI bbox hiz kestirimi icin
     while True:
         # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
@@ -802,9 +803,20 @@ def dedektor_dongusu():
                     poz_ui = _normalize_poz(pdet, poz, yp)
             except Exception:
                 poz_ui = None
+        # UI tespiti + NORMALIZE HIZ (vx,vy [1/s]): arayuz bbox'u tespit YASI kadar
+        # ILERI cizer (inference + aktarim gecikmesi telafisi; /api/gorsel tasir).
+        ui_det = _normalize_tespit(det)
+        if ui_det is not None and det is not None:
+            t_det = float(det.get("t", time.perf_counter()))
+            ui_det["t_det"] = t_det
+            if onceki_ui is not None and 0.0 < (t_det - onceki_ui[2]) < 0.5:
+                dt_ui = t_det - onceki_ui[2]
+                ui_det["vx"] = (ui_det["cx"] - onceki_ui[0]) / dt_ui
+                ui_det["vy"] = (ui_det["cy"] - onceki_ui[1]) / dt_ui
+            onceki_ui = (ui_det["cx"], ui_det["cy"], t_det)
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det_beyin)
-            _son_tespit_ui = _normalize_tespit(det)
+            _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle
         if bgr is None:
@@ -1059,6 +1071,17 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path == "/api/telemetry":
             payload = json.dumps(build_telemetry()).encode("utf-8")
             self._send(200, payload, "application/json")
+        elif self.path == "/api/gorsel":
+            # HIZLI GORSEL KANAL (~15 Hz istemci): yalniz son tespit + poz. Telemetri
+            # 200 ms dongusunu beklemeden taze bbox -> arayuzde kutu gecikmesi dusuk.
+            # yas_s: tespitin bu yaniti urettigimiz andaki yasi (istemci lead-cizim yapar).
+            with beyin_lock:
+                det = dict(_son_tespit_ui) if _son_tespit_ui is not None else None
+                poz = _son_poz_ui
+            if det is not None and "t_det" in det:
+                det["yas_s"] = round(max(0.0, time.perf_counter() - det.pop("t_det")), 3)
+            self._send(200, json.dumps({"tespit": det, "poz": poz}).encode("utf-8"),
+                       "application/json")
         elif self.path == "/api/tune":
             # Mevcut tune parametre degerlerini dondur (slider'lari baslatmak icin).
             vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
