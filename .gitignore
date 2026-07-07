@@ -10,6 +10,7 @@ models/bestpose.pt
 models/*.pt
 !models/best.pt
 !models/talon_pose.pt
+!models/best_kayra_son.pt
 # ham Colab ciktisi 126 MB (optimizer dahil) > 100 MB siniri. Calisan kopyasi
 # models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
 talon_yolo11m_pose_2_best.pt
