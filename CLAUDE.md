@@ -84,6 +84,9 @@ Düzeltmeler (server.py):
    yiyip dedektörü ~5-7 Hz'e düşürüyordu → takip delikleri).
 Beklenti (mesafeye bağlı, normal): 0-10 m ~%70-80, 15-20 m ~%45+, 60 m+ %0 (hedef
 birkaç piksel). "Video gibi kesintisiz" görünüm UI'daki 0.25 eşiğiyle gelir.
+Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280).
+Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
+(640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
 
 ## POZ KESTİRİMİ (2026-07-04'te eklendi — GÖZLEMCİ modda)
 `models/talon_pose.pt` (yolo11m-pose, 6 keypoint) + PnP artık pipeline'da:
