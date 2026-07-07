@@ -1,41 +1,35 @@
-# GÖRSEL GÜDÜM — HIZLI AYAR REHBERİ (2026-07-07, sade panel)
+# GÖRSEL GÜDÜM — HIZLI AYAR REHBERİ (2026-07-07 v7: BASİT IBVS)
 
-> Arayüzdeki tune paneli 12 knob'a indirildi (yapısal sabitler Cfg'de kaldı). Aşağıdaki
-> **belirti → çözüm** tablosuna göre ayarla. **ALTIN KURAL: tek seferde TEK slider değiştir,
-> bir görev uç, `python araclar/gorsel_episode_analiz.py` ile ölç, karşılaştır.** Panel canlı
-> (restart yok). Sıra = önce ANA grup (★ çok etkili), yetmezse İNCE AYAR.
-
-**Etki büyüklüğü:** ★★★ davranışı kökten değiştirir · ★★ belirgin · ★ ince.
+> **BÜYÜK SIFIRLAMA:** PN yığını (ve 14 slider'lık eski panel) SİLİNDİ. Tek yasa:
+> görüntü merkezinden bbox merkezine ÇİZGİ; yatay bileşen → yaw, dikey bileşen →
+> gaz, çizgi büyüklüğü → ileri itkiyi kısar, roll=0. Panelde 8 slider kaldı.
+> **ALTIN KURAL: tek seferde TEK slider değiştir, bir görev uç, karşılaştır.**
+> Panel canlı (restart yok).
 
 | Belirti (videoda/logda gördüğün) | Knob | Yön | Etki |
 |---|---|---|---|
-| Görsel faza geçince araç **sert yatıyor/savruluyor** (bank), kamera yere bakıp clutter | `VIS_TRACK_TILT` | **DÜŞÜR** (yalnız ROLL; ileri hızı ETKİLEMEZ) | ★★★ |
-| **Çok yavaş / hiç yaklaşamıyor** | `VIS_TAKIP_VC` | **ARTIR** (asıl hız knob'u; pitch tam yetkili — tilt'e takılmaz) | ★★★ |
-| **Kilit menziline varıp** tam orada hedefi kaçırıyor / kilit dolmuyor | `VIS_TAKIP_VC` | **DÜŞÜR** | ★★★ |
-| Hedef **yatayda** (sağ/sol kenar) geride kalıyor, kamera kovalıyor | `VIS_K_YAW_LEAD` | **ARTIR** (0.30→0.45) | ★★ |
-| Yatay hâlâ kaçıyor + yaw doygunlukta | `YAW_MAX` sonra `VIS_K_YAW` | **ARTIR** | ★ |
-| Araç hedefin **ÜSTÜNE çıkıyor** → arka plan zemin → tespit kopuyor | `VIS_DH_TARGET` | **ARTIR** (400→550) = daha altta uç | ★★ |
-| Araç çok altta, hedef üst kenardan kaçıyor | `VIS_DH_TARGET` | **DÜŞÜR** | ★★ |
-| Dikeyde sert/salınım/titreme | `VIS_DH_BAND` **ARTIR** veya `VIS_LOOKUP_VZ` **DÜŞÜR** | | ★ |
-| Geçiş anında hâlâ sert manevra ("masayı deviriyor") | `VIS_SOFTSTART_S` | **ARTIR** (1.5→2.5) | ★★ |
-| Genel **titreşim/salınım** (sarkaç gibi) | `VIS_PN_N` sonra `VIS_K_YAW` | **DÜŞÜR** | ★ |
-| Iskalıyor (hedefi geçiyor) | `VIS_KP_CLOSE` | **DÜŞÜR** | ★ |
-| Geç kilit / yanlış tespit | `VIS_CONF_MIN` | yanlış çoksa ARTIR / geç ise DÜŞÜR | ★ |
-| Takipte fazla uzak/yakın park ediyor | `VIS_HOLD_PCT` | yakın için ARTIR | ★ |
+| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızının ana knob'u) | ★★★ |
+| Hedefe sert dalıp **ıskalıyor / kilit penceresi dolmadan varıyor** | `IBVS_ILERI` | **DÜŞÜR** | ★★★ |
+| Hedef **yatayda** (sağ/sol kenar) kaçıyor | `IBVS_K_YAW` | **ARTIR**; hâlâ yetmiyorsa `YAW_MAX` ARTIR | ★★★ |
+| **Yatay salınım** (sağa-sola sarkaç) | `IBVS_K_YAW` | **DÜŞÜR** (önce), sonra `VIS_EMA` DÜŞÜR | ★★ |
+| Hedef **üst/alt kenardan** kaçıyor | `IBVS_K_DIKEY` | **ARTIR** | ★★★ |
+| **Dikey salınım/zıplama** | `IBVS_K_DIKEY` | **DÜŞÜR** | ★★ |
+| Kenardaki hedefe doğru **körlemesine ilerliyor** (önce dönmesi lazım) | `IBVS_MERKEZ_FREN` | **ARTIR** (sapınca ileriyi keser) | ★★ |
+| Sapmada **duraksıyor**, hiç yol almıyor | `IBVS_MERKEZ_FREN` | **DÜŞÜR** (0 = hep tam gaz) | ★★ |
+| Komutlar **titrek** (bbox jitter'ı komuta geçiyor) | `VIS_EMA` | **DÜŞÜR** (daha yumuşak) | ★ |
+| Tepki **gecikiyor** (hedef kaçtıktan sonra dönüyor) | `VIS_EMA` | **ARTIR** (daha tepkili) | ★ |
+| Yanlış tespit çok / geç görüyor | `VIS_CONF_MIN` | yanlış çoksa ARTIR / geç ise DÜŞÜR | ★ |
+| Kısa tespit kopmasında hemen GPS'e dönüyor | `VIS_LOST_TO_GPS_S` | **ARTIR** (kayıpta hover süresi) | ★ |
+| Yaw/dikey **TERS** çalışıyor | `IBVS_SIGN_YAW` / `IBVS_SIGN_DIKEY` = **-1** (Cfg'den, panelde yok — bir kez doğrula) | | — |
 
-**DİKEY = HEDEF ALTINDA SABİT MESAFE (7 Tem v4):** dikey artık kadraj pozisyonu değil, **dünya
-dikey ayrımı** ile kontrol edilir — araç hedefin irtifasından `VIS_DH_TARGET` (cm) kadar ALTTA
-tutulur. (Kadraj-çizgisi = sabit AÇI idi; kapanınca dünya-ayrımı küçülüp araç hedefin üstüne
-çıkıyordu → zemin arka plan → tespit kopuyordu.) Artık kapandıkça araç HEP altta kalır, hedef
-kadrajda yukarı kayar (alttan yaklaşma), gökyüzü arka plan korunur, TERMINAL'de alttan vuruş.
-FPV'de **"HEDEF ALTINDA: X.X m"** göstergesi (+ = altta iyi; ≤0 = üste çıkıyor uyarısı). İrtifa
-J kestiriminden (magnitude; yön kameradan). `VIS_DH_BAND` = mesafede ne kadar sıkı tutulacağı.
+**Neden merkez = alttan yaklaşma:** kamera gövdeye +25° yukarı bakar; hedef kadraj
+merkezindeyken LOS ufka göre +25° demektir → araç hedefin ALTINDA uçar, arka plan
+gökyüzü. Ekstra dikey-geometri knob'u YOK; bu davranış geometriden bedava gelir.
 
-**Tipik ayarlama akışı:** (1) `VIS_TRACK_TILT` ile savrulmayı kes → (2) `VIS_TAKIP_VC` ile
-kilit menzilinde nazik park → (3) `VIS_K_YAW_LEAD` (yatay) + `VIS_DH_TARGET` (dikey altta-kal) ile
-hedefi çerçevele → (4) `VIS_SOFTSTART_S` ile geçişi yumuşat. Kilit penceresi (5/10 sn) dolup
-TERMINAL/vuruş açılana kadar tekrarla. Panelden çıkarılan sabitler (filtre EMA'ları, işaretler,
-FSM zamanlamaları, GPS PD, GPS handoff açısı `LOOKUP_ELEV_DEG`) nadiren gerekir —
+**Tipik ayarlama akışı:** (1) `IBVS_K_YAW` + `IBVS_K_DIKEY` ile hedefi merkezde
+sabitle (ileri düşükken) → (2) `IBVS_ILERI`'yi kademeli artır → (3) sapmada taşma
+görürsen `IBVS_MERKEZ_FREN` artır → (4) kilit penceresi (5/10 sn) videoda dolacak
+kadar hızı ayarla. İşaretler/FSM zamanlamaları/GPS PD panelde yok —
 gerekirse `guidance/ana_kontrol.py` Cfg'den.
 
 ---
@@ -236,9 +230,9 @@ KP_CLOSE=0.6 · V_CLOSE_MIN=850 · KV_STRIKE=2.0 · STRIKE_TILT=0.45 · COMMIT_R
 
 ---
 
-## 9) GÖRSEL TUNE MODU (PNG çarpışma rotası — 2026-07-06)
+## 9) GÖRSEL TUNE MODU (basit IBVS — 2026-07-07 v7)
 
-Görsel güdümü (PNG, `guidance/png_gorsel.py`) **GPS yaklaşma mekaniklerine
+Görsel güdümü (basit IBVS, `guidance/ibvs_gorsel.py`) **GPS yaklaşma mekaniklerine
 takılmadan** izole test etmenin yolu:
 
 1. Oyun + arayüzü başlat; **kaynak = GERÇEK GPS** seç (J filtre sapması denklemden çıkar).
