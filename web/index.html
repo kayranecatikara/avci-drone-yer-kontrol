@@ -801,6 +801,9 @@
     const rc=_icerikRect(camEl);
     const mcx=rc.x+rc.w/2, mcy=rc.y+rc.h/2;   // görüntü merkezi (REF/sapma çizgisi için; artı ÇİZİLMEZ)
 
+    // ===== STATİK KATMAN (KOŞULSUZ — her render karesinde, TESPİTTEN BAĞIMSIZ; asla titremez):
+    //       Av/Ak sınırları + alan etiketleri + pervane maskesi (aşağıda) · DURUM/FAZ çipleri +
+    //       telemetri rozetleri + banner'lar (if(det) bloğundan SONRA, yine koşulsuz). =====
     // ======= ŞEKİL 2 — VURUŞ ALANI OVERLAY'İ (şartname kilitlenme geometrisi) =======
     // Ak (yeşil) = Kamera Görüş Alanı (%100) · Av (sarı) = Hedef Vuruş Alanı (yatay %25, dikey %10 pay)
     function halo(txt,x,y,renk,hiza,fnt){
@@ -858,6 +861,16 @@
         det={...det, cx:det.cx+det.vx*ek, cy:det.cy+det.vy*ek};
       }
     }
+    // ===== DİNAMİK KATMAN — HOLD-LAST: yeni tespit gelene kadar son AH'yi (dörtgen + skor +
+    // oran + boyut uyarısı) çizmeye DEVAM et, en fazla AH_HOLD_MS. Böylece AH 8.5 Hz'de sert
+    // yanıp sönmez. Süre aşılırsa temizle (bayat kutu asılı kalmaz). Statik katman bundan
+    // BAĞIMSIZ çizildi. =====
+    {
+      const _now=performance.now();
+      if(det){ sonAH={det:det, t:_now}; }               // taze tespit -> sakla+damgala
+      else if(sonAH && (_now-sonAH.t)<=AH_HOLD_MS){ det=sonAH.det; }   // köprüle (son AH'yi çiz)
+      else { sonAH=null; }                              // süre aşıldı -> temizle
+    }
     if(det){
       const bx=rc.x+det.cx*rc.w, by=rc.y+det.cy*rc.h, bw=det.w*rc.w, bh=det.h*rc.h;
       const wPct=(det.w||0)*100, hPct=(det.h||0)*100;
@@ -878,14 +891,20 @@
         ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-7);
       } else {
         // --- GÖRSEL GÜDÜM FAZI: şartname kilitlenme dörtgeni + AV/boyut etiketleri ---
-        const inAV = det.cx>=0.25&&det.cx<=0.75&&det.cy>=0.10&&det.cy<=0.90;
-        const boyOK = wPct>=lockPct || hPct>=lockPct;           // ekran ekseninde ≥ eşik (şartname ≥%5 + tolerans)
-        const kilit = inAV && boyOK;
+        // İKİ KOŞULLU KİLİT (2026-07-08): (1) AH TAMAMEN AV içinde (dört kenar; MERKEZ değil
+        // = full-box) VE (2) en az bir eksende ≥ eşik. inAV = kutunun TAMAMI AV bandında.
+        const inAV = (det.cx-det.w/2>=0.25 && det.cx+det.w/2<=0.75
+                      && det.cy-det.h/2>=0.10 && det.cy+det.h/2<=0.90);
+        const boyOK = wPct>=lockPct || hPct>=lockPct;           // ekran ekseninde ≥ eşik
+        // SAHTE-POZİTİF KAPISI (backend ile aynı): conf + en/boy (w/h). Dar/dikey = talon değil.
+        const enboy = (det.h>0 ? (det.w/det.h)*(rc.w/rc.h) : 0);
+        const gercek = (Number(det.conf) >= 0.50 && enboy >= 1.5 && enboy <= 6.0);
+        const kilit = inAV && boyOK && gercek;
         const esik = (gs.conf_esik!=null ? gs.conf_esik : 0.45);
         const zayif = Number(det.conf) < esik;
-        // ŞARTNAME: kilit anlarında kilitlenme dörtgeni KIRMIZI #FF0000, ≤3 px, kesiksiz.
-        const AH = zayif ? "#ffb01f" : (kilit ? "#FF0000" : "rgba(200,210,225,.9)");
-        ctx.setLineDash(zayif?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=kilit?3:2.5;
+        // ŞARTNAME: kilitlenme dörtgeni (AH) HER ZAMAN KIRMIZI #FF0000 — renk koşula bağlı DEĞİL.
+        const AH = "#FF0000";
+        ctx.setLineDash(zayif?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=3;
         ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
         ctx.setLineDash([]);
         ctx.fillStyle=AH; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();
@@ -896,19 +915,25 @@
         ctx.strokeStyle="rgba(255,170,60,.9)"; ctx.lineWidth=2; ctx.setLineDash([]);
         ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke();
         ctx.fillStyle="rgba(255,170,60,.9)"; ctx.beginPath(); ctx.arc(mcx,mcy,3,0,6.2832); ctx.fill();
-        halo("IBVS: sapma "+ir.toFixed(2)+" · açı "+iaci.toFixed(0)+"°",
-             (mcx+bx)/2, (mcy+by)/2-8, "rgba(255,170,60,.95)", "center", "11px monospace");
-        halo("≥ %"+lockPct.toFixed(0)+" yatay", bx, by-bh/2-15, AH, "center", "10px monospace");
-        halo("≥ %"+lockPct.toFixed(0)+" dikey", bx+bw/2+6, by, AH, "left", "10px monospace");
+        // Etiketler kutu ALTINDA tek sütun (küçük bbox'ta üst üste binmesin): ID kutu
+        // ÜSTÜNDE; altta sırayla boyut % / gerekçe / IBVS. Yüzen IBVS etiketi ve tekrar
+        // eden "≥%6 yatay/dikey" kaldırıldı (çakışma). "Ah: Kilitlenme Dörtgeni" silindi.
         ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
-        ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-33, itw+10, 15);
-        ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-22);
-        halo("Ah: Kilitlenme Dörtgeni", bx, by+bh/2+14, AH, "center", "10px monospace");
+        ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 15);
+        ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-7);
         halo("yatay %"+wPct.toFixed(1)+" · dikey %"+hPct.toFixed(1)+"  ("+(boyOK?("≥%"+lockPct.toFixed(0)+" ✓"):("<%"+lockPct.toFixed(0)+" ✗"))+")",
-             bx, by+bh/2+28, boyOK?"#37e0a0":"#ff6b6b", "center", "10px monospace");
-        halo(zayif?("zayıf tespit — güdüm eşiği ("+Number(esik).toFixed(2)+") altı")
-                  :(kilit?"KİLİTLİ ✓":(inAV?"boyut yetersiz":"merkez AV dışında ✗")),
-             bx, by+bh/2+42, zayif?"#ffb01f":(kilit?"#37e0a0":"#ff6b6b"), "center", "bold 11px monospace");
+             bx, by+bh/2+14, boyOK?"#37e0a0":"#ff6b6b", "center", "10px monospace");
+        // GEREKÇE: her koşul AYRI; ikisi birden de olabilir (boyut + vuruş alanı).
+        let _gk, _gc;
+        if(zayif){ _gk="zayıf tespit — güdüm eşiği ("+Number(esik).toFixed(2)+") altı"; _gc="#ffb01f"; }
+        else if(kilit){ _gk="KİLİTLİ ✓ (LOCKED)"; _gc="#37e0a0"; }
+        else if(boyOK && inAV && !gercek){ _gk="sahte-pozitif (dar/dikey — talon değil)"; _gc="#ffb01f"; }
+        else if(!boyOK && !inAV){ _gk="boyut yetersiz + vuruş alanı dışında"; _gc="#ff6b6b"; }
+        else if(!boyOK){ _gk="boyut yetersiz"; _gc="#ff6b6b"; }
+        else { _gk="vuruş alanı dışında"; _gc="#ff6b6b"; }
+        halo(_gk, bx, by+bh/2+28, _gc, "center", "bold 11px monospace");
+        halo("IBVS: sapma "+ir.toFixed(2)+" · açı "+iaci.toFixed(0)+"°",
+             bx, by+bh/2+42, "rgba(255,170,60,.95)", "center", "10px monospace");
       }
     }
     // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
@@ -971,7 +996,10 @@
     ctx.fillRect(rx, ry, tw+2*pad, 24);
     ctx.fillStyle="#fff"; ctx.fillText(bt, rx+pad, ry+17);
     // TAKİP rozeti (GPS rozetinin altında; ister 6)
-    const takAktif=!!takip.aktif;
+    // TAKİP rozeti KİLİT durumunu yansıtır: iki-koşullu (full-box AV + boyut) backend
+    // gorsel.kilit.anlik. Geçerli kilit karesinde AKTİF (LOCKED), koşul düşünce PASİF.
+    // (Yan panel/sayaç DOKUNULMADI — onlar tespit tazeliği "takip.aktif" ile çalışır.)
+    const takAktif=!!(gs && gs.kilit && gs.kilit.anlik);
     const tkTxt = takAktif ? "TAKİP: AKTİF" : "TAKİP: PASİF";
     const tk2=ctx.measureText(tkTxt).width;
     const tkx=rc.x+rc.w-tk2-2*pad-10, tky=ry+30;
@@ -1538,6 +1566,8 @@
   // =========================================================================
   let sonTelemetri=null;
   let hizliGorsel=null;   // /api/gorsel hızlı kanalının son yanıtı {tespit,poz,alinan}
+  let sonAH=null;         // HOLD-LAST (dinamik katman): son tespit {det,t_ms}; AH'yi kısa süre tut
+  const AH_HOLD_MS=150;   // yeni tespit gelmezse son AH bu kadar çizilir (8.5 Hz'de ~1 kare köprü) -> sert yanıp sönme yok
   const ATIS_STEP=100, ATIS_N_KUR=2, ATIS_M_KOP=3;   // 100ms adım; kilit 200ms'de kurulur, 300ms'de kopar (≈200ms köprü)
   const ATIS_PENCERE=10000, ATIS_ESIK_S=5.0;         // 10 sn kayan pencere, 5 sn eşik
   let atisAralik=[], atisAcik=null, atisSonKilit=null;
