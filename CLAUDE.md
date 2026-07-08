@@ -203,6 +203,19 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
   Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
   tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
 
+## ARAYÜZ GECİKME TELAFİSİ + DEDEKTÖR DEBUG PENCERESİ (2026-07-08)
+Kullanıcı gözlemi: bbox/iskelet FPV'de hedefin GERİSİNDE kalıyor (pose daha da geç).
+Sebep: FPV = tarayıcı ekran paylaşımı (~0 ms), tespit = yakala+inference (~100-300 ms),
+poz ayrıca `POZ_HER_N=3` seyrek → yapısal olarak daha bayat. **GÜDÜM BUNDAN ETKİLENMEZ:**
+beyin tespiti inference biter bitmez `set_gorsel_tespit` ile alır (UI polling/çizim hattı
+güdüme girmez); poz da `IBVS_POZ_STALE_S` kapısıyla yalnız tazeyken yaw lead'e katkı verir.
+Düzeltmeler: (1) bbox'taki YAŞ TELAFİSİ (vx,vy ile ileri çizim) İSKELETE de uygulandı —
+`/api/gorsel` poz'a `yas_s` ekler (`t_poz` damgası `_normalize_poz`'da), index.html kp'leri
+bbox hızıyla poz yaşı kadar kaydırır (cap 500 ms). (2) `set AVCI_DEBUG_PENCERE=1` →
+server'da OpenCV "dedektör gözü" penceresi: işlenen karenin üzerine AYNI karenin
+tespit/poz çıktısı (kare↔çıktı %100 senkron; yeşil=güdüme giden, turuncu=zayıf/UI-only,
+kırmızı=pervane maskesi). Yalnız görev aktifken güncellenir; kapalıyken sıfır maliyet.
+
 ## TUNE RAPORU — "DEĞERLERİ YAZDIR" → EXCEL (2026-07-08)
 Tune panelindeki **Değerleri Yazdır** artık Cfg dökümüne EK olarak `/api/tune_rapor`'u
 çağırır: `web/tune_rapor.py` aktif (yoksa en yeni) `veri/ucus_log_*.csv`'yi okuyup

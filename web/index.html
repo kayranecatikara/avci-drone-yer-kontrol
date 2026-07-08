@@ -939,7 +939,15 @@
     // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
     // kp REF sırada gelir (0 burun,1 solK,2 sağK,3 solKuy,4 sağKuy,5 kuyArk);
     // renkler pose/onizle.py ile aynı aile. Mesafe/yaw KAMERADAN (GNSS bağımsız).
-    const pz = hizliGorsel ? hizliGorsel.poz : gs.poz;   // poz da hızlı kanaldan (taze iskelet)
+    let pz = hizliGorsel ? hizliGorsel.poz : gs.poz;     // poz da hızlı kanaldan (taze iskelet)
+    // İSKELET YAŞ TELAFİSİ: poz seyrek koşar (POZ_HER_N=3) → bbox'tan da bayat kalır.
+    // Tüm keypoint'ler tespitin (bbox) normalize hızıyla pozun yaşı kadar İLERİ kaydırılır
+    // → iskelet hedefin ŞİMDİKİ konumuna oturur (en çok 500 ms; hız yoksa olduğu gibi).
+    if(pz && pz.kp && pz.yas_s!=null && hizliGorsel && det && det.vx!=null){
+      const yasP=pz.yas_s+(performance.now()-hizliGorsel.alinan)/1000;
+      const ekP=Math.min(Math.max(yasP,0),0.50);
+      pz={...pz, kp: pz.kp.map(p=>p?[p[0]+det.vx*ekP, p[1]+det.vy*ekP, p[2]]:p)};
+    }
     if(pz && pz.kp){
       const PK=["#ff4646","#3dff7a","#ffc400","#3f9dff","#ff52ff","#2ee6e6"];
       const KE=[[0,5],[1,2],[0,1],[0,2],[3,5],[4,5],[3,4]];
