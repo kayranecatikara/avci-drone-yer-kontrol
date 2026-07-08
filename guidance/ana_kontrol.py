@@ -249,7 +249,10 @@ class Cfg:
     # iken conf~0.48 tespit) SAG-ALT'ta kumelendi (ex~0.75-1.0, ey~0.25). Canli FPV'de
     # dogrula/rafine et (arayuz maskeyi kirmizi tarama ile cizer; vis_cx/vis_ey loglanir).
     PROP_MASKE = [(0.80, 0.55, 1.0, 0.95)]   # sag-alt kose (on-sag pervane)
-    VIS_CONF_MIN     = 0.45     # kilit/komut icin asgari guven
+    VIS_CONF_MIN     = 0.15     # kilit/komut icin asgari guven. 0.45->0.15 (8 Tem ucus_1
+                                # segment kiyasi: tespit %22-33 -> %50-64; yanlis-poz ana
+                                # kumesi PROP_MASKE ile zaten eleniyor). Cok yanlis tespit
+                                # gorursen slider'dan yukselt.
     VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
     VIS_LOST_TO_GPS_S = 0.0     # kayipta GPS'e donmeden once hover suresi (yalniz OTO).
@@ -268,12 +271,15 @@ class Cfg:
     # arka plan / alttan yaklasma) — ekstra dikey geometri kodu GEREKMEZ.
     IBVS_K_YAW       = 0.8      # yatay kazanc: yaw = SIGN*K*ex (clamp +-YAW_MAX) ⚙
     IBVS_SIGN_YAW    = +1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir; ters tepki gorursen -1
-    IBVS_K_DIKEY     = 1.2      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
+    IBVS_K_DIKEY     = 1.3      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
+                                # 8 Tem ucus_2: 1.3 en iyi merkezleme (1.9 asiri tepkili,
+                                # 0.65 yetersiz kaldi — episod kiyasi r_ort medyan ~0.21).
     IBVS_SIGN_DIKEY  = +1.0     # hedef YUKARIDA (ey<0) -> TIRMAN (thr>0; GPS faziyla ayni kanon).
                                 # SIM'de dikey TERS tepki gorursen -1 yap (tek isaret, tek yer).
     IBVS_ILERI       = 0.45     # sabit ileri itki komutu (0..1; pitch kanali) ⚙
-    IBVS_MERKEZ_FREN = 1.0      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
+    IBVS_MERKEZ_FREN = 1.4      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
                                 # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙
+                                # 1.0->1.4 (8 Tem ucus_2: fren artisi sonrasi episodlar oturakli).
     # --- DIKEY NISAN (tilt-farkinda; hiz vektorunu hedefe kilitle) ---
     # Kamera +TILT derece YUKARI sabit. Hedefi kadraj MERKEZINDE tutmak = hiz vektorunu
     # hedefin ~TILT altina nisanlamak (kronik dikey undershoot). Hedefi hiz vektorunun
@@ -281,8 +287,11 @@ class Cfg:
     # carpisma rotasi. ey_ref = NISAN * tan(TILT) / tan(VFOV_yari) (tilt'ten TURETILIR).
     IBVS_TILT_DEG      = 25.0   # kamera YUKARI tilt (DOGRULANDI; kullanici teyidi)
     IBVS_VFOV_HALF_DEG = 47.2   # dikey FOV yari acisi (16:9 + HFOV 125'ten)
-    IBVS_DIKEY_NISAN   = 1.0    # 0 = hedefi MERKEZDE tut (altta kal / gokyuzu arka plan),
+    IBVS_DIKEY_NISAN   = 0.1    # 0 = hedefi MERKEZDE tut (altta kal / gokyuzu arka plan),
                                 # 1 = HIZ VEKTORUNU hedefe nisanla (ey_ref~0.43; terminal carpisma) ⚙
+                                # 1.0->0.1 (8 Tem ucus_2 kullanici tune'u: izleme fazinda merkezde
+                                # tutma en iyi sonucu verdi — r=0.07-0.14'luk episodlar bu degerde.
+                                # Terminal yaklasma denemesinde slider'dan 0.3-0.5'e cikar.)
     # --- ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank) ---
     # Hedefi ARKADAN takip ederken iki kanat ucu pikselinden (kp[1]=sol, kp[2]=sag)
     # goruntu-uzayi bank acisi: roll_img=atan2(dy,dx). Bankli ucak alcak kanadi yonune

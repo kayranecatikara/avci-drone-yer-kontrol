@@ -74,15 +74,21 @@ def test_nisanda_tam_ileri():
 
 
 def test_dikey_nisan_tilt_farkinda():
-    """ey_ref = tan(TILT)/tan(VFOV_yari) (~0.43 @25); hedef nisan ustunde -> tirman, altinda -> alcal."""
-    ey_ref = _ey_ref(Cfg)
-    assert 0.35 < ey_ref < 0.55, "tilt=25 icin ey_ref ~0.43 bekleniyordu: %.3f" % ey_ref
-    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.5 + ey_ref / 2.0), Cfg)
-    assert abs(g.durum()["ey_ref"] - round(ey_ref, 3)) < 1e-3
-    # nisanin USTUNDE (ey<ey_ref): tirman (thr>0); ALTINDA (ey>ey_ref): alcal (thr<0)
-    thr_ust = _tek(0.5, 0.5, p=Cfg)[0]             # ey=0 < ey_ref -> tirman
-    thr_alt = _tek(0.5, 0.95, p=Cfg)[0]            # ey=0.9 > ey_ref -> alcal
-    assert thr_ust > 0 and thr_alt < 0, "nisan ustu tirman / alti alcal (thr %.2f/%.2f)" % (thr_ust, thr_alt)
+    """ey_ref = NISAN*tan(TILT)/tan(VFOV_yari) (~0.43 @25 ve NISAN=1); nisan ustunde tirman,
+    altinda alcal. NISAN default'u tune ile degisir (8 Tem: 0.1) -> mekanizma NISAN=1'de denenir."""
+    eski = Cfg.IBVS_DIKEY_NISAN
+    Cfg.IBVS_DIKEY_NISAN = 1.0
+    try:
+        ey_ref = _ey_ref(Cfg)
+        assert 0.35 < ey_ref < 0.55, "tilt=25 icin ey_ref ~0.43 bekleniyordu: %.3f" % ey_ref
+        g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.5 + ey_ref / 2.0), Cfg)
+        assert abs(g.durum()["ey_ref"] - round(ey_ref, 3)) < 1e-3
+        # nisanin USTUNDE (ey<ey_ref): tirman (thr>0); ALTINDA (ey>ey_ref): alcal (thr<0)
+        thr_ust = _tek(0.5, 0.5, p=Cfg)[0]             # ey=0 < ey_ref -> tirman
+        thr_alt = _tek(0.5, 0.95, p=Cfg)[0]            # ey=0.9 > ey_ref -> alcal
+        assert thr_ust > 0 and thr_alt < 0, "nisan ustu tirman / alti alcal (thr %.2f/%.2f)" % (thr_ust, thr_alt)
+    finally:
+        Cfg.IBVS_DIKEY_NISAN = eski
 
 
 def test_merkez_freni_ileriyi_kisar():
