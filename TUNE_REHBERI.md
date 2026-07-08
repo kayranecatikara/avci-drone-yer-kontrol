@@ -17,6 +17,7 @@
 | Araç hedefin **altında takılıyor**, dikeyde kapatamıyor (25° tilt undershoot) | `IBVS_DIKEY_NISAN` | **ARTIR** (0/pozitife; 1=hız vektörünü hedefe nişanla) | ★★ |
 | Araç fazla tırmanıp **hedefin ÜSTÜNE çıkıyor** (zemin arka planda tespit kopuyor) | `IBVS_DIKEY_NISAN` | **NEGATİFE çek** (−0.25..−0.4 = ALTTAN VUR: hedef merkez ÜSTÜNDE tutulur, araç altta+gökyüzü) | ★★★ |
 | Üste çıkma sürüyor / **alçal komutu tırmanışı durduramıyor** (lift carry) | `IBVS_ALCAL_FREN` | **ARTIR** (fazla yükselince ileriyi kısıp alçalmayı mümkün kılar; 0=kapalı) | ★★ |
+| Gövde öne yatınca **sahte tırmanış** (pitch geçişinde hedef kadrajda yukarı zıplayıp thr+ oluyor) | `IBVS_EGO_PITCH_GAIN` (Cfg) | default 1.0 = telafi AÇIK; şüphede 0 ile A/B (log `ibvs_eyego` vs `vis_ey`) | ★★ |
 | Hedef **manevra/dönüş** yapınca burun geriden yakalıyor (pose ile) | `IBVS_K_ROLL_LEAD` | **ARTIR** (0=kapalı; öngörü gücü) | ★★ |
 | Öngörü **erken/aşırı** dönüyor, salınım | `IBVS_K_ROLL_LEAD` **DÜŞÜR** / yanlış bank sıçraması → `IBVS_ROLL_CONF_MIN` **ARTIR** | | ★★ |
 | Öngörü **hiç çalışmıyor** (roll_ok hep pasif) | pose model/aspect kontrol: `IBVS_ROLL_CONF_MIN` **DÜŞÜR** ya da `IBVS_ASPECT_MIN` (Cfg) düşür | | ★ |

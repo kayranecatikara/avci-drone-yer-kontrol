@@ -202,17 +202,23 @@ def _kopru_beyin(yas_s, vx_px=200.0, vy_px=0.0):
 
 
 def test_kopru_sentetik_tespit_uretir():
-    """Bayat tespit + hiz var -> oku KOPRU det dondurur; cx hiz*yas kadar ilerlemis."""
+    """Bayat tespit + hiz var -> oku KOPRU det dondurur; cx hiz*yas kadar ilerlemis,
+    cy ise DONMUS (dikey ekstrapole edilmez: olculen vy cogunlukla ego-pitch urunu;
+    8 Tem kacak-tirmanma dersi)."""
     yas = Cfg.VIS_STALE_S + 0.4                    # stale asildi, kopru penceresi icinde
-    b = _kopru_beyin(yas, vx_px=200.0)
+    b = _kopru_beyin(yas, vx_px=200.0, vy_px=300.0)
     d = b._gorsel_tespit_oku()
     assert d is not None and d.get("kopru") is True, "kopru det bekleniyordu: %s" % (d,)
     assert b.vis_kopru is True
     beklenen = 0.5 * W + 200.0 * yas
     assert abs(d["cx"] - beklenen) < 1.0, "cx hizla ilerlemeliydi: %.1f vs %.1f" % (d["cx"], beklenen)
-    # kopru det ile gorsel yasa KOMUT uretir (revert/hover degil) ve faz korunur
+    assert abs(d["cy"] - 0.5 * H) < 1e-6, "cy DONMALIYDI (vy uygulanmaz): %.1f" % d["cy"]
+    # kopru det ile gorsel yasa KOMUT uretir (revert/hover degil) ve faz korunur;
+    # DIKEY komut koprude 0 (irtifa-tut) — tahminle tirmanis/alcalis entegre edilmez.
     r = b._gorsel_guduum(d, 0.0)
     assert r is not None and b.durum == "GORSEL_GUDUM"
+    assert r[0] == 0.0, "koprude thr=0 (irtifa-tut) bekleniyordu: %s" % (r,)
+    assert b.ibvs_tlm.get("dikey") == 0.0
 
 
 def test_kopru_kilit_sayaci_saymaz():

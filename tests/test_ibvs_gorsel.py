@@ -163,6 +163,37 @@ def test_alcalma_taban():
     assert abs(pitch) > 0, "tabanda bile ileri itki tam SIFIRLANMAZ"
 
 
+def test_ego_pitch_telafi():
+    """KACAK-TIRMANMA senaryosu (8 Tem log 204331): drone hedefin ALTINDA, govde one
+    yatiyor (burun asagi -20 derece) -> hedef goruntude sahte YUKARI ziplar (ey=-0.2).
+    Telafisiz yasa TIRMAN derdi; ego-pitch telafisi gercek bakis-hattini geri kurar
+    -> thr artik pozitife sapmamali (alcal/notr). GAIN=0 ile eski davranis kiyasi."""
+    det = _det(cxn=0.5, cyn=0.40)                    # ey = -0.2 (sahte 'yukarida')
+    p0 = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_EGO_PITCH_GAIN=0.0)
+    thr0, _, _, _ = AvciIBVS().hesapla(_det(cxn=0.5, cyn=0.40), p0,
+                                       own_pitch_rad=math.radians(-20.0))
+    assert thr0 > 0, "GAIN=0 (telafisiz): sahte 'yukarida' -> tirman beklenirdi (kok neden)"
+    p1 = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_EGO_PITCH_GAIN=1.0)
+    g = AvciIBVS()
+    thr1, _, _, _ = g.hesapla(det, p1, own_pitch_rad=math.radians(-20.0))
+    # tan(-20)/tan(47.2) ~ -0.337 -> ey_kul = -0.2 + 0.337 = +0.137 -> ALCAL (thr<0)
+    assert thr1 < 0, "telafili yasa tirmanmamali (thr=%.3f)" % thr1
+    assert abs(g.durum()["ey_ego"] - (-0.2 + math.tan(math.radians(20.0))
+                                      / math.tan(math.radians(47.2)))) < 5e-3
+    # govde duz ise telafi no-op (ey_ego == ey)
+    g2 = AvciIBVS()
+    g2.hesapla(_det(cxn=0.5, cyn=0.40), p1, own_pitch_rad=0.0)
+    assert abs(g2.durum()["ey_ego"] - (-0.2)) < 1e-6
+
+
+def test_ego_pitch_yokken_eski_davranis():
+    """own_pitch_rad verilmezse (None) yasa bit-bit eski haliyle calisir."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0)
+    k1 = AvciIBVS().hesapla(_det(cxn=0.6, cyn=0.4), p)
+    k2 = AvciIBVS().hesapla(_det(cxn=0.6, cyn=0.4), p, own_pitch_rad=None)
+    assert k1 == k2
+
+
 def test_merkez_freni_ileriyi_kisar():
     p_merkez = abs(_tek(0.5, 0.5)[1])
     p_kenar = abs(_tek(0.98, 0.5)[1])            # cizgi ~0.96 -> fren
@@ -198,12 +229,12 @@ def test_ema_yumusatma():
 
 
 def test_gps_siz_imza():
-    """hesapla girdileri: det (bbox px) + p (Cfg) + poz (kamera keypoint) + own_roll_rad
-    (KENDI IMU roll'u, ego-motion telafisi). Hedef YONU %100 kameradan; own_roll yalniz
-    gorsel OLCUMU temizler (hedefi konumlamaz). YASAK olan HEDEF GPS/J kestirimidir
-    (son_temiz/son_hiz/...) ve genel kinematik dump (drone_pos/v_own/rot)."""
+    """hesapla girdileri: det (bbox px) + p (Cfg) + poz (kamera keypoint) + own_roll_rad/
+    own_pitch_rad (KENDI IMU'muz, ego-motion telafileri). Hedef YONU %100 kameradan;
+    own_roll/pitch yalniz gorsel OLCUMU temizler (hedefi konumlamaz). YASAK olan HEDEF
+    GPS/J kestirimidir (son_temiz/son_hiz/...) ve genel kinematik dump (drone_pos/v_own/rot)."""
     params = list(inspect.signature(AvciIBVS.hesapla).parameters)
-    assert set(params) <= {"self", "det", "p", "poz", "own_roll_rad"}, \
+    assert set(params) <= {"self", "det", "p", "poz", "own_roll_rad", "own_pitch_rad"}, \
         "beklenmedik parametre: %s" % params
     yasak = {"drone_pos", "v_own", "v_own_xy", "rot", "rot_rpy", "drone_rot_rpy",
              "yaw_rad", "drone_z", "son_temiz", "son_hiz", "son_xy_anlik", "son_z_anlik"}

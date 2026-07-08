@@ -223,8 +223,22 @@ karşılığı YOKTU → irtifa mandallanıyordu. Çözüm (ikisi de SALT görü
   artık tasarımsal ~|ey_ref| ofseti taşır — merkezleme kalitesi için `ibvs_r`/`merkez_%` kullan
   (ibvs_r nişan-göreli olduğundan rapor KPI'ları doğru kalır).
 - Testler: `test_negatif_nisan_altta_kal` (merkezdeki hedef → thr<0), `test_alcalma_freni_*`,
-  `test_alcalma_taban`, `test_nisan_clamp_negatif` (19/19). Canlı: üste çıkma sürerse
+  `test_alcalma_taban`, `test_nisan_clamp_negatif`. Canlı: üste çıkma sürerse
   NISAN −0.4 + ALCAL_FREN 3+.
+- **EGO-PITCH TELAFİSİ + KÖPRÜ DİKEY-TUT (aynı gün, 2. iterasyon — kaçak tırmanma):** ilk
+  düzeltme yetmedi; log 204331 tık-tık analizi kök nedeni gösterdi: **ileri itki gövdeyi öne
+  yatırınca (burun −20°) gövdeye sabit kamera düşüyor, hedef görüntüde sahte YUKARI zıplıyor**
+  (corr(drone_pitch, vis_ey)=0.70) → yasa drone hedefin 10 m ALTINDAYKEN +0.70 tırmanış
+  veriyordu; tespit ölünce KÖPRÜ ego-kaynaklı vy'yi sürdürüp sanal kutuyu kadraj tepesine
+  mıhlıyor, ~1.7 sn kör tam-tırmanış (+30 m fırlama; ey=−1.0 kuyrukları). Düzeltme:
+  (1) `ey_dunya = ey_f − IBVS_EGO_PITCH_GAIN·tan(own_pitch)/tan(VFOV_yarı)` — dikey hata kendi
+  pitch'ten arındırılır (`hesapla(..., own_pitch_rad=...)`; ego-roll emsali, kendi IMU = ego-motion
+  → kural OK; GAIN=1.0, 0=A/B kapalı); (2) köprüde **cy DONar** (vy ekstrapole edilmez) ve
+  **thr=0 (irtifa-tut)** — tahminle irtifa entegre edilmez, yatay takip sürer. EP5 geri-oynatma:
+  pitch sallanma anında eski thr +0.35'e sapıyor, yeni −0.45..−0.03'te kalıyor; köprü kuyruğu
+  +0.70→0.0. İmza testi allowed-set'e `own_pitch_rad` eklendi. Telemetri `gudum.ibvs.ey_ego`;
+  log kolonu `ibvs_eyego` (vis_ey ham kalır; fark = silinen kirlilik). Testler:
+  `test_ego_pitch_telafi`, `test_ego_pitch_yokken_eski_davranis` (21/21) + köprü testleri (16/16).
 
 ## ⭐ GÖRÜNTÜ-DÜZLEMİ KÖPRÜ / ÖLÜ-HESAP (2026-07-08, kullanıcı onayı)
 İki tune uçuşunun verisi netti: güdüm parametreleri işini yapıyor (en iyi episodlarda

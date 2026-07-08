@@ -124,7 +124,7 @@ class AvciIBVS:
     #  Server ayni det'i VIS_STALE_S boyunca sunar; ayni kareyi tekrar gormek
     #  zararsizdir (EMA sabit degere yakinsar = son komutu tutar).
     # ------------------------------------------------------------------
-    def hesapla(self, det, p, poz=None, own_roll_rad=None):
+    def hesapla(self, det, p, poz=None, own_roll_rad=None, own_pitch_rad=None):
         W = float(det["W"]); H = float(det["H"])
         ex = (float(det["cx"]) - W / 2.0) / (W / 2.0) if W > 1 else 0.0
         ey = (float(det["cy"]) - H / 2.0) / (H / 2.0) if H > 1 else 0.0
@@ -151,8 +151,22 @@ class AvciIBVS:
         tan_v = math.tan(vfov_h)
         ey_ref = nisan * math.tan(tilt) / tan_v if abs(tan_v) > 1e-9 else 0.0
 
-        # NISAN NOKTASINDAN -> bbox cizgisi: yatay ex, dikey (ey - ey_ref) = nisandan sapma.
-        eyy = self.ey_f - ey_ref                      # dikey sapma (nisan noktasina gore)
+        # EGO-PITCH TELAFISI (2026-07-08, veri: 8 Tem 204331 logu corr(drone_pitch,vis_ey)=0.70):
+        # kamera govdeye sabit -> ileri itki govdeyi one yatirinca (burun asagi) optik eksen
+        # duser ve hedef goruntude YUKARI ziplar; yasa bunu "hedef kacti -> TIRMAN" okuyup
+        # kacak tirmanma yapiyordu (drone hedefin 10 m ALTINDAYKEN +0.70 tirmanis komutu).
+        # Duzeltme: dikey hatayi kendi pitch'imizden ARINDIR -> gercek bakis-hatti yuksekligi:
+        #   ey_dunya = ey_f - GAIN * tan(own_pitch) / tan(VFOV_yari)
+        # (own_pitch<0 = burun asagi -> tan<0 -> cikarma ey'yi YUKARI duzeltir; ego-roll
+        # telafisiyle ayni emsal: kendi IMU'muz = ego-motion, HEDEF verisi degil -> kural OK.)
+        ey_kul = self.ey_f
+        if own_pitch_rad is not None:
+            g = float(getattr(p, "IBVS_EGO_PITCH_GAIN", 1.0))
+            if g != 0.0 and abs(tan_v) > 1e-9:
+                ey_kul = self.ey_f - g * math.tan(float(own_pitch_rad)) / tan_v
+
+        # NISAN NOKTASINDAN -> bbox cizgisi: yatay ex, dikey (ey_kul - ey_ref) = nisandan sapma.
+        eyy = ey_kul - ey_ref                         # dikey sapma (ego-telafili, nisana gore)
         r = math.hypot(self.ex_f, eyy)
         aci = math.degrees(math.atan2(-eyy, self.ex_f)) if r > 1e-9 else 0.0
 
@@ -182,6 +196,7 @@ class AvciIBVS:
             "law": "IBVS",
             "ex": round(self.ex_f, 3), "ey": round(self.ey_f, 3),
             "ey_ref": round(ey_ref, 3),       # dikey nisan (hiz-vektoru FOE; tilt'ten)
+            "ey_ego": round(ey_kul, 3),       # ego-pitch TELAFILI dikey hata (yasa bunu kullanir)
             "buyukluk": round(r, 3),          # nisandan sapma (0=hedef nisan noktasinda)
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)
             "kisma": round(kisma, 3),         # ileri itki carpani (1=tam gaz)

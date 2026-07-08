@@ -90,6 +90,9 @@ _LOG_COLS = [
     # ALTTAN-VURUS teshisi (2026-07-08): dikey nisan (negatif=hedef merkez ustunde tutulur)
     # + alcalma freni carpani (1=serbest, taban=tam fren; eyy>0'da devreye girer).
     "ibvs_eyref", "ibvs_alcal",
+    # EGO-PITCH TELAFISI (2026-07-08): yasanin kullandigi ego-telafili dikey hata
+    # (vis_ey ham kalir; ikisinin farki = telafinin o tik sildigi kirlilik).
+    "ibvs_eyego",
 ]
 
 
@@ -321,6 +324,13 @@ class Cfg:
     IBVS_ALCAL_FREN  = 2.0      # 0=kapali; 2.0 -> eyy~0.4'te tabana iner ⚙
     IBVS_ALCAL_TABAN = 0.2      # fren tabani (asla tam durma; biraz kapanis kalsin).
                                 # GPS alc_oncelik 0.15 tabaninin gorsel karsiligi; slider DISI.
+    # --- EGO-PITCH TELAFISI (2026-07-08; kacak-tirmanma kok nedeni) ---
+    # Ileri itki govdeyi one yatirinca kamera (govdeye sabit) asagi doner -> hedef goruntude
+    # YUKARI ziplar -> yasa "hedef kacti, TIRMAN" okuyordu (log 204331: corr(pitch,ey)=0.70;
+    # drone hedefin 10 m ALTINDAYKEN +0.70 tirmanis). Dikey hata kendi pitch'ten arindirilir:
+    #   ey_dunya = ey_f - GAIN*tan(own_pitch)/tan(VFOV_yari)   (ibvs_gorsel.hesapla)
+    # Kendi IMU'muz = ego-motion (ego-roll telafisiyle ayni emsal) -> kural ihlali DEGIL.
+    IBVS_EGO_PITCH_GAIN = 1.0   # 0=kapali (A/B icin); ters etki gorulurse once 0'la kiyasla.
     # --- ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank) ---
     # Hedefi ARKADAN takip ederken iki kanat ucu pikselinden (kp[1]=sol, kp[2]=sag)
     # goruntu-uzayi bank acisi: roll_img=atan2(dy,dx). Bankli ucak alcak kanadi yonune
@@ -804,7 +814,11 @@ class AvciKontrol:
             if W > 1 and H > 1:
                 d2 = dict(det)
                 d2["cx"] = min(max(float(det["cx"]) + self._vis_v[0] * yas, 0.0), W)
-                d2["cy"] = min(max(float(det["cy"]) + self._vis_v[1] * yas, 0.0), H)
+                # DIKEY EKSTRAPOLE EDILMEZ (2026-07-08 kacak-tirmanma dersi): olculen vy
+                # cogunlukla EGO-PITCH sallanmasinin urunu; kopru onu surdurup sanal kutuyu
+                # kadraj tepesine mihliyor ve ~1.7 sn kor TAM TIRMANIS komutu uretiyordu
+                # (log 204331: ey=-1.0 kuyruklari). cy son GERCEK olcumde DONAR; dikey
+                # komut da koprude 0'a cekilir (_gorsel_guduum) -> irtifa-tut.
                 d2["kopru"] = True                        # kilit sayaci + log bunu ayirt eder
                 self.vis_kopru = True
                 return d2
@@ -861,6 +875,7 @@ class AvciKontrol:
             d["ibvs_roll_raw"] = it.get("roll_raw_deg")   # ham goruntu-roll (ego-comp A/B)
             # alttan-vurus teshisi: dikey nisan + alcalma freni carpani (tune analizi)
             d["ibvs_eyref"] = it.get("ey_ref"); d["ibvs_alcal"] = it.get("alcal")
+            d["ibvs_eyego"] = it.get("ey_ego")    # ego-pitch telafili dikey (yasa girdisi)
         self._log("VISUAL", d)
 
     # ----------------------------------------------------------------
@@ -916,7 +931,8 @@ class AvciKontrol:
     #  GERI DON: durum=ARAMA, None dondur -> adim() GPS yoluna duser.
     #  return: (throttle,pitch,roll,yaw) | None (=GPS'e don). _send rate-limit'ler.
     # ----------------------------------------------------------------
-    def _gorsel_guduum(self, tespit, t, revert_izin=True, own_roll_rad=None):
+    def _gorsel_guduum(self, tespit, t, revert_izin=True, own_roll_rad=None,
+                       own_pitch_rad=None):
         # revert_izin=False (manuel GORSEL switch): kayipta GPS'e DONME, hover'da kal.
         # own_roll_rad: aracin KENDI roll'u (IMU) — pose roll ego-motion telafisi (hedef degil).
         # KILITLENME ISTERI SAYACI (sartname 6.1.2/6.1.4): SALT GOZLEM — kirmizi
@@ -935,8 +951,15 @@ class AvciKontrol:
             if poz is None or self.son_poz_t is None or \
                     (time.perf_counter() - self.son_poz_t) > float(getattr(Cfg, "IBVS_POZ_STALE_S", 0.6)):
                 poz = None
-            komut = self.ibvs.hesapla(tespit, Cfg, poz=poz, own_roll_rad=own_roll_rad)
+            komut = self.ibvs.hesapla(tespit, Cfg, poz=poz, own_roll_rad=own_roll_rad,
+                                      own_pitch_rad=own_pitch_rad)
             self.ibvs_tlm = self.ibvs.durum()
+            # KOPRUDE DIKEY-TUT (2026-07-08 kacak-tirmanma dersi): kopru bbox'i TAHMINDIR
+            # (cy zaten donduruldu); tahminle irtifa entegre etme -> thr=0 (irtifa-tut),
+            # yatay takip (pitch/yaw) surer. Gercek tespit donunce normal yasa devralir.
+            if kopru:
+                komut = (0.0, komut[1], komut[2], komut[3])
+                self.ibvs_tlm["dikey"] = 0.0          # telemetri uygulanani gostersin
             return komut
         # --- KAYIP: (OTO) VIS_LOST_TO_GPS_S kadar HOVER, sonra GPS'e don.
         #     0 = ANINDA GPS (hover fazi yok; dedektor titremesini zaten VIS_STALE_S
@@ -1038,11 +1061,16 @@ class AvciKontrol:
                         self._vis_ilan = True
 
         if self.durum == "GORSEL_GUDUM":
-            # kendi roll'umuz (IMU) -> pose roll ego-motion telafisi (hedef verisi DEGIL).
+            # kendi roll+pitch'imiz (IMU) -> ego-motion telafileri (hedef verisi DEGIL):
+            # roll pose-lead'i temizler; pitch dikey hatayi (ileri yatista kamera dusmesi
+            # hedefi goruntude yukari ziplatiyordu -> sahte TIRMAN) temizler.
             own_roll_rad = (math.radians(float(rot_rpy[0])) if Cfg.ROT_IN_DEGREES
                             else float(rot_rpy[0]))
+            own_pitch_rad = (math.radians(float(rot_rpy[1])) if Cfg.ROT_IN_DEGREES
+                             else float(rot_rpy[1]))
             sonuc = self._gorsel_guduum(tespit, t, revert_izin=(mod == "OTO"),
-                                        own_roll_rad=own_roll_rad)
+                                        own_roll_rad=own_roll_rad,
+                                        own_pitch_rad=own_pitch_rad)
             if sonuc is not None:
                 thr, pitch, roll, yaw = sonuc
                 self._send(thr, pitch, roll, yaw)
