@@ -129,41 +129,60 @@ def test_nisan_clamp_negatif():
     assert abs(g.durum()["ey_ref"] - round(beklenen, 3)) < 1e-3, g.durum()["ey_ref"]
 
 
+# Alcalma freni artik YALNIZ kilit-tut bandinda (yak<1, boyut hedefe yakin) ileri
+# itkiyi kisar; UZAKTA (yak=1) frenler baypas (yaklasma-agirlikli fren, 2026-07-08).
+# Bu yardimci kilit-tut bandi kurar: hedef=0.10, K=10, ILERI=1.0, wp=0.09 -> istek=0.1,
+# yak=0.1 -> frenler ~tam devrede; MERKEZ_FREN=0 ile alcal izole.
+def _band(**kw):
+    d = dict(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_BOYUT_HEDEF=0.10,
+             IBVS_K_BOYUT=10.0, IBVS_ILERI=1.0)
+    d.update(kw)
+    return _CfgVar(**d)
+
+
 def test_alcalma_freni_ustteyken_ileriyi_kisar():
-    """Hedef nisanin ALTINDA (eyy>0 = fazla yuksekteyiz) -> ileri itki carpimsal kisilir
-    (lift carry kirilir), thr<0. MERKEZ_FREN=0 + UZAK bbox (istek doygun=TAVAN) ile
-    carpan birebir dogrulanir."""
-    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
-    g = AvciIBVS()
-    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.65, wp=0.02, hp=0.01), p)  # ey=eyy=+0.3
-    beklenen = Cfg.PITCH_SIGN * Cfg.IBVS_ILERI * (1.0 - 2.0 * 0.3)
-    assert abs(pitch - beklenen) < 1e-6, "pitch=ILERI*alcal bekleniyordu: %.3f vs %.3f" % (pitch, beklenen)
+    """KILIT-TUT bandinda hedef nisanin ALTINDA (eyy>0 = fazla yuksekteyiz) -> ileri
+    itki alcal ile kisilir (lift carry kirilir), thr<0. Duz referansa gore kuculur."""
+    p = _band(IBVS_ALCAL_FREN=2.0)
+    g0 = AvciIBVS(); _, p0, _, _ = g0.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.09, hp=0.09), p)   # eyy=0
+    g1 = AvciIBVS(); thr, p1, _, _ = g1.hesapla(_det(cxn=0.5, cyn=0.65, wp=0.09, hp=0.09), p)  # eyy=+0.3
+    assert p1 < p0, "alcal kilit-tut bandinda ileriyi kismali: %.3f vs %.3f" % (p1, p0)
     assert thr < 0
-    assert abs(g.durum()["alcal"] - 0.4) < 1e-3
-    # fren buyudukce pitch kuculur (ayni sapmada)
-    _, pitch_sert, _, _ = AvciIBVS().hesapla(
-        _det(cxn=0.5, cyn=0.65, wp=0.02, hp=0.01),
-        _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=3.0))
-    assert abs(pitch_sert) < abs(pitch)
+    assert abs(g1.durum()["alcal"] - 0.4) < 1e-3
+    # fren buyudukce pitch kuculur (ayni sapma, daha sert fren)
+    g2 = AvciIBVS(); _, p2, _, _ = g2.hesapla(_det(cxn=0.5, cyn=0.65, wp=0.09, hp=0.09),
+                                              _band(IBVS_ALCAL_FREN=3.0))
+    assert p2 < p1
 
 
 def test_alcalma_freni_tirmanista_dokunmaz():
-    """Hedef nisanin USTUNDE (eyy<0 = alttayiz, tirman) -> alcal=1, ileri itki etkilenmez."""
-    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
+    """Hedef nisanin USTUNDE (eyy<0 = alttayiz, tirman) -> alcal=1 (yak'tan bagimsiz)."""
+    p = _band(IBVS_ALCAL_FREN=2.0)
     g = AvciIBVS()
-    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.35, wp=0.02, hp=0.01), p)  # ey=eyy=-0.3
+    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.35, wp=0.09, hp=0.09), p)  # eyy=-0.3
     assert g.durum()["alcal"] == 1.0, "tirmanista alcal=1 bekleniyordu"
-    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6
     assert thr > 0
 
 
 def test_alcalma_taban():
-    """Buyuk sapmada fren TABANA oturur (asla tam durma; biraz kapanis kalir)."""
-    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
+    """Buyuk sapmada ham fren TABANA oturur (asla tam durma; biraz kapanis kalir)."""
+    p = _band(IBVS_ALCAL_FREN=2.0)
     g = AvciIBVS()
-    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.95, wp=0.02, hp=0.01), p)  # eyy=+0.9
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.95, wp=0.09, hp=0.09), p)  # eyy=+0.9
     assert abs(g.durum()["alcal"] - float(Cfg.IBVS_ALCAL_TABAN)) < 1e-6
     assert abs(pitch) > 0, "tabanda bile ileri itki tam SIFIRLANMAZ"
+
+
+def test_yaklasmada_fren_baypas():
+    """KOK-NEDEN (gorsel fazda hizlanamiyor): UZAK hedef (yak=1) kenarda+yuksekte
+    OLSA BILE frenler baypas -> tam ileri TAVAN. Eskiden kisma*alcal bunu ~0.05'e
+    eziyordu; artik uzakta mesafe kapatilir."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=1.4, IBVS_ALCAL_FREN=2.0)
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.9, cyn=0.9, wp=0.02, hp=0.01), p)  # uzak+kenar+yuksek
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6, \
+        "uzakta fren baypas -> tam TAVAN bekleniyordu: %.3f" % pitch
+    assert g.durum()["yak"] == 1.0
 
 
 # ---------------------------------------------------------------------------

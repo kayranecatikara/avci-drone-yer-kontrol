@@ -8,7 +8,8 @@
 
 | Belirti (videoda/logda gördüğün) | Knob | Yön | Etki |
 |---|---|---|---|
-| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızı TAVANI) | ★★★ |
+| **Görsel fazda hiç hızlanamıyor / hedef kaçıyor** | (2026-07-08 yapısal düzeltildi: uzakta frenler baypas, tam ileri) — hâlâ azsa `IBVS_ILERI` (tavan) **ARTIR** | | ★★★ |
+| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızı TAVANI; artık çarpanlar yemiyor) | ★★★ |
 | Hedefe sert dalıp **ıskalıyor / kilit penceresi dolmadan varıyor** | `IBVS_ILERI` | **DÜŞÜR** (tavan) | ★★★ |
 | **KİLİT-TUT: çok uzakta duruyor, kilit saymıyor** (boyut < %6 platosu) | `IBVS_BOYUT_HEDEF` | **ARTIR** (0.10-0.12); yetmezse `IBVS_K_BOYUT` ARTIR | ★★★ |
 | **KİLİT-TUT: fazla sokuluyor / vuracak gibi** | `IBVS_BOYUT_HEDEF` | **DÜŞÜR** | ★★★ |

@@ -218,7 +218,18 @@ class AvciIBVS:
         geri = max(0.0, float(getattr(p, "IBVS_GERI_MAX", 0.0)))
         ileri_istek = (clamp(kb * (hedef_boyut - self.boyut_f), -geri, ileri_cap)
                        if kb > 0.0 else ileri_cap)
-        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma * alcal
+        # YAKLASMA-AGIRLIKLI FREN (2026-07-08, "gorsel fazda hizlanamiyor" teshisi):
+        # merkez freni (kisma) + alcalma freni (alcal) CARPIMSAL bindiginde ileri itkiyi
+        # ~10'da 1'e eziyordu (220830 logu: pitchC med 0.04 vs GPS 0.17; hedef 18 m/s
+        # kaciyor, yaklasilamiyor -> IBVS_ILERI'yi sonuna cekmek carpanlarin altinda
+        # yeniyor). Cozum: frenler YALNIZ kilit-tut bandinda (hedefe yakin) devrede;
+        # UZAKTA (istek tavanda = yak~1) frenler DEVRE DISI -> tam ileri, mesafe kapat.
+        # yak = istek/tavan (0..1). Merkezleme (yaw/thr) yak'tan BAGIMSIZ hep aktif ->
+        # "dengeleme" bozulmaz, yalniz ILERI itki acilir. Sadece goruntu verisi -> kural OK.
+        yak = clamp(ileri_istek / ileri_cap, 0.0, 1.0) if ileri_cap > 1e-6 else 0.0
+        kisma_eff = yak + (1.0 - yak) * kisma
+        alcal_eff = yak + (1.0 - yak) * alcal
+        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma_eff * alcal_eff
                                        + min(ileri_istek, 0.0))
         roll = 0.0
 
@@ -229,8 +240,9 @@ class AvciIBVS:
             "ey_ego": round(ey_kul, 3),       # ego-pitch TELAFILI dikey hata (yasa bunu kullanir)
             "buyukluk": round(r, 3),          # nisandan sapma (0=hedef nisan noktasinda)
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)
-            "kisma": round(kisma, 3),         # ileri itki carpani (1=tam gaz)
-            "alcal": round(alcal, 3),         # alcalma freni carpani (1=serbest; eyy>0'da kisar)
+            "kisma": round(kisma, 3),         # ham merkez freni (1=tam gaz)
+            "alcal": round(alcal, 3),         # ham alcalma freni (1=serbest; eyy>0'da kisar)
+            "yak": round(yak, 3),             # yaklasma agirligi (1=uzak/frensiz, 0=hedefte/fren tam)
             # KILIT-TUT: EMA'li bbox eksen orani + hedefi + regulator istegi
             # (istek tavanda = yaklasiyor, bantta = tutuyor, -geri'de = kacisiyor)
             "boyut": round(self.boyut_f, 4),

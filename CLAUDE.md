@@ -256,6 +256,16 @@ oranını (boyut = max(w/W, h/H) — **kilit sayacı metriğiyle AYNI ölçü**)
   Segment Kıyas'ta tek uçuşta kıyaslanır).
 - boyut ex/ey ile aynı `VIS_EMA`'dan geçer (`boyut_f`, sifirla'da temiz). Girdi yalnız bbox
   pikselleri → GPS yasağına uygun; `hesapla` imzası DEĞİŞMEDİ (`test_gps_siz_imza` dokunulmadan).
+- **YAKLAŞMA-AĞIRLIKLI FREN (2026-07-08, "görsel fazda hızlanamıyor" düzeltmesi):** merkez freni
+  (kisma) + alçalma freni (alcal) ÇARPIMSAL binince ileri itkiyi ~10'da 1'e eziyordu (220830 logu:
+  görsel pitch med **0.04** vs GPS 0.17; hedef 18 m/s kaçıyor, yaklaşılamıyor → `IBVS_ILERI`'yi
+  sonuna çekmek çarpanların altında yeniliyordu). Çözüm: `yak = clamp(ileri_istek/İLERİ,0,1)` →
+  frenler yalnız **kilit-tut bandında** (hedefe yakın, istek düşük → yak→0) devrede; **UZAKTA**
+  (istek tavanda → yak=1) `kisma_eff=alcal_eff=1` → tam ileri, mesafe kapat. `kisma_eff =
+  yak+(1−yak)·kisma` (alcal aynı). Merkezleme (yaw/thr) yak'tan BAĞIMSIZ hep aktif → dengeleme
+  bozulmaz, yalnız ileri açılır. Geri-oynatma: görsel pitch med 0.04→**0.45** (tiklerin %90'ı
+  tavan). Telemetri `gudum.ibvs.yak` (UI ileri satırı: YAKLAŞMA frensiz / fren % / TUT); yaklaşma
+  hâlâ az gelirse artık `IBVS_ILERI` (tavan) etkili — çekilebilir. Test: `test_yaklasmada_fren_baypas`.
 - Cfg: `IBVS_BOYUT_HEDEF=0.09⚙` (slider 0.06-0.20), `IBVS_K_BOYUT=15⚙` (0-40),
   `IBVS_GERI_MAX=0.15⚙` (0-0.40); `IBVS_ILERI` artık **TAVAN** (etiket güncellendi).
 - Telemetri `gudum.ibvs.boyut/boyut_hedef/ileri_istek`; UI IBVS kartında "📏 Bbox boyutu /
