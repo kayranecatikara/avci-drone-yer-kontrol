@@ -200,6 +200,23 @@ def test_cmc_track_warp_azaltir_kaymayi():
         (np.mean(kaymalar_cmc), np.mean(kaymalar_ham))
 
 
+def test_cikti_t_ve_cls_tasima():
+    # cikti() olcum tikinde son_det'in t/cls'ini tasir (server UI yas-telafisi +
+    # sinif etiketi bunlara dayanir); coast tikinde t TASINMAZ (bayat zaman
+    # damgasiyla asiri ileri-cizim olmasin — server 'simdi' atar).
+    tp = tk.Takipci()
+    out = None
+    for i in range(6):
+        out = tp.guncelle([_det(500 + i, 400, t=100.0 + i * 0.05, cls=0)], 0.02)
+    assert out is not None
+    assert out["cls"] == 0
+    assert abs(out["t"] - (100.0 + 5 * 0.05)) < 1e-9
+    assert out["tespit_mi"] is True
+    out = tp.guncelle([], 0.02)                     # olcum yok -> coast
+    assert out is not None and out["tespit_mi"] is False
+    assert "t" not in out
+
+
 if __name__ == "__main__":
     testler = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in testler:

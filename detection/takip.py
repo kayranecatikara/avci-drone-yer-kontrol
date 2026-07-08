@@ -216,10 +216,13 @@ class Track:
         kp = self.son_det.get("keypoints") if self.son_det else None
         if kp is not None and self.tespit_mi:
             d["keypoints"] = kp        # coast'ta keypoint tasima (bayat poz gitmesin)
-        # son OLCULEN tespitin W/H'sini (goruntu boyutu) tasi
+        # son OLCULEN tespitin W/H'sini (goruntu boyutu) + sinif indeksini tasi
         if self.son_det:
             d["W"] = self.son_det.get("W")
             d["H"] = self.son_det.get("H")
+            d["cls"] = self.son_det.get("cls", -1)
+            if self.tespit_mi and "t" in self.son_det:
+                d["t"] = self.son_det["t"]   # olcum tiki: kare zamani (UI yas telafisi)
         return d
 
 

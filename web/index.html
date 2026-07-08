@@ -872,12 +872,15 @@
       // giderken (ARAMA/KİLİT) hedef SADE bir kutuya alınır — kilit ancak görsel fazda
       // sayılır (backend _kilit_degerlendir de yalnız GORSEL_GUDUM'da çalışır).
       const gorselFaz = (gs.durum==="GORSEL_GUDUM");
+      // coast: ByteTrack ölçümsüz tahminle sürüyor (tespit_mi=false) → kesikli kutu
+      const coast = (det.tespit_mi===false);
       const idTxt = (det.id!=null ? "ID:"+det.id+" " : "") + (det.sinif||"hedef")
-                    + " " + Number(det.conf).toFixed(2);
+                    + " " + Number(det.conf).toFixed(2) + (coast?" (tahmin)":"");
       if(!gorselFaz){
         // --- GPS GÜDÜM FAZI: sade nötr bbox (kırmızı/yeşil YOK) ---
-        ctx.setLineDash([]); ctx.strokeStyle="rgba(150,200,235,.92)"; ctx.lineWidth=2;
+        ctx.setLineDash(coast?[5,4]:[]); ctx.strokeStyle="rgba(150,200,235,.92)"; ctx.lineWidth=2;
         ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
+        ctx.setLineDash([]);
         ctx.fillStyle="rgba(150,200,235,.92)"; ctx.beginPath(); ctx.arc(bx,by,3.5,0,6.2832); ctx.fill();
         ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
         ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 15);
@@ -891,7 +894,7 @@
         const zayif = Number(det.conf) < esik;
         // ŞARTNAME: kilit anlarında kilitlenme dörtgeni KIRMIZI #FF0000, ≤3 px, kesiksiz.
         const AH = zayif ? "#ffb01f" : (kilit ? "#FF0000" : "rgba(200,210,225,.9)");
-        ctx.setLineDash(zayif?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=kilit?3:2.5;
+        ctx.setLineDash((zayif||coast)?[5,4]:[]); ctx.strokeStyle=AH; ctx.lineWidth=kilit?3:2.5;
         ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
         ctx.setLineDash([]);
         ctx.fillStyle=AH; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();

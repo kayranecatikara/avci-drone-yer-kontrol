@@ -94,8 +94,9 @@ ASLA GPS/J tabanlı bir çözüm önerme; pose keypoint'i GÖRSEL veridir, serbe
   görsel BASİT IBVS güdüm (TEK görsel yasa). Teslim .zip'i bu modülleri + modeli içermeli.
 - **GÜDÜM KODU HARİTASI: `guidance/GUDUM_HARITA.md`** (2026-07-07 v7 büyük sıfırlama
   sonrası günceldir: PN yığını silindi, basit IBVS geldi; Cfg faz-bantlı).
-- **Bizim hat (TAŞINACAK-ADAY; runtime dışı ama repoda + testli):** `detection/`
-  (takip=ByteTrack+gyro-CMC, algi_hatti, model_yonetici=registry, talon_pose_estimator=PnP),
+- **Bizim hat:** `detection/takip.py` (**ByteTrack+gyro-CMC — 2026-07-08 AKTİF hatta GERİ
+  BAĞLANDI**, aşağıdaki "BYTETRACK GERİ BAĞLAMA" bölümü); runtime dışı kalanlar (repoda +
+  testli): `algi_hatti`, `model_yonetici`=registry, `talon_pose_estimator`=PnP,
   `iletisim/hakem_istemci`. **ARŞİVE TAŞINDI (kullanıcı kararı 2026-07-08):**
   `kilit_kurali.py` (**§6.1.4 ZORUNLU — bağlanacaksa arşivden geri gelir**),
   `gudum_yasasi.py` (APN+OIPN, emekli) + testleri ve KilitCfg'ye bağımlı arac
@@ -116,8 +117,10 @@ DEĞİŞMEZ (kural 8: izleyici "durum değişti mi?" karşılaştırmasından ib
   KESİNTİ işareti) + görev olay günlüğü; sağ sütunda BOZUK GNSS kartı (KESİNTİ rozeti,
   paket yaşı, J düzeltme) + GÖREV kartı (faz, profil, en yakın mesafe, TAKİP rozeti);
   "VURUŞ!" uçucu banner + kalıcı "GÖREV BAŞARILI" ekranı (mevcut basariEkran).
-- **Takip-ID:** merge uyarlaması — main'in sentetik ID makinesi yerine GERÇEK ByteTrack
-  `track_id`'si kullanılır; kayıp/yeniden eşikleri `Cfg.VIS_STALE_S`/`VIS_LOST_TO_GPS_S`.
+- **Takip-ID:** GERÇEK ByteTrack `track_id`'si kullanılır (2026-07-07 MAIN-BAZ merge'inde
+  sentetik makineye dönmüştü; **2026-07-08 GERİ BAĞLANDI** — `_gorev_izle` ID'yi
+  `beyin.son_tespit.track_id`'den alır, alan yoksa sentetik sayaca düşer); kayıp/yeniden
+  eşikleri `Cfg.VIS_STALE_S`/`VIS_LOST_TO_GPS_S`.
 - **VURUŞ latch mesafesi:** J-temiz kestirim; DEV koşusunda (DEV-ONLY çit içinde,
   `dev_truth.mesafe_m` üzerinden) gerçek 3B; **ham ASLA** (sahte vuruş). SERT AYRIM korunur:
   paketlenmiş kodda çit söküldüğünden latch daima J-temizdir.
@@ -188,6 +191,33 @@ damgası `on_frame_arrived`'da. UI: dedektör mss'e düşünce FPV'de turuncu "�
 Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280).
 Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
 (640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
+
+## ⭐ BYTETRACK GERİ BAĞLAMA (2026-07-08, kullanıcı kararı — AKTİF hat)
+2026-07-07 MAIN-BAZ merge'inde düşen ByteTrack+gyro-CMC, `web/server.py`
+`dedektor_dongusu`'na GERİ bağlandı (tarif: `docs/BYTETRACK_ENTEGRASYON_NOTU.md`;
+A/B bulgusu: argmax hattı 120 sn'de 72 kayıp-kenarı / 30 sentetik ID üretiyordu).
+- **Akış:** `tespit_hepsi(bgr, maske=PROP_MASKE)` (çok-kutu; maskeli kutu takipçiye
+  hiç girmez) → `kamera_model.cmc_homografi(W,H,önceki_att,att)` (kendi dönüşümüz
+  kutu kaydırmasını telafi eder; att=`get_drone_rotation`) → `takipci.guncelle(dets,
+  dt, H_cmc)` → en iyi CONFIRMED track | None (sözleşme argmax'la uyumlu:
+  cx,cy,w,h,conf,W,H + track_id/track_durumu/tespit_mi; `Track.cikti` artık ölçüm
+  tikinde `t`+`cls` de taşır, coast'ta `t` yok → server `simdi` atar).
+- **Güdüm kapısı DEĞİŞMEDİ + coast beyne GİTMEZ:** `det_beyin` şartı `tespit_mi=True`
+  VE `conf≥VIS_CONF_MIN`. Kayan (coast, Kalman tahmini) kutu YALNIZ UI'da yaşar —
+  görsel fazın kendi köprüsü (ana_kontrol ölü-hesap) delik yönetimini yapar, çift
+  ölü-hesap YOK. Poz inferansı da coast karesinde koşmaz.
+- **Predict eşiği:** `min(UI_CONF_MIN, VIS_CONF_MIN, TakipCfg.CONF_DUSUK=0.1)` — BYTE
+  ikinci turu düşük-conf kutuyla İZİ YAŞATIR ama yeni track AÇAMAZ; tek-kare parazit
+  MIN_HITS=5'i geçemeden ölür (−30 yanlış-kilit sigortası).
+- **UI:** takip-ID artık GERÇEK `track_id` (telemetri + `/api/gorsel`); `_gorev_izle`
+  ID makinesi `beyin.son_tespit.track_id` okur (İLK/YENİDEN ayrımı `_takip["ilk"]`
+  bayrağıyla — ID değerinden bağımsız), iz değişince YENİDEN TESPİT olayı düşer.
+  Coast kutusu FPV'de KESİKLİ + "(tahmin)" etiketli. UI hız damgalama (`vx,vy`)
+  aynı-track_id şartına bağlandı. Görev pasifken `takipci.sifirla()` (bayat ID yok).
+- **Test:** `tests/test_takip.py` 14/14 (`test_cikti_t_ve_cls_tasima` yeni);
+  ibvs 21/21, kilit_takip 16/16, prop_maske 4/4, algi_hatti 5/5 geçiyor.
+- **KALAN:** canlı koşuda ID sürekliliği/coast davranışı gözle + `arac/ab_kiyas.py`
+  ile regresyon (takip kayıp-kenarı 72'den düşmeli, başarı/en-yakın bozulmamalı).
 
 ## ⭐ BÜYÜK SIFIRLAMA — BASİT IBVS (2026-07-07 v7, kullanıcı kararı)
 Kullanıcı: "bu IBVS işine çok değişik şeyler eklemişsin (PN'i yönelime entegre etmiştik),
@@ -420,9 +450,9 @@ FPV'de maske pervaneyi tam örtmüyorsa `PROP_MASKE`'yi düzenle (sol-üstte zay
      bağlanması Kayra kodunda değişiklik gerektirir → Kayra ile koordine (teslim öncesi
      ZORUNLU). (`_kilit_degerlendir` sayacı SALT GÖZLEM — hakem BİLDİRİMİ ayrı iştir;
      bağlama günü kilit_kurali arşivden `guidance/`e geri taşınır.)
-  3. **ByteTrack: PUSH'landı — Kayra kendi hattında deneyecek (kullanıcı kararı):**
-     modüller `detection/takip.py` + `gorsel_tespit.tespit_hepsi` (çok-kutu; `tespit_et`
-     argmax geriye-uyumlu). Bağlama tarifi: `docs/BYTETRACK_ENTEGRASYON_NOTU.md`.
+  3. **ByteTrack: AKTİF HATTA GERİ BAĞLANDI (2026-07-08, kullanıcı kararı):** bkz.
+     "BYTETRACK GERİ BAĞLAMA" bölümü. Canlı koşuda doğrulama + `arac/ab_kiyas.py`
+     regresyonu (madde 5) hâlâ bekliyor.
   4. **Test uyumu:** test_dev_kaynak + test_fsm_faz3 eski hatta göre düşüyor (bilinen);
      güncelleme kilit/SERT AYRIM işleriyle birlikte yapılacak.
   5. **Regresyon koşusu:** entegrasyonlardan sonra `arac/ab_kiyas.py` ile 3 görev koşusu —
