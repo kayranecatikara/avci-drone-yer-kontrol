@@ -24,7 +24,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sdk import drone_sdk as drone
-from guidance.ana_kontrol import AvciKontrol, Cfg
+from guidance.ana_kontrol import AvciKontrol, Cfg, talon_gate
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
 import numpy as np
 
@@ -342,6 +342,86 @@ _GPS_LOG = os.path.join(VERI_DIR, "gps_log_canli.json")
 _gps_log_kayitlar = []
 _gps_log_t0 = None
 _gps_log_son_yaz = 0.0
+
+# --- KILIT DENEMESI TESHIS CSV (Aşama 0; per-kare, GOZLEMSEL — gudume/detektore DOKUNMAZ) ---
+# Kilit denemesinde her detektor karesi icin "sayilari akitir": yerel+sunucu damga, GPS+PnP
+# menzil, det skor, bbox yatay/dikey %, hedef AV-ici (full-box), guidance_source, YOLO+PnP ms.
+# Ayri dosya (kiyas_log deseni), zaman-damgali (her calistirma yeni), satir basi flush.
+# KILIT_CSV_AKTIF=False ile kapatilir; hata durumunda SESSIZCE atlar (log kontrole karismaz).
+KILIT_CSV_AKTIF = True
+_KILIT_CSV_COLS = ("t_yerel", "t_sunucu", "gps_menzil_m", "pnp_menzil_m", "det_skor",
+                   "bbox_yatay_pct", "bbox_dikey_pct", "bbox_en_boy", "av_ici", "sahte_poz",
+                   "gudum_hedef", "devir", "guidance_source", "vis_mode", "yolo_ms", "pnp_ms",
+                   "toplam_ms", "det_var", "poz_kostu")
+_kilit_csv_f = None
+_kilit_son_durum = None       # devir kenar-tespiti: (ARAMA/KILIT) -> GORSEL_GUDUM gecis ani
+
+
+def _kilit_csv_yaz(satir):
+    """Bir per-kare teshis satirini yaz (lazy-open, timestamped, satir basi flush). Hata yutulur."""
+    global _kilit_csv_f
+    try:
+        if _kilit_csv_f is None:
+            fn = time.strftime("kilit_deneme_%Y%m%d_%H%M%S.csv")
+            _kilit_csv_f = open(os.path.join(VERI_DIR, fn), "w", encoding="utf-8")
+            _kilit_csv_f.write(",".join(_KILIT_CSV_COLS) + "\n")
+        _kilit_csv_f.write(",".join("" if satir.get(k) is None else str(satir.get(k))
+                                    for k in _KILIT_CSV_COLS) + "\n")
+        _kilit_csv_f.flush()
+    except Exception:
+        pass
+
+
+def _kilit_csv_teshis(det, poz_ui, det_var, poz_kostu, yolo_ms, pnp_ms, durum, vis_mode, son_xy):
+    """Per-kare teshis satirini KUR ve yaz. Yalnizca OKUR (kontrol/detektor durumuna dokunmaz)."""
+    if not KILIT_CSV_AKTIF:
+        return
+    try:
+        global _kilit_son_durum
+        devir = int(_kilit_son_durum in ("ARAMA", "KILIT") and durum == "GORSEL_GUDUM")  # GPS->gorsel gecis
+        _kilit_son_durum = durum
+        gudum_hedef = "yok" if det is None else ("gercek" if talon_gate(det) else "sahte-elendi")
+        gps_m = None                                          # yatay temiz-GPS menzili (d_h; lead-siz), m
+        if son_xy is not None:
+            try:
+                dl = drone.get_drone_location()
+                gps_m = round(float(np.hypot(float(son_xy[0]) - float(dl[0]),
+                                             float(son_xy[1]) - float(dl[1]))) / 100.0, 2)
+            except Exception:
+                gps_m = None
+        pnp_m = (round(float(poz_ui["mesafe_m"]), 2)
+                 if (poz_ui is not None and poz_ui.get("mesafe_m") is not None) else None)
+        det_skor = bbox_y = bbox_d = av_ici = en_boy = sahte = None
+        if det is not None:
+            W = float(det.get("W", 0) or 0); H = float(det.get("H", 0) or 0)
+            det_skor = round(float(det.get("conf", 0.0)), 3)
+            if W > 1 and H > 1:
+                wn = float(det["w"]) / W; hn = float(det["h"]) / H
+                cxn = float(det["cx"]) / W; cyn = float(det["cy"]) / H
+                bbox_y = round(wn * 100.0, 2); bbox_d = round(hn * 100.0, 2)
+                hpx = float(det["h"]); en_boy = round(float(det["w"]) / hpx, 2) if hpx > 0 else 0.0
+                ax = float(Cfg.VIS_AV_X); ay = float(Cfg.VIS_AV_Y)     # full-box (kilit ile AYNI)
+                av_ici = int(ax <= cxn - wn / 2.0 and cxn + wn / 2.0 <= 1.0 - ax
+                             and ay <= cyn - hn / 2.0 and cyn + hn / 2.0 <= 1.0 - ay)
+                # SAHTE-POZITIF: >=%6 + AV ama talon kapisini (conf+en-boy) gecemez -> sahte
+                buyuk = max(wn, hn) >= float(Cfg.VIS_LOCK_PCT)
+                sahte = int(bool(av_ici) and buyuk and not talon_gate(det))
+        toplam = (round((yolo_ms or 0.0) + (pnp_ms or 0.0), 1)
+                  if (yolo_ms is not None or pnp_ms is not None) else None)
+        t_yerel = (round(float(det["t"]), 4) if (det is not None and det.get("t") is not None)
+                   else round(time.perf_counter(), 4))
+        _kilit_csv_yaz({
+            "t_yerel": t_yerel, "t_sunucu": round(time.time(), 3),
+            "gps_menzil_m": gps_m, "pnp_menzil_m": pnp_m, "det_skor": det_skor,
+            "bbox_yatay_pct": bbox_y, "bbox_dikey_pct": bbox_d, "bbox_en_boy": en_boy,
+            "av_ici": av_ici, "sahte_poz": sahte, "gudum_hedef": gudum_hedef, "devir": devir,
+            "guidance_source": durum, "vis_mode": vis_mode,
+            "yolo_ms": (round(yolo_ms, 1) if yolo_ms is not None else None),
+            "pnp_ms": (round(pnp_ms, 1) if pnp_ms is not None else None),
+            "toplam_ms": toplam, "det_var": int(bool(det_var)), "poz_kostu": int(bool(poz_kostu)),
+        })
+    except Exception:
+        pass
 
 
 # ============================================================
@@ -768,6 +848,7 @@ def dedektor_dongusu():
         if not dedektor.hazir:
             time.sleep(1.0)                           # kurulum yok -> CPU yakma
             continue
+        _yolo_ms = None; _pnp_ms = None               # Aşama 0 teshis: cikarim sureleri (ms)
         try:
             # Predict esigi UI icin dusuk (UI_CONF_MIN): zayif tespitler arayuzde
             # turuncu cizilir. GUDUM yine yalnizca conf>=VIS_CONF_MIN gorur
@@ -777,14 +858,17 @@ def dedektor_dongusu():
             bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
             # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
             # PERVANE MASKESI canli okunur (Cfg.PROP_MASKE) -> kendi pervanemiz elenir.
+            _yt0 = time.perf_counter()                # Aşama 0 teshis: YOLO cikarim suresi
             det = (dedektor.tespit_et(bgr, maske=getattr(Cfg, "PROP_MASKE", None))
                    if bgr is not None else None)
+            if bgr is not None:
+                _yolo_ms = (time.perf_counter() - _yt0) * 1000.0
         except Exception:
             bgr, det = None, None
-        # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
-        # takip rozeti, gorsel guduum eski predict-esigi davranisiyla BIREBIR ayni.
-        det_beyin = (det if det is not None
-                     and float(det.get("conf", 0.0)) >= float(Cfg.VIS_CONF_MIN) else None)
+        # GUDUM/KILIT KAPISI = SAHTE-POZITIF KAPISI (talon_gate): conf + en-boy. Kapiyi gecmeyen
+        # (zayif VEYA dar/dikey clutter) beyne GITMEZ -> IBVS onu HEDEF ALMAZ (clutter'i ORTALAMAZ),
+        # kilit saymaz. Gecmezse beyin son GECERLI hedefi VIS_STALE boyunca tutar (kisa hold-last).
+        det_beyin = det if talon_gate(det) else None
         # POZ kestirimi: AYNI kare uzerinde ILAVE inference + PnP (kilit DISINDA).
         # SEYREK kosar: best.pt hedef gormusken her POZ_HER_N turda bir. Gozlemci-only
         # bir ozellik icin GPU'nun yarisini yemesin: her turda kosunca dedektor canli
@@ -799,8 +883,10 @@ def dedektor_dongusu():
             try:
                 pdet = poz_dedektor.tespit_et(bgr)
                 if pdet is not None:
+                    _pt0 = time.perf_counter()        # Aşama 0 teshis: PnP cozum suresi
                     poz = poz_cozucu.coz(pdet["kp_xy"], pdet["kp_conf"],
                                          pdet["W"], pdet["H"], t=pdet["t"])
+                    _pnp_ms = (time.perf_counter() - _pt0) * 1000.0
                     yp = None
                     if poz is not None:
                         try:   # dunya yaw/pitch: kare anindaki drone rotasyonuyla
@@ -826,6 +912,13 @@ def dedektor_dongusu():
             _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle
+            _b_durum = getattr(beyin, "durum", "")    # Aşama 0 teshis: guidance_source + menzil parcalari
+            _b_vismode = getattr(beyin, "vis_mode", "")
+            _b_sonxy = getattr(beyin, "son_xy_anlik", None)
+        # Aşama 0 — KILIT DENEMESI per-kare teshis CSV'si (kilit DISINDA; GOZLEMSEL):
+        _kilit_csv_teshis(det, poz_ui, det_var=(det is not None), poz_kostu=poz_kostu,
+                          yolo_ms=_yolo_ms, pnp_ms=_pnp_ms,
+                          durum=_b_durum, vis_mode=_b_vismode, son_xy=_b_sonxy)
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
