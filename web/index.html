@@ -717,6 +717,7 @@
       ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
       ["VIS_CONF_MIN","Tespit güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
       ["VIS_LOST_TO_GPS_S","Kayıpta bekleme (s)   (0=kayıpta ANINDA GPS'e dön; titreme koruması VIS_STALE_S'te ayrı)",0,5.0,0.25],
+      ["VIS_KOPRU_S","★ Kayıp köprüsü / ölü-hesap (s)   (dedektör deliğinde bbox son hızıyla sanal sürülür; kilit SAYMAZ; 0=kapalı)",0,2.5,0.1],
     ]],
   ];
   let tuneAcik=false;
@@ -995,6 +996,11 @@
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
     const fazTxt = gorev.faz ? "  · FAZ: "+gorev.faz : "";
     ctx.fillText("DURUM: "+dur+modTxt+fazTxt, rc.x+10, rc.y+22);
+    // KÖPRÜ (ölü-hesap) rozeti: dedektör deliğinde sanal bbox ile devam ediliyor
+    if(gs.kopru){
+      halo("◌ KÖPRÜ: ölü-hesap (dedektör deliği)", rc.x+10, rc.y+40,
+           "rgba(255,176,31,.95)", "left", "bold 12px monospace");
+    }
     // KARE KAYNAĞI uyarısı: dedektör mss'e düşerse (oyun penceresi arkada) yanlış yeri
     // görebilir → sağ-üstte turuncu uyarı. windows-capture ise sessiz (occlusion-proof).
     if(gs.kare_kaynak && /mss/i.test(gs.kare_kaynak)){

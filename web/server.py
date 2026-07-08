@@ -296,6 +296,7 @@ TUNE_ALLOW = {
     "YAW_MAX",           # yaw tavani (doygunluk)
     "VIS_CONF_MIN",      # tespit guven esigi
     "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
+    "VIS_KOPRU_S",       # goruntu-duzlemi kopru (olu-hesap) suresi; 0 = kapali
 }
 
 # ----------------------------------------------------------
@@ -1123,6 +1124,7 @@ def build_telemetry():
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
         "kare_kaynak": _fpv_kaynak.get("ad"),      # dedektorun gordugu kaynak (windows-capture / mss)
         "conf_esik": float(Cfg.VIS_CONF_MIN),      # gudum/kilit esigi (alti = zayif, UI turuncu cizer)
+        "kopru": bool(getattr(beyin, "vis_kopru", False)),  # olu-hesap koprusu aktif mi (FPV rozeti)
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
         "kilit": b_kilit,                          # {anlik,sure,gerek,pencere,ok,esik_pct,boyut_pct}
         # PERVANE MASKESI (yanlis-poz engelleme): UI kirmizi tarama ile cizer (kullanici dogrular)

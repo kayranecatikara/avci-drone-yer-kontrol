@@ -84,6 +84,9 @@ _LOG_COLS = [
     # ONGORULU YAW LEAD (pose kanat uclarindan hedef bank): roll (ego-telafili, deg) + yaw lead +
     # kapi durumu + HAM goruntu-roll (ego-telafisiz; ego-comp A/B analizi icin).
     "ibvs_roll", "ibvs_lead", "ibvs_roll_ok", "ibvs_roll_raw",
+    # GORUNTU-DUZLEMI KOPRU (2026-07-08): bu tik olu-hesap sanal bbox'la mi calisti?
+    # (vis_gordu o tik 0 yazilir -> tespit% durust; kopru katkisi bu kolondan izlenir)
+    "vis_kopru",
 ]
 
 
@@ -262,6 +265,18 @@ class Cfg:
                                # son gorusten itibaren toplam ~(VIS_STALE_S + bu) sn'de doner.
                                # Manuel GORSEL switch'te donus YOK (revert_izin=False), hep hover.
     VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
+    # --- GORUNTU-DUZLEMI KOPRU / OLU-HESAP (2026-07-08, kullanici onayi) ---
+    # Sorun: dedektor 15-40 m'de duzenli 0.5+ sn delik aciyor -> VIS_STALE_S dolunca
+    # gorsel faz dusuyordu (8 Tem ucus_2: 22 episodun hepsi 1-2.4 sn; kilit isteri
+    # matematiksel imkansiz). Cozum: gercek tespit bayatlayinca bbox, son iki GERCEK
+    # tespitten olculen goruntu-hiziyla (px/s, EMA'li) VIS_KOPRU_S boyunca ILERI
+    # tasinir; IBVS ayni yasayla onu izler. Gercek tespit donunce devralir, donmezse
+    # kayip mantigi (VIS_LOST_TO_GPS_S) calisir. ACIKLANABILIR: sabit-hiz varsayimi,
+    # kameradan turetilmis veri (son bbox + bbox hizi) -> gorsel-faz GPS yasagina uygun.
+    # DURUSTLUK: kopru tespiti KILIT SAYACINA SAYILMAZ (vis_gordu=0, vis_kopru=1
+    # loglanir); yalniz GORSEL_GUDUM fazinda uygulanir (OTO kilit sayacini sisirmez).
+    VIS_KOPRU_S      = 1.2      # kopru suresi (s); 0 = kapali ⚙
+    VIS_KOPRU_V_EMA  = 0.5      # goruntu-hizi EMA katsayisi (yeni olcum agirligi)
     # --- BASIT IBVS (2026-07-07): goruntu merkezi -> bbox merkezi cizgisi ---
     # TEK gorsel yasa (guidance/ibvs_gorsel.py): cizginin YATAY bileseni yaw'a,
     # DIKEY bileseni throttle'a gider; BUYUKLUGU (merkeze sapma "mesafesi") ileri
@@ -427,6 +442,8 @@ class AvciKontrol:
         self._vis_pos_count = 0         # ardisik gecerli-tespit (kilit histerezisi)
         self._vis_lost_count = 0        # ardisik kayip (hover -> GPS'e donus karari)
         self._vis_ilan = False          # "GPS kesildi" anonsu bir kez basilsin
+        self._vis_v = None              # goruntu-hizi (px/s; son iki GERCEK tespitten, EMA'li)
+        self.vis_kopru = False          # bu tik KOPRU (olu-hesap) tespitiyle mi? (telemetri/log)
         self.ibvs = AvciIBVS()          # merkez->bbox cizgisi (tek gorsel yasa; basit IBVS)
         self.ibvs_tlm = {}              # son IBVS telemetrisi (server build_telemetry okur; salt-okunur)
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
@@ -466,7 +483,7 @@ class AvciKontrol:
         self.handoff_announced = False
         self.durum = "ARAMA"
         self._kalkis_done = (not Cfg.TAKEOFF)
-        # GORSEL GUDUM: yeni gorev -> gorsel kilit/kor-devam durumunu da taze basla
+        # GORSEL GUDUM: yeni gorev -> gorsel kilit/kopru durumunu da taze basla
         self.son_tespit = None
         self.son_tespit_t = None
         self.son_poz = None
@@ -474,6 +491,8 @@ class AvciKontrol:
         self._vis_pos_count = 0
         self._vis_lost_count = 0
         self._vis_ilan = False
+        self._vis_v = None
+        self.vis_kopru = False
         self.ibvs.sifirla()
         self.ibvs_tlm = {}
         # kilitlenme isteri sayaci: yeni gorev -> pencere ve latch dahil taze basla
@@ -702,6 +721,8 @@ class AvciKontrol:
         self._vis_pos_count = 0          # switch -> gorsel kilit/EMA temiz baslasin
         self._vis_lost_count = 0
         self._vis_ilan = False
+        self._vis_v = None               # kopru hizi da taze baslasin
+        self.vis_kopru = False
         self.ibvs.sifirla()
         # switch = yeni deneme -> kilitlenme penceresi ve latch de taze baslasin
         self.kilit_win.clear()
@@ -713,8 +734,30 @@ class AvciKontrol:
 
     def set_gorsel_tespit(self, det):
         if det is not None:
+            t_det = det.get("t", time.perf_counter())
+            # GORUNTU-HIZI (px/s, EMA'li): son iki GERCEK tespitten. KOPRU (olu-hesap)
+            # bu hizla bbox'u ileri tasir. Uzun aradan sonraki ilk tespitte hiz BAYAT
+            # sayilir ve sifirlanir (delik oncesi hizla kopru kurulmasin).
+            if self.son_tespit is not None and self.son_tespit_t is not None:
+                dt = t_det - self.son_tespit_t
+                if 0.0 < dt <= Cfg.VIS_STALE_S:
+                    vx = (float(det["cx"]) - float(self.son_tespit["cx"])) / dt
+                    vy = (float(det["cy"]) - float(self.son_tespit["cy"])) / dt
+                    W = float(det.get("W", 0) or 0)
+                    if W > 1:                       # tavan: kare genisligi / 1.25 sn
+                        vmax = 0.8 * W              # (sacma tek-kare sicramasini keser)
+                        vx = max(-vmax, min(vmax, vx))
+                        vy = max(-vmax, min(vmax, vy))
+                    if self._vis_v is None:
+                        self._vis_v = (vx, vy)
+                    else:
+                        a = float(Cfg.VIS_KOPRU_V_EMA)
+                        self._vis_v = (a * vx + (1 - a) * self._vis_v[0],
+                                       a * vy + (1 - a) * self._vis_v[1])
+                elif dt > Cfg.VIS_STALE_S:
+                    self._vis_v = None
             self.son_tespit = det
-            self.son_tespit_t = det.get("t", time.perf_counter())
+            self.son_tespit_t = t_det
         # det None ise ESKI tespiti SILME: tek bos kare kilidi dusurmesin. Bayatlik
         # (VIS_STALE_S) _oku'da elenir; kayip histerezisini _vis_lost_count yonetir.
 
@@ -728,13 +771,30 @@ class AvciKontrol:
             self.son_poz_t = time.perf_counter()
 
     def _gorsel_tespit_oku(self):
-        """Bayat-olmayan son tespiti dondur; yoksa/bayatsa None (kayip mantigi devreye girer)."""
+        """Bayat-olmayan son tespiti dondur. Bayatsa: (yalniz GORSEL_GUDUM'da) once
+        GORUNTU-DUZLEMI KOPRUSU dene — bbox son olculen hizla ileri tasinir,
+        kopru=True isaretlenir. Kopru de bittiyse None (kayip mantigi devreye girer)."""
+        self.vis_kopru = False
         det = self.son_tespit
         if det is None or self.son_tespit_t is None:
             return None
-        if (time.perf_counter() - self.son_tespit_t) > Cfg.VIS_STALE_S:
-            return None
-        return det
+        yas = time.perf_counter() - self.son_tespit_t
+        if yas <= Cfg.VIS_STALE_S:
+            return det
+        # --- KOPRU (olu-hesap): sabit goruntu-hizi varsayimiyla sanal bbox ---
+        kopru_s = float(getattr(Cfg, "VIS_KOPRU_S", 0.0))
+        if (kopru_s > 0.0 and self._vis_v is not None
+                and self.durum == "GORSEL_GUDUM"          # yalniz gorsel fazda (kilit sayaci sismesin)
+                and yas <= Cfg.VIS_STALE_S + kopru_s):
+            W = float(det.get("W", 0) or 0); H = float(det.get("H", 0) or 0)
+            if W > 1 and H > 1:
+                d2 = dict(det)
+                d2["cx"] = min(max(float(det["cx"]) + self._vis_v[0] * yas, 0.0), W)
+                d2["cy"] = min(max(float(det["cy"]) + self._vis_v[1] * yas, 0.0), H)
+                d2["kopru"] = True                        # kilit sayaci + log bunu ayirt eder
+                self.vis_kopru = True
+                return d2
+        return None
 
     # ----------------------------------------------------------------
     #  GORSEL_GUDUM logu (phase="VISUAL"): meta+drone+uygulanan komut + normalize
@@ -759,7 +819,10 @@ class AvciKontrol:
             "vis_ey": (((float(tespit["cy"]) - float(tespit["H"]) / 2.0)
                         / (float(tespit["H"]) / 2.0))
                        if (tespit is not None and float(tespit.get("H", 0) or 0) > 1) else None),
-            "vis_gordu": 1 if tespit is not None else 0,
+            # vis_gordu: yalniz GERCEK tespit (kopru HARIC -> rapor tespit% durust kalir);
+            # vis_kopru: bu tik olu-hesap koprusuyle mi calisti (analiz ayirt eder).
+            "vis_gordu": 1 if (tespit is not None and not tespit.get("kopru")) else 0,
+            "vis_kopru": 1 if (tespit is not None and tespit.get("kopru")) else 0,
             # kilitlenme isteri sayaci (sartname isteri teshisi; vis_faz kolonu bos kalir)
             "kilit_win_s": self.kilit_sure,
             # HAM normalize yatay konum (pervane konumlamasi; vis_ey dikey karsiligi)
@@ -842,7 +905,10 @@ class AvciKontrol:
         # own_roll_rad: aracin KENDI roll'u (IMU) — pose roll ego-motion telafisi (hedef degil).
         # KILITLENME ISTERI SAYACI (sartname 6.1.2/6.1.4): SALT GOZLEM — kirmizi
         # dortgen / ANGAJMAN cipi / olay gunlugu icin sayilir, KOMUTA GIRMEZ.
-        self._kilit_degerlendir(tespit, t)
+        # DURUSTLUK: KOPRU (olu-hesap) tespiti sayaca GIRMEZ — kilit yalniz GERCEK
+        # gorsel temasla dolar (kopru tik'i tespitsiz tik gibi islenir).
+        kopru = bool(tespit is not None and tespit.get("kopru"))
+        self._kilit_degerlendir(None if kopru else tespit, t)
         # YARISMA KURALI: gorsel temastan SONRA hareket komutu YALNIZ GORSEL veriden.
         # GPS/J (yon YA DA buyukluk) GECIRILMEZ -> diskalifiye. IBVS yalniz bbox okur.
         if tespit is not None:

@@ -137,7 +137,8 @@ SİLİNDİ (git geçmişinde). Yeni tek yasa: **`guidance/ibvs_gorsel.py` (AvciI
   revert. **Default 0 = kayıpta ANINDA GPS (2026-07-08 kullanıcı isteği: ara hover beklemesi
   kafa karıştırıyordu);** dedektör titremesini `VIS_STALE_S`(0.5 s) köprüsü emer → tek-kare
   atlamalar revert tetiklemez. Manuel GÖRSEL switch'te revert yok (hep hover). Kör-devam/
-  yakın-yapışkanlık katmanları silindi.
+  yakın-yapışkanlık katmanları silindi → **2026-07-08: GÖRÜNTÜ-DÜZLEMİ KÖPRÜ kullanıcı
+  onayıyla GERİ GELDİ (aşağıdaki bölüm)** — v7'dekinden farkı: tek knob, kilit saymaz, log ayrıştırır.
 - **Telemetri:** `gudum.png`→`gudum.ibvs` {ex,ey,buyukluk,aci_deg,kisma,dikey,ileri,yaw};
   UI'da PN kartı→IBVS kartı, FPV'de merkez→bbox turuncu HATA ÇİZGİSİ (sapma+açı etiketi).
   Log: png_R_m/Vc/omega + vis_faz artık BOŞ; yeni `ibvs_r`/`ibvs_aci` kolonları.
@@ -202,6 +203,23 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
 - Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 14/14).
   Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
   tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
+
+## ⭐ GÖRÜNTÜ-DÜZLEMİ KÖPRÜ / ÖLÜ-HESAP (2026-07-08, kullanıcı onayı)
+İki tune uçuşunun verisi netti: güdüm parametreleri işini yapıyor (en iyi episodlarda
+r=0.07-0.2) ama **dedektör 15-40 m'de düzenli 0.5+ sn delik açıyor** → görsel episodlar
+1-2.4 sn'de ölüyor → kilit isteri (10 sn'de 5 sn) matematiksel imkânsız. Model ekipçe
+iyileştiriliyor (paralel iş); yazılım tarafı çözümü **köprü**: gerçek tespit `VIS_STALE_S`'i
+aşınca bbox, son iki GERÇEK tespitten ölçülen görüntü-hızıyla (px/s, `VIS_KOPRU_V_EMA`=0.5
+EMA'lı, tavan 0.8·W/s) `VIS_KOPRU_S`(1.2 s ⚙ slider) boyunca İLERİ taşınır; IBVS aynı
+yasayla sanal bbox'u izler. Gerçek tespit dönünce devralır; köprü de dolarsa kayıp mantığı
+(`VIS_LOST_TO_GPS_S`) çalışır. **Kurallara uyum:** sabit-hız varsayımı = açıklanabilir
+(kural 8); girdi = son bbox + bbox hızı (kameradan türetilmiş) → görsel-faz GPS yasağına
+uygun. **DÜRÜSTLÜK:** köprü tiki KİLİT SAYACINA SAYILMAZ (`_kilit_degerlendir`'e None gider),
+loga `vis_gordu=0, vis_kopru=1` yazılır (rapor tespit%'si gerçek kalır), yalnız GORSEL_GUDUM
+fazında kurulur (OTO kilit sayacı `_vis_pos_count` şişmez), uzun delik sonrası ilk tespitte
+hız SIFIRLANIR (bayat hızla köprü kurulmaz). UI: FPV'de turuncu "◌ KÖPRÜ" rozeti
+(`gorsel.kopru`). Mekanik: `set_gorsel_tespit` hız ölçer, `_gorsel_tespit_oku` sanal det
+üretir (`kopru=True`). Testler: `tests/test_kilit_takip.py` (16/16; 5 köprü testi).
 
 ## ARAYÜZ GECİKME TELAFİSİ + DEDEKTÖR DEBUG PENCERESİ (2026-07-08)
 Kullanıcı gözlemi: bbox/iskelet FPV'de hedefin GERİSİNDE kalıyor (pose daha da geç).
