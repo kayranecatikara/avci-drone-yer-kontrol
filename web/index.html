@@ -1014,6 +1014,16 @@
       const wt="⚠ KAMERA: mss — oyun penceresini ÖNE al";
       ctx.fillText(wt, rc.x+rc.w-ctx.measureText(wt).width-10, rc.y+rc.h-48);
     }
+    // DEDEKTÖR PERFORMANSI (sağ-alt): inference ms + FPS. Yeşil ≥25 FPS, sarı 15-25, kırmızı <15.
+    // "modelden tam performans alıyor muyuz?" -> TensorRT/FP16 kararı bu sayılara göre.
+    if(gs.perf && gs.perf.det_ms!=null){
+      const pf=gs.perf, fps=pf.fps||0;
+      const rk = fps>=25?"rgba(55,224,160,.95)":(fps>=15?"rgba(255,205,25,.95)":"rgba(255,107,107,.95)");
+      ctx.font="bold 11px monospace"; ctx.fillStyle=rk;
+      const pt="⚙ DET "+pf.det_ms+"ms"+(pf.det_p95!=null?" (p95 "+pf.det_p95+")":"")
+        +(pf.poz_ms!=null?" · POZ "+pf.poz_ms+"ms":"")+" · "+fps+" FPS";
+      ctx.fillText(pt, rc.x+rc.w-ctx.measureText(pt).width-10, rc.y+rc.h-30);
+    }
     if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
       ctx.fillStyle="#8aa"; ctx.fillText("KİLİT: "+(gs.pos_count||0)+"/"+gs.n_lock, rc.x+10, rc.y+40);
     }

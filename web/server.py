@@ -828,12 +828,49 @@ def _debug_pencere_goster(bgr, det, det_gecti, poz):
     cv2.waitKey(1)                                           # pencere olay dongusu (1 ms)
 
 
+# ----------------------------------------------------------
+#  DEDEKTOR PERFORMANS OLCUMU (2026-07-08): "modelden tam performans aliyor muyuz?"
+#  sorusunu VERIYLE cevaplamak icin. Canli dongude her inference'in GERCEK suresi
+#  (torch.cuda.synchronize ile async-kernel bitene kadar beklenir -> dogru latency)
+#  olculur; son ~120 orneğin ort/p95'i + dongu FPS'i telemetriye (gorsel.perf) ve
+#  periyodik konsola yazilir. Gudume DOKUNMAZ (salt gozlem). TensorRT/FP16 karari
+#  bu sayilara gore: DET_ms yuksek + FPS dusukse export mantikli; recall sorunuysa
+#  export cozmez (egitim isi).
+# ----------------------------------------------------------
+_perf = {"det_ms": None, "det_p95": None, "poz_ms": None, "fps": None, "gpu": None}
+_perf_det = deque(maxlen=120)     # best.pt inference ms
+_perf_poz = deque(maxlen=60)      # pose inference ms (seyrek kosar)
+_perf_dongu = deque(maxlen=120)   # dongu periyodu (s) -> FPS
+
+
+def _cuda_senkron():
+    """GPU async kernel'i bitene kadar bekle -> olculen sure GERCEK latency olsun."""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+    except Exception:
+        pass
+
+
+def _perf_ozet(p95_kaynak):
+    """deque -> (ort, p95) ms; bos ise (None, None)."""
+    if not p95_kaynak:
+        return None, None
+    v = sorted(p95_kaynak)
+    ort = sum(v) / len(v)
+    p95 = v[min(len(v) - 1, int(0.95 * len(v)))]
+    return round(ort, 1), round(p95, 1)
+
+
 def dedektor_dongusu():
     global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
     from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
     poz_sayac = 0                                        # POZ_HER_N seyreklestirme sayaci
     onceki_ui = None                                     # (cx, cy, t) — UI bbox hiz kestirimi icin
+    _t_dongu = None                                      # onceki dongu damgasi (FPS)
+    _t_konsol = 0.0                                      # son konsol ozeti zamani
     while True:
         # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
@@ -882,8 +919,13 @@ def dedektor_dongusu():
             bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
             # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
             # PERVANE MASKESI canli okunur (Cfg.PROP_MASKE) -> kendi pervanemiz elenir.
+            # OLCUM: best.pt inference GERCEK suresi (synchronize sonrasi).
+            _t_inf = time.perf_counter()
             det = (dedektor.tespit_et(bgr, maske=getattr(Cfg, "PROP_MASKE", None))
                    if bgr is not None else None)
+            if bgr is not None:
+                _cuda_senkron()
+                _perf_det.append((time.perf_counter() - _t_inf) * 1000.0)
         except Exception:
             bgr, det = None, None
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
@@ -902,7 +944,10 @@ def dedektor_dongusu():
                 and det is not None and poz_sayac % POZ_HER_N == 0):
             poz_kostu = True
             try:
+                _t_poz = time.perf_counter()
                 pdet = poz_dedektor.tespit_et(bgr)
+                _cuda_senkron()
+                _perf_poz.append((time.perf_counter() - _t_poz) * 1000.0)
                 if pdet is not None:
                     poz = poz_cozucu.coz(pdet["kp_xy"], pdet["kp_conf"],
                                          pdet["W"], pdet["H"], t=pdet["t"])
@@ -940,7 +985,33 @@ def dedektor_dongusu():
                                       poz_ui if poz_ui is not None else _son_poz_ui)
             except Exception:
                 pass                                  # gosterim hatasi dedektoru ASLA durdurmaz
-        if bgr is None:
+        # OLCUM: dongu periyodu -> FPS (yalniz kare islenen turlar; bekleme turlari haric)
+        if bgr is not None:
+            _now = time.perf_counter()
+            if _t_dongu is not None:
+                dp = _now - _t_dongu
+                if 0.0 < dp < 1.0:
+                    _perf_dongu.append(dp)
+            _t_dongu = _now
+            # global ozeti tazele (telemetri build_telemetry'de okur)
+            _perf["det_ms"], _perf["det_p95"] = _perf_ozet(_perf_det)
+            _perf["poz_ms"], _ = _perf_ozet(_perf_poz)
+            _perf["fps"] = (round(len(_perf_dongu) / sum(_perf_dongu), 1)
+                            if _perf_dongu and sum(_perf_dongu) > 0 else None)
+            if _perf["gpu"] is None:
+                try:
+                    import torch
+                    _perf["gpu"] = (torch.cuda.get_device_name(0)
+                                    if torch.cuda.is_available() else "CPU")
+                except Exception:
+                    _perf["gpu"] = "?"
+            # periyodik konsol ozeti (her ~3 sn; canli takip)
+            if _now - _t_konsol > 3.0:
+                _t_konsol = _now
+                print("[PERF] DET %s ms (p95 %s) | POZ %s ms | dongu %s FPS | %s"
+                      % (_perf["det_ms"], _perf["det_p95"], _perf["poz_ms"],
+                         _perf["fps"], _perf["gpu"]))
+        else:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
 
@@ -1129,6 +1200,7 @@ def build_telemetry():
         "kare_kaynak": _fpv_kaynak.get("ad"),      # dedektorun gordugu kaynak (windows-capture / mss)
         "conf_esik": float(Cfg.VIS_CONF_MIN),      # gudum/kilit esigi (alti = zayif, UI turuncu cizer)
         "kopru": bool(getattr(beyin, "vis_kopru", False)),  # olu-hesap koprusu aktif mi (FPV rozeti)
+        "perf": dict(_perf),                       # dedektor performansi (det_ms/p95, poz_ms, fps, gpu)
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
         "kilit": b_kilit,                          # {anlik,sure,gerek,pencere,ok,esik_pct,boyut_pct}
         # PERVANE MASKESI (yanlis-poz engelleme): UI kirmizi tarama ile cizer (kullanici dogrular)
