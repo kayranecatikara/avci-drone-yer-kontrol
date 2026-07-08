@@ -295,12 +295,15 @@ class Cfg:
     # arka plan / alttan yaklasma) — ekstra dikey geometri kodu GEREKMEZ.
     IBVS_K_YAW       = 0.8      # yatay kazanc: yaw = SIGN*K*ex (clamp +-YAW_MAX) ⚙
     IBVS_SIGN_YAW    = +1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir; ters tepki gorursen -1
-    IBVS_K_DIKEY     = 1.3      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
-                                # 8 Tem ucus_2: 1.3 en iyi merkezleme (1.9 asiri tepkili,
-                                # 0.65 yetersiz kaldi — episod kiyasi r_ort medyan ~0.21).
+    IBVS_K_DIKEY     = 2.0      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
+                                # 8 Tem ucus (222830): kullanici 2.25 kullandi; 2.0'a cektim
+                                # (2.25 salinim/asiri tepki riski). Dikey hata buyukse thr zaten
+                                # doygun (clamp) — K'yi asiri buyutmek merkezlemeyi iyilestirmez.
     IBVS_SIGN_DIKEY  = +1.0     # hedef YUKARIDA (ey<0) -> TIRMAN (thr>0; GPS faziyla ayni kanon).
                                 # SIM'de dikey TERS tepki gorursen -1 yap (tek isaret, tek yer).
-    IBVS_ILERI       = 0.45     # ileri itki TAVANI (0..1; boyut yasasi bunu asamaz) ⚙
+    IBVS_ILERI       = 0.70     # ileri itki TAVANI (0..1; boyut yasasi bunu asamaz) ⚙
+                                # 8 Tem ucus: kullanici 0.65 kullandi; 0.70'e (hedef ~18 m/s
+                                # kaciyor, daha yakina sokulmak icin agresif yaklasma tavani).
     # --- KILIT-TUT / BOYUT REGULASYONU (2026-07-08, Faz 2 sartname 6.1.2/6.1.4) ---
     # VURUS degil MESAFE TUTMA: bbox eksen orani (max(w/W,h/H) — kilit sayaci metriğiyle
     # AYNI olcu) HEDEF'e P-yasayla surulur:
@@ -311,8 +314,14 @@ class Cfg:
     # K_BOYUT=0 -> regulasyon KAPALI = eski sabit-ileri yasa (canli A/B + kacis kapisi).
     # Girdi yalniz bbox pikselleri -> gorsel-faz GPS yasagina uygun. Terminal vurus AYRI
     # faz olarak sonra (kilit_ok sonrasi karar; o zaman NISAN/ILERI ayri banda gecer).
-    IBVS_BOYUT_HEDEF = 0.09     # bbox eksen orani hedefi (>= VIS_LOCK_PCT 0.06 + marj) ⚙
-    IBVS_K_BOYUT     = 15.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
+    IBVS_BOYUT_HEDEF = 0.12     # bbox eksen orani hedefi (>= VIS_LOCK_PCT 0.06 + marj) ⚙
+                                # 0.09->0.12 (8 Tem ucus 222830: 8-9 m'de bile bbox ~%6.6,
+                                # kilit esigi %6'da salinip dolmuyordu; hedefi 0.12 yapmak
+                                # dengeyi ~%8.5'e cikarir -> istek uzun doygun kalir, drone
+                                # yapabildigi EN YAKINA gider, boyut esigi guvenli gecer).
+    IBVS_K_BOYUT     = 20.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
+                                # 15->20 (denge boyutunu HEDEF'e yaklastirir: boyut_eq =
+                                # HEDEF - ileri_eq/K; K buyuk -> daha kararli ve yuksek boyut).
     IBVS_GERI_MAX    = 0.15     # fazla yakinken geri itki tavani (0=asla geri gitme) ⚙
     IBVS_MERKEZ_FREN = 1.4      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
                                 # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙
@@ -337,7 +346,9 @@ class Cfg:
     # Ileri-ucus tasimasi (lift carry) dusunce negatif thr gercekten alcaltir (THR_DN
     # yorumundaki ders: tam ileri ucusta -0.40 bile tirmanmayi durduramiyordu).
     # Tirmanis tarafi (eyy<0) etkilenmez. Girdi yalniz goruntu buyuklugu -> kural uygun.
-    IBVS_ALCAL_FREN  = 2.0      # 0=kapali; 2.0 -> eyy~0.4'te tabana iner ⚙
+    IBVS_ALCAL_FREN  = 1.5      # 0=kapali; ~eyy 0.53'te tabana iner ⚙ (8 Tem ucus:
+                                # kullanici 2.0->1.5 kullandi — ileri itki daha az frenlensin,
+                                # yaklasma acilsin; yak-agirlikli fren zaten uzakta baypas ediyor).
     IBVS_ALCAL_TABAN = 0.2      # fren tabani (asla tam durma; biraz kapanis kalsin).
                                 # GPS alc_oncelik 0.15 tabaninin gorsel karsiligi; slider DISI.
     # --- EGO-PITCH TELAFISI (2026-07-08; kacak-tirmanma kok nedeni) ---
@@ -353,7 +364,10 @@ class Cfg:
     # doner -> hedefin GIDECEGI yon oncelenir, yaw'a ILERI-BESLEME eklenir:
     # yaw = K_YAW*ex + SIGN_ROLL*K_ROLL_LEAD*roll_img. Sadece YAW; thr/pitch/roll degismez.
     # Pose GORSEL veri (kameradan keypoint) -> yarisma kuralina uygun (GPS/J degil).
-    IBVS_K_ROLL_LEAD   = 0.5    # roll_img (rad) -> yaw lead kazanci ⚙ (0 = ongoru kapali)
+    IBVS_K_ROLL_LEAD   = 0.0    # roll_img (rad) -> yaw lead kazanci ⚙ (0 = ongoru kapali)
+                                # 8 Tem: kilit-tut fazinda KAPALI (kullanici tercihi) — hedef
+                                # cogunlukla duz kaciyor, oncelu donus geregi az; terminal
+                                # fazda / bankli hedefte tekrar acilir (0.5 iyi baslangic).
     IBVS_SIGN_ROLL     = -1.0   # bank -> yaw isareti. VERI ile belirlendi (7 Tem, ucus_log_220539):
                                 # araclar/pose_ongoru_analiz.py corr=-0.86 @0.2sn, %86 uyum -> SIGN=-1.
                                 # (roll_img>0 iken hedef goruntude SOLA gidiyor; +1 TERS'ti.) Yeni pose

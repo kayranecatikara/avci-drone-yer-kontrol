@@ -285,8 +285,11 @@ def test_ego_pitch_yokken_eski_davranis():
 
 
 def test_merkez_freni_ileriyi_kisar():
-    p_merkez = abs(_tek(0.5, 0.5)[1])
-    p_kenar = abs(_tek(0.98, 0.5)[1])            # cizgi ~0.96 -> fren
+    # KILIT-TUT bandinda (yak<1) merkez freni etkili: sapma buyudukce ileri kisilir.
+    # (Uzakta yak=1 -> fren baypas oldugundan bandi _band ile kurariz; MERKEZ_FREN acik.)
+    p = _band(IBVS_MERKEZ_FREN=1.4)
+    p_merkez = abs(AvciIBVS().hesapla(_det(cxn=0.5, cyn=0.5, wp=0.09, hp=0.09), p)[1])
+    p_kenar = abs(AvciIBVS().hesapla(_det(cxn=0.98, cyn=0.5, wp=0.09, hp=0.09), p)[1])
     assert p_kenar < p_merkez, "sapma buyuyunce ileri itki kisilmali"
 
 
@@ -369,8 +372,9 @@ def test_roll_lead_sag_bank_mekanizma():
     kayar; lead isareti = IBVS_SIGN_ROLL (isaret-bagimsiz: mekanizmayi test eder, yonu degil).
     (Yonun DOGRULUGU veriyle belirlenir: araclar/pose_ongoru_analiz.py -> IBVS_SIGN_ROLL.)"""
     det = _det(cxn=0.5, cyn=0.5)                          # merkez -> ex=0 -> yaw yalniz lead'den
-    k0 = AvciIBVS().hesapla(dict(det), Cfg)               # poz yok -> lead 0, yaw 0
-    g1 = AvciIBVS(); k1 = g1.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56))
+    p = _CfgVar(IBVS_K_ROLL_LEAD=0.5)                     # ongoru default 0 -> testte AC
+    k0 = AvciIBVS().hesapla(dict(det), p)                # poz yok -> lead 0, yaw 0
+    g1 = AvciIBVS(); k1 = g1.hesapla(dict(det), p, poz=_poz(0.40, 0.48, 0.60, 0.56))
     d = g1.durum()
     assert d["roll_ok"] is True and abs(d["lead"]) > 1e-6, "sag bank -> lead uretilmeli"
     # yaw(ex=0) = clamp(lead). d["lead"] telemetride round(.,3)'lu -> 3-basamak toleransi.
@@ -382,8 +386,9 @@ def test_roll_lead_sag_bank_mekanizma():
 def test_roll_lead_sol_bank_ters_isaret():
     """Sol kanat ALCAK -> roll_img<0 -> lead isareti sag-bankin TERSI (yon simetrik)."""
     det = _det(cxn=0.5, cyn=0.5)
-    gs = AvciIBVS(); gs.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56)); lead_sag = gs.durum()["lead"]
-    gl = AvciIBVS(); gl.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.56, 0.60, 0.48)); lead_sol = gl.durum()["lead"]
+    p = _CfgVar(IBVS_K_ROLL_LEAD=0.5)                     # ongoru default 0 -> testte AC
+    gs = AvciIBVS(); gs.hesapla(dict(det), p, poz=_poz(0.40, 0.48, 0.60, 0.56)); lead_sag = gs.durum()["lead"]
+    gl = AvciIBVS(); gl.hesapla(dict(det), p, poz=_poz(0.40, 0.56, 0.60, 0.48)); lead_sol = gl.durum()["lead"]
     assert lead_sag * lead_sol < 0.0, "sag ve sol bank zit isaretli lead uretmeli"
 
 
