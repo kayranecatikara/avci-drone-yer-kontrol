@@ -58,7 +58,7 @@ class _FakeModel:
 def _dedektor(boxes, W=1000, H=1000):
     d = HedefDedektor.__new__(HedefDedektor)   # __init__'i atla (YOLO yukleme yok)
     d.hazir = True
-    d.imgsz = 1280; d.conf = 0.25; d.device = "cpu"
+    d.imgsz = 1280; d.conf = 0.25; d.device = "cpu"; d._q = {}   # FP16 kwarg (gercek __init__ set eder)
     d.model = _FakeModel(_FakeRes(boxes, W, H))
     return d
 

@@ -19,24 +19,37 @@ sag_kuyruk]. talon_keypoints.json REFERANS sirasina cevirme poz_cozucu
 
 class PozDedektor:
 
-    def __init__(self, model_path, conf=0.20, imgsz=960, device=None):
+    def __init__(self, model_path, conf=0.20, imgsz=960, device=None, half=None):
         self.hazir = False
         self.model = None
         self.conf = float(conf)
         self.imgsz = int(imgsz)          # egitim imgsz'ine esitle (v3 model: 1280; cagiran verir)
         self.device = device
+        self.half = half
+        self._q = {}                                     # FP16 predict kwarg (bir kez sabitlenir)
         self.hata = None
         try:
             from ultralytics import YOLO
-            if self.device is None:
+            if self.device is None:                       # cihaz otomatik: cuda varsa GPU 0
                 try:
                     import torch
-                    self.device = "cuda" if torch.cuda.is_available() else "cpu"
+                    self.device = "cuda:0" if torch.cuda.is_available() else "cpu"
                 except Exception:
                     self.device = "cpu"
+            if self.half is None:                         # bu kartta FP32 daha hizli+guvenli (bkz gorsel_tespit)
+                self.half = False
             self.model = YOLO(model_path)
             if getattr(self.model, "task", None) != "pose":
                 raise ValueError("model 'pose' degil: %r" % getattr(self.model, "task", None))
+            # FP16 kwarg: ultralytics >= 8.4 'quantize=fp16' (deprecated 'half' spam eder).
+            if self.half:
+                try:
+                    import numpy as _np
+                    self.model.predict(_np.zeros((32, 32, 3), "uint8"), imgsz=32,
+                                       device=self.device, quantize="fp16", verbose=False)
+                    self._q = {"quantize": "fp16"}
+                except Exception:
+                    self._q = {"half": True}
             self.hazir = True
             self._warmup()
         except Exception as e:
@@ -48,7 +61,7 @@ class PozDedektor:
             import numpy as np
             bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
             self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
-                               device=self.device, verbose=False)
+                               device=self.device, verbose=False, **self._q)
         except Exception:
             pass
 
@@ -60,7 +73,7 @@ class PozDedektor:
         import time as _t
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
-                                     device=self.device, verbose=False)[0]
+                                     device=self.device, verbose=False, **self._q)[0]
         except Exception:
             return None
         boxes = getattr(res, "boxes", None)
@@ -68,8 +81,11 @@ class PozDedektor:
         if boxes is None or kps is None or len(boxes) == 0:
             return None
         try:
+            import math as _m
             i = int(boxes.conf.argmax())                  # EN-YUKSEK-conf tespit
             x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
+            if not (_m.isfinite(x1) and _m.isfinite(y1) and _m.isfinite(x2) and _m.isfinite(y2)):
+                return None                               # nan/inf kutu -> gecersiz poz (gudume/CSV'ye gitmez)
             kxy = kps.xy[i].cpu().numpy()                 # (6,2) px
             kcf = (kps.conf[i].cpu().numpy() if kps.conf is not None else None)
             if kxy.shape[0] != 6:
