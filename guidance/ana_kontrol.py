@@ -357,7 +357,14 @@ class Cfg:
     # drone hedefin 10 m ALTINDAYKEN +0.70 tirmanis). Dikey hata kendi pitch'ten arindirilir:
     #   ey_dunya = ey_f - GAIN*tan(own_pitch)/tan(VFOV_yari)   (ibvs_gorsel.hesapla)
     # Kendi IMU'muz = ego-motion (ego-roll telafisiyle ayni emsal) -> kural ihlali DEGIL.
-    IBVS_EGO_PITCH_GAIN = 1.0   # 0=kapali (A/B icin); ters etki gorulurse once 0'la kiyasla.
+    IBVS_EGO_PITCH_GAIN = 0.4   # 1.0->0.4 (9 Tem ucus 000321 VERI: GAIN=1.0 kalici govde
+                                # yatikligini (-37 deg, ileri itki artinca) "sahte yukari"
+                                # sanip ASIRI telafi ediyordu -> ey isareti donuyordu (ham
+                                # -0.36 -> telafili +0.37) -> yasa surekli sert ALCAL veriyordu
+                                # (thr -0.63, %93) -> drone hedefin altina inip hedefi kadraj
+                                # USTUNDEN kaciriyordu (dikey merkezleme cokuyordu). Veriden
+                                # taranan optimal: 0.4 -> eyy~0 (hedef nisanda) + |ey| dikey
+                                # kadraj-ici en iyi (p90 0.77->0.59). 0=tam kapali.
     # --- ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank) ---
     # Hedefi ARKADAN takip ederken iki kanat ucu pikselinden (kp[1]=sol, kp[2]=sag)
     # goruntu-uzayi bank acisi: roll_img=atan2(dy,dx). Bankli ucak alcak kanadi yonune

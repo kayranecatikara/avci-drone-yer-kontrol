@@ -110,6 +110,21 @@ Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280
 Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
 (640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
 
+## ⭐ DİKEY MERKEZLEME ÇÖKÜŞÜ — EGO-PITCH TELAFİSİ AŞIRIYDI (2026-07-09)
+Kullanıcı: "model tracking'i kaybetmese bile araç ortalayamıyor, hedef hemen kameradan
+çıkıyor." VERİ (ucus_log_000321, YALNIZ gerçek-tespit tikleri): **yatay iyi** (|ex| ort 0.16,
+kenar %7) ama **dikey çöküyor** (|ey| p90 0.92 — hedef kadraj üst kenarında). Kök neden
+PARAMETRE/model değil, **ego-pitch telafisi ters çalışıyordu**: ileri itki artınca (İLERİ
+0.70) gövde kalıcı **−37°** yatık uçuyor; `IBVS_EGO_PITCH_GAIN=1.0` bu KALICI yatıklığı
+"sahte yukarı" sanıp +0.70 telafi ekliyordu → ham `vis_ey −0.36` (hedef GERÇEKTE yukarıda,
+drone altında = istenen) telafiyle **+0.37'ye DÖNÜYORDU** → yasa "hedef aşağıda, çok
+yüksekteyiz" sanıp sürekli sert **alçalış** (thr ort −0.63, %93) → drone hedefin altına inip
+hedefi kadraj ÜSTÜNDEN kaçırıyordu. Ego-telafi geçici pitch spike'ları içindi (kaçak-tırmanma);
+ileri itki kalıcı olunca kalıcı zararlı ofset oldu. **Düzeltme:** `IBVS_EGO_PITCH_GAIN 1.0→0.4`
+— uçuş verisinden tarandı (GAIN süpürme: 1.0 eyy +0.47/%86 alçal → 0.4 eyy +0.04 hedef nişanda,
+|ey| dikey p90 0.77→0.59 en merkezi). Kaçak-tırmanma koruması 0.4'te kısmen korunur (geçici
+spike hâlâ telafi, kalıcı yatıklık aşırı silinmez). Yatay kanal (yaw) zaten iyiydi, dokunulmadı.
+
 ## ⭐ MODEL PERFORMANSI — DARBOĞAZ GPU PAYLAŞIMI, MODEL DEĞİL (2026-07-08)
 Kullanıcı "YZ modellerinden tam performans alamıyoruz" → ÖLÇTÜK (`veri/perf_log_*.csv`,
 `server._perf`/`_perf_log_yaz`, ~1 Hz; FPV sağ-altta canlı gösterge). **Canlı:** DET ~100 ms,
