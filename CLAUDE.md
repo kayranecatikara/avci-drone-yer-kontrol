@@ -25,13 +25,15 @@ GPS güdümü **öldürücü faz değildir.** Görevi:
 
 ## ⛔ KATI KURAL — GÖRSEL FAZDA GPS/J YASAK (diskalifiye sebebi)
 **Görsel temas SAĞLANDIKTAN SONRA (GORSEL_GUDUM) hareket komutu YALNIZCA GÖRSEL VERİDEN
-türetilir.** GPS/GNSS ya da J-filtre kestirimi (`son_temiz`, `son_z_anlik`, `son_xy_anlik`,
-`son_hiz`) bu fazda komuta GİRMEZ — ne yön ne büyüklük olarak. **Yarışma kuralı: görsel
-temastan sonra GPS verisiyle aracı yönlendirmek DİSKALİFİYEDİR.** (2026-07-07 v7: tek
-görsel yasa `ibvs_gorsel.hesapla(det, p)` — imzasında konum/hız/rotasyon parametresi bile
-YOK; kural YAPISAL sağlanır, kilit testi: `test_ibvs_gorsel.test_gps_siz_imza`.)
+türetilir.** Görsel veri = **kameradan gelen her şey: bbox pikselleri (det) + pose KEYPOINT
+pikselleri (poz)**. İkisi de kameradan → kurala UYGUN. GPS/GNSS ya da J-filtre kestirimi
+(`son_temiz`, `son_z_anlik`, `son_xy_anlik`, `son_hiz`) bu fazda komuta GİRMEZ — ne yön ne
+büyüklük olarak. **Yarışma kuralı: görsel temastan sonra GPS verisiyle aracı yönlendirmek
+DİSKALİFİYEDİR.** (2026-07-07 v8: görsel yasa `ibvs_gorsel.hesapla(det, p, poz=None)` — imzada
+det+p+poz var, `drone_pos/v_own/rot/yaw_rad` GİRMEZ; kural YAPISAL sağlanır, kilit testi
+`test_ibvs_gorsel.test_gps_siz_imza` hem izinli seti hem yasak kinematik isimleri denetler.)
 GPS/J YALNIZCA görsel-öncesi fazda (ARAMA/KILIT yaklaşma) kullanılır. **Görsel güdüm için
-ASLA GPS/J tabanlı bir çözüm önerme.**
+ASLA GPS/J tabanlı bir çözüm önerme; pose keypoint'i GÖRSEL veridir, serbesttir.**
 
 ## SİSTEM MİMARİSİ (modül → şartname teslim eşlemesi)
 - `drone_sdk.py`        → simülasyon I/O (input/telemetri); şartname "input.py" muadili.
@@ -140,6 +142,64 @@ SİLİNDİ (git geçmişinde). Yeni tek yasa: **`guidance/ibvs_gorsel.py` (AvciI
 - **İŞARET DOĞRULAMA (canlı, İLK İŞ):** yaw ters dönerse `IBVS_SIGN_YAW=-1`, dikey ters
   tepkiyse `IBVS_SIGN_DIKEY=-1` (Cfg'den; bir kez doğrula). Sim'de +1 varsayıldı, teyit edilecek.
 
+## ⭐ ÖNGÖRÜLÜ YAW LEAD — POSE'DAN HEDEF ROLL (2026-07-07 v8)
+Kullanıcı: iki yeni model (`eniyi_bbox.pt` = mevcut `models/best.pt` ile ÖZDEŞ → bbox no-op;
+`eniyi_pose.pt` = yeni poz modeli → `models/talon_pose.pt`). Pose çıktısı artık güdüme giriyor:
+avcı hedefi **arkadan takip ederken** iki **kanat ucu pikselinden** (kp[1]=sol, kp[2]=sağ)
+hedefin **roll/bank** açısı çıkarılıp, banklı uçağın alçak kanadı yönüne döneceği fiziğiyle
+**bir an sonra nereye yöneleceği** öngörülür ve yaw'a **ileri-besleme (lead)** olarak eklenir.
+- **Matematik (`ibvs_gorsel.kanat_roll_img`):** `roll_img = atan2((v_sağ−v_sol)·H, (u_sağ−u_sol)·W)`
+  (normalize kp W/H ile piksel-orana ölçeklenir). Sağ kanat alçak (v büyük) → roll_img>0 → hedef
+  sağa döner. `yaw = clamp(K_YAW·ex + IBVS_SIGN_ROLL·IBVS_K_ROLL_LEAD·roll_f, ±YAW_MAX)`. **Sadece
+  YAW; thr/pitch/roll DEĞİŞMEZ** (kullanıcı kararı: yaw ileri-besleme). roll_f EMA'lı (IBVS_ROLL_EMA).
+- **Kapılar (biri düşerse lead=0 → saf IBVS, zarif düşüş):** iki kanat ucu conf ≥ `IBVS_ROLL_CONF_MIN`;
+  `aspect_deg ≥ IBVS_ASPECT_MIN` (yalnız PnP çözülünce; yandan/önden kanat çizgisi bank'i temsil
+  etmez); poz bayatlığı ≤ `IBVS_POZ_STALE_S` (`_gorsel_guduum`'da; POZ_HER_N=3 seyrek).
+- **Roll PnP'ye BAĞIMLI DEĞİL:** doğrudan 2 kanat-ucu pikselinden → PnP başarısız olsa da (kp varsa)
+  çalışır (PnP'nin LOS-ekseni roll'ü kötü-koşullu; bu yöntem sağlam).
+- **EGO-MOTION TELAFİSİ (v8+):** kamera gövdeye sabit → biz yatınca (kendi roll) kanat çizgisi de
+  döner, "hedef bank"ı kirletir. `roll_comp = roll_img − IBVS_EGO_ROLL_GAIN·own_roll` (own_roll =
+  kendi IMU roll'ümüz, `adim()`→`_gorsel_guduum`→`hesapla(..., own_roll_rad=...)`). Kendi IMU'muz =
+  ego-motion, HEDEF konumu DEĞİL → kural ihlali değil. **Basit IBVS roll=0 komut verdiğinden gövde
+  ~düz kalır → kirlilik zaten küçük** (7 Tem log: own roll std 1.5° vs hedef bank 9.2°); ego-comp
+  agresif/banklı uçuşta sigortadır. Log: ham `ibvs_roll_raw` + ego-telafili `ibvs_roll`.
+- **⛔ İŞARET VERİYLE BELİRLENDİ:** `IBVS_SIGN_ROLL=−1` (default). `araclar/pose_ongoru_analiz.py`
+  (7 Tem, ucus_log_220539): corr **−0.86** @0.2sn, **%86** doğru yön → +1 TERS'ti (sağ derken hedef
+  sola gidiyordu). Öngörünün FİZİĞİ geçerli, yön bağı tersti. Ego-comp işareti: aynı araç ego A/B
+  → `IBVS_EGO_ROLL_GAIN` (+1 default; banklı koşuda teyit).
+- **Veri akışı:** `server.dedektor_dongusu` taze pose koşunca `beyin_lock` altında
+  `beyin.set_gorsel_poz(poz_ui)` (normalize kp); `_gorsel_guduum` bayatlık + kendi roll'le
+  `ibvs.hesapla(det, Cfg, poz=..., own_roll_rad=...)`'a geçirir. Pose GÖRSEL veri → kurala uygun.
+- **Cfg (yeni):** `IBVS_K_ROLL_LEAD=0.5⚙`, `IBVS_SIGN_ROLL=−1(veri)`, `IBVS_ROLL_CONF_MIN=0.5⚙`,
+  `IBVS_ROLL_EMA=0.4`, `IBVS_ASPECT_MIN=120`, `IBVS_POZ_STALE_S=0.6`, `IBVS_EGO_ROLL_GAIN=1.0`,
+  `VIS_POSE_MODEL_PATH`.
+- **Telemetri/UI:** `gudum.ibvs` → `roll_deg(ego-telafili)/roll_raw_deg/lead/roll_ok`; IBVS kartında
+  "Hedef bank"+"Öngörü"; FPV'de kanat çizgisi (camgöbeği) + öngörülen dönüş oku (sarı).
+  Log: `ibvs_roll/ibvs_lead/ibvs_roll_ok/ibvs_roll_raw`.
+- **DOĞRULAMA ARAÇLARI:** `python araclar/kp_sira_dogrula.py` (keypoint sırası; "SONUÇ: OK") +
+  `python araclar/pose_ongoru_analiz.py` (öngörü uyum%/işaret/ufuk + ego-comp A/B). Tune prosedürü
+  `TUNE_REHBERI.md` "ÖNGÖRÜLÜ YAW LEAD — VERİ-TABANLI TUNE PROSEDÜRÜ".
+- **DURUM:** işaret VERİYLE belirlendi (`SIGN_ROLL=−1`); ego-comp eklendi (`GAIN=+1`, banklı koşuda
+  teyit). Kalan: `IBVS_K_ROLL_LEAD` canlı tune. Test: `tests/test_ibvs_gorsel.py` (13/13).
+
+## ⭐ TILT-FARKINDA DİKEY NİŞAN — HIZ VEKTÖRÜ HEDEFE (2026-07-08)
+Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız vektörünü hedefin
+~25° ALTINA nişanlamak (kronik dikey undershoot / laggy tail-chase). **Tilt kesin 25° (teyit).**
+Çözüm: dikey setpoint'i tilt'ten türet — hedefi hız vektörünün görüntüdeki yerine (FOE) tut:
+- **Matematik (`ibvs_gorsel.hesapla`):** `ey_ref = IBVS_DIKEY_NISAN · tan(TILT)/tan(VFOV_yarı)`
+  (25°/47.2° → ~0.43). Dikey sapma `eyy = ey_f − ey_ref`; `thr = SIGN_DIKEY·K_DIKEY·(−eyy)`,
+  `r = hypot(ex, eyy)`, `açı = atan2(−eyy, ex)`. Yani "çizgi" artık MERKEZDEN değil **NİŞAN
+  noktasından** bbox'a; hedefi oraya sürmek = "burun hedefe kilitli" (doğrudan çarpışma rotası).
+- **`IBVS_DIKEY_NISAN` (0..1, ⚙ slider):** 0 = hedefi merkezde tut (altta kal / gökyüzü arka plan,
+  eski davranış); 1 = hız vektörünü hedefe nişanla (terminal çarpışma). Default **1.0**. Her ikisi
+  de çarpışmaya yakınsar (açısal bias, menzille küçülür) ama nişan=1 daha DOĞRUDAN/az-laggy rota.
+- **Geriye uyum:** ey_ref=0 (nisan=0) → eski merkez-tabanlı yasa bit-bit aynı. Cfg: `IBVS_TILT_DEG=25`,
+  `IBVS_VFOV_HALF_DEG=47.2`, `IBVS_DIKEY_NISAN=1.0⚙`. Telemetri `gudum.ibvs.ey_ref`; FPV'de mavi
+  kesikli "⊕ HIZ VEKTÖRÜ (nişan)" çizgisi + IBVS hata çizgisi artık nişandan çizilir.
+- Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 14/14).
+  Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
+  tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
+
 ## PERVANE YANLIŞ-POZİTİF MASKESİ (2026-07-07 — clutter değil, kendi aracımız)
 Avcının KENDİ pervanesi arada bir "uçak" olarak algılanıyor (dedektör sınıf-agnostik
 en-yüksek-conf seçer → bir karede pervane hedefi bastırabilir). Pervane kadrajda SABIT
@@ -157,8 +217,10 @@ FPV'de maske pervaneyi tam örtmüyorsa `PROP_MASKE`'yi düzenle (sol-üstte zay
 `models/talon_pose.pt` (yolo11m-pose, 6 keypoint) + PnP artık pipeline'da:
 - `detection/poz_tespit.py` (PozDedektor) + `pose/poz_cozucu.py` (PnP+EMA; **EGITIM_SIRASI
   ve MESH_PIVOT_OFFSET kritik** — POSE_REHBERI "EĞİTİM SIRASI" bölümü).
-- `server.py` dedektör döngüsü best.pt'ye İLAVE koşar; **beyin/güdüm girdisi DEĞİŞMEDİ**
-  (best.pt bbox akışı aynen). Telemetri: `gorsel.poz` + `gorsel.poz_hazir`.
+- `server.py` dedektör döngüsü best.pt'ye İLAVE koşar. Telemetri: `gorsel.poz` + `gorsel.poz_hazir`.
+  **GÜNCELLEME (v8, 7 Tem):** poz artık gözlemci-only DEĞİL — kanat uçlarından türetilen hedef
+  ROLL, görsel güdüme öngörülü yaw lead olarak giriyor (üstteki "ÖNGÖRÜLÜ YAW LEAD" bölümü).
+  Mesafe/yaw kestirimi hâlâ gözlemci (güdüme girmez); yalnız kanat-ucu roll'ü komuta katkı yapar.
 - Arayüz: FPV'de iskelet + "MESAFE (KAM) / HEDEF YAW" satırları + 📐 POZ KESTİRİMİ kartı
   (kamera vs gerçek kıyas). Video isteri "GNSS bağımlılığının azalması" kanıtına birebir.
 - Model: **v3 (5 Tem 2026)**, models/best.pt ile AYNI dosya (talon_pose.pt kopyası;

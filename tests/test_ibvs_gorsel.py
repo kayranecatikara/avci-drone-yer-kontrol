@@ -15,6 +15,7 @@ Test edilenler:
 Calistirma:  python tests/test_ibvs_gorsel.py     (pytest de calisir)
 """
 import inspect
+import math
 import os
 import sys
 
@@ -31,12 +32,28 @@ def _det(cxn=0.5, cyn=0.5, wp=0.08, hp=0.04, t=0.0):
             "conf": 0.9, "cls": 0, "W": W, "H": H, "t": t}
 
 
-def _tek(cxn, cyn):
-    """Tek kare besle (ilk kare EMA'siz aynen alinir) -> (thr,pitch,roll,yaw)."""
-    return AvciIBVS().hesapla(_det(cxn=cxn, cyn=cyn), Cfg)
+class _Cfg0:
+    """Cfg kopyasi ama IBVS_DIKEY_NISAN=0 (dikey nisan=merkez) -> cekirdek cizgi-geometrisini
+    tilt-aim ozelliginden yalitir (ey_ref=0 -> eski merkez-tabanli davranis)."""
+    def __getattr__(self, k):
+        return 0.0 if k == "IBVS_DIKEY_NISAN" else getattr(Cfg, k)
+
+
+CFG0 = _Cfg0()
+
+
+def _ey_ref(p=Cfg):
+    return (float(p.IBVS_DIKEY_NISAN) * math.tan(math.radians(float(p.IBVS_TILT_DEG)))
+            / math.tan(math.radians(float(p.IBVS_VFOV_HALF_DEG))))
+
+
+def _tek(cxn, cyn, p=CFG0):
+    """Tek kare besle (ilk kare EMA'siz). Varsayilan CFG0 (nisan=merkez) -> cekirdek yasa."""
+    return AvciIBVS().hesapla(_det(cxn=cxn, cyn=cyn), p)
 
 
 def test_yon_eslemesi():
+    # CFG0 (nisan=merkez): cekirdek yon eslemesi (ey_ref=0 -> merkez setpoint)
     thr, _, _, yaw = _tek(0.75, 0.5)             # hedef SAGDA
     assert yaw > 0 and abs(thr) < 1e-9, "sagda: yaw>0 thr=0 bekleniyordu"
     _, _, _, yaw = _tek(0.25, 0.5)               # SOLDA
@@ -47,11 +64,25 @@ def test_yon_eslemesi():
     assert thr < 0, "asagida: thr<0 (alcal) bekleniyordu"
 
 
-def test_merkezde_tam_ileri():
-    thr, pitch, roll, yaw = _tek(0.5, 0.5)
-    assert abs(yaw) < 1e-9 and abs(thr) < 1e-9
-    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-9, \
-        "merkezde ileri itki tam IBVS_ILERI olmali (kisma=1)"
+def test_nisanda_tam_ileri():
+    """Hedef NISAN noktasinda (ex=0, ey=ey_ref) -> yaw~0, thr~0, tam ileri (r=0)."""
+    ey_ref = _ey_ref(Cfg)
+    cyn = 0.5 + ey_ref / 2.0                       # ey = ey_ref
+    thr, pitch, roll, yaw = _tek(0.5, cyn, p=Cfg)
+    assert abs(yaw) < 1e-9 and abs(thr) < 2e-3, "nisan noktasinda yaw~0 thr~0"
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6, "nisanda ileri itki tam (kisma=1)"
+
+
+def test_dikey_nisan_tilt_farkinda():
+    """ey_ref = tan(TILT)/tan(VFOV_yari) (~0.43 @25); hedef nisan ustunde -> tirman, altinda -> alcal."""
+    ey_ref = _ey_ref(Cfg)
+    assert 0.35 < ey_ref < 0.55, "tilt=25 icin ey_ref ~0.43 bekleniyordu: %.3f" % ey_ref
+    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.5 + ey_ref / 2.0), Cfg)
+    assert abs(g.durum()["ey_ref"] - round(ey_ref, 3)) < 1e-3
+    # nisanin USTUNDE (ey<ey_ref): tirman (thr>0); ALTINDA (ey>ey_ref): alcal (thr<0)
+    thr_ust = _tek(0.5, 0.5, p=Cfg)[0]             # ey=0 < ey_ref -> tirman
+    thr_alt = _tek(0.5, 0.95, p=Cfg)[0]            # ey=0.9 > ey_ref -> alcal
+    assert thr_ust > 0 and thr_alt < 0, "nisan ustu tirman / alti alcal (thr %.2f/%.2f)" % (thr_ust, thr_alt)
 
 
 def test_merkez_freni_ileriyi_kisar():
@@ -61,13 +92,14 @@ def test_merkez_freni_ileriyi_kisar():
 
 
 def test_aci_ve_buyukluk():
-    g = AvciIBVS(); g.hesapla(_det(cxn=0.75, cyn=0.5), Cfg)
+    # CFG0 (nisan=merkez): cizgi geometrisi merkeze gore
+    g = AvciIBVS(); g.hesapla(_det(cxn=0.75, cyn=0.5), CFG0)
     d = g.durum()
     assert abs(d["aci_deg"] - 0.0) < 1e-6, "sag = 0 derece"
     assert abs(d["buyukluk"] - 0.5) < 1e-6
-    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.25), Cfg)
+    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.25), CFG0)
     assert abs(g.durum()["aci_deg"] - 90.0) < 1e-6, "yukari = +90 derece"
-    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.75), Cfg)
+    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.75), CFG0)
     assert abs(g.durum()["aci_deg"] + 90.0) < 1e-6, "asagi = -90 derece"
 
 
@@ -88,9 +120,94 @@ def test_ema_yumusatma():
 
 
 def test_gps_siz_imza():
-    """hesapla yalniz (det, p) alir — 'gorsel fazda GPS yasak' yapisal garanti."""
+    """hesapla girdileri: det (bbox px) + p (Cfg) + poz (kamera keypoint) + own_roll_rad
+    (KENDI IMU roll'u, ego-motion telafisi). Hedef YONU %100 kameradan; own_roll yalniz
+    gorsel OLCUMU temizler (hedefi konumlamaz). YASAK olan HEDEF GPS/J kestirimidir
+    (son_temiz/son_hiz/...) ve genel kinematik dump (drone_pos/v_own/rot)."""
     params = list(inspect.signature(AvciIBVS.hesapla).parameters)
-    assert params == ["self", "det", "p"], "imzaya konum/hiz parametresi SIZMAMALI: %s" % params
+    assert set(params) <= {"self", "det", "p", "poz", "own_roll_rad"}, \
+        "beklenmedik parametre: %s" % params
+    yasak = {"drone_pos", "v_own", "v_own_xy", "rot", "rot_rpy", "drone_rot_rpy",
+             "yaw_rad", "drone_z", "son_temiz", "son_hiz", "son_xy_anlik", "son_z_anlik"}
+    sizan = set(params) & yasak
+    assert not sizan, "GPS/J hedef-kestirimi ya da kinematik dump imzaya sizdi (DISKALIFIYE): %s" % sizan
+
+
+def test_ego_roll_telafi():
+    """own_roll_rad = goruntu-roll'unden (GAIN ile) cikarilir -> DUZ hedef + kendi bank'imiz
+    varken telafili roll ~0'a yakinsar (kendi roll'umuz sinyalden temizlenir)."""
+    det = _det(cxn=0.5, cyn=0.5)
+    # Goruntude kanat cizgisi ~duz (dy=0 -> roll_img~0). own_roll = +10 deg dayatalim.
+    poz = _poz(0.40, 0.50, 0.60, 0.50)                # yatay kanat (roll_img=0)
+    orr = math.radians(10.0)
+    g = AvciIBVS(); g.hesapla(dict(det), Cfg, poz=poz, own_roll_rad=orr)
+    d = g.durum()
+    # ham roll ~0; telafili roll = 0 - GAIN*10deg -> GAIN=+1'de ~-10 deg (kendi bank'imiz cikti)
+    assert abs(d["roll_raw_deg"]) < 1.0, "ham goruntu-roll ~0 olmali (duz kanat): %s" % d["roll_raw_deg"]
+    bek = -float(Cfg.IBVS_EGO_ROLL_GAIN) * 10.0
+    assert abs(d["roll_deg"] - bek) < 1.0, \
+        "ego-telafili roll = -GAIN*own bekleniyordu (%.1f), gelen %.1f" % (bek, d["roll_deg"])
+    # own_roll_rad=None -> telafi yok, ham=telafili
+    g2 = AvciIBVS(); g2.hesapla(dict(det), Cfg, poz=poz, own_roll_rad=None)
+    assert abs(g2.durum()["roll_deg"]) < 1.0, "own=None -> telafi yok, roll ~ham"
+
+
+# ---------------------------------------------------------------------------
+#  ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank)
+# ---------------------------------------------------------------------------
+def _poz(uL, vL, uR, vR, cL=0.9, cR=0.9, aspect=170.0):
+    """Normalize poz dict: kp[1]=sol kanat, kp[2]=sag kanat [u,v,conf]. aspect=None -> alan yok."""
+    kp = [[0.5, 0.40, 0.9], [uL, vL, cL], [uR, vR, cR],
+          [0.48, 0.55, 0.9], [0.52, 0.55, 0.9], [0.5, 0.60, 0.9]]
+    d = {"kp": kp, "conf": 0.9, "ok": aspect is not None}
+    if aspect is not None:
+        d["aspect_deg"] = aspect
+    return d
+
+
+def test_roll_lead_sag_bank_mekanizma():
+    """Sag kanat ALCAK (v buyuk) -> roll_img>0 -> lead uretilir; yaw komutu TAM lead kadar
+    kayar; lead isareti = IBVS_SIGN_ROLL (isaret-bagimsiz: mekanizmayi test eder, yonu degil).
+    (Yonun DOGRULUGU veriyle belirlenir: araclar/pose_ongoru_analiz.py -> IBVS_SIGN_ROLL.)"""
+    det = _det(cxn=0.5, cyn=0.5)                          # merkez -> ex=0 -> yaw yalniz lead'den
+    k0 = AvciIBVS().hesapla(dict(det), Cfg)               # poz yok -> lead 0, yaw 0
+    g1 = AvciIBVS(); k1 = g1.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56))
+    d = g1.durum()
+    assert d["roll_ok"] is True and abs(d["lead"]) > 1e-6, "sag bank -> lead uretilmeli"
+    # yaw(ex=0) = clamp(lead). d["lead"] telemetride round(.,3)'lu -> 3-basamak toleransi.
+    assert abs((k1[3] - k0[3]) - d["lead"]) < 1.5e-3, "yaw komutu lead kadar kaymali (ex=0)"
+    assert math.copysign(1, d["lead"]) == math.copysign(1, float(Cfg.IBVS_SIGN_ROLL)), \
+        "roll_img>0 -> lead isareti IBVS_SIGN_ROLL ile ayni olmali"
+
+
+def test_roll_lead_sol_bank_ters_isaret():
+    """Sol kanat ALCAK -> roll_img<0 -> lead isareti sag-bankin TERSI (yon simetrik)."""
+    det = _det(cxn=0.5, cyn=0.5)
+    gs = AvciIBVS(); gs.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56)); lead_sag = gs.durum()["lead"]
+    gl = AvciIBVS(); gl.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.56, 0.60, 0.48)); lead_sol = gl.durum()["lead"]
+    assert lead_sag * lead_sol < 0.0, "sag ve sol bank zit isaretli lead uretmeli"
+
+
+def test_roll_lead_dusuk_conf_kapali():
+    """Kanat ucu guveni dusuk -> ongoru kapisi kapali -> lead=0."""
+    det = _det(cxn=0.5, cyn=0.5)
+    g = AvciIBVS(); g.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56, cL=0.2, cR=0.2))
+    assert g.durum()["roll_ok"] is False and abs(g.durum()["lead"]) < 1e-9
+
+
+def test_roll_lead_aspect_kapisi():
+    """Kafa kafaya (aspect<esik) -> kanat cizgisi bank'i temsil etmez -> lead=0."""
+    det = _det(cxn=0.5, cyn=0.5)
+    g = AvciIBVS(); g.hesapla(dict(det), Cfg, poz=_poz(0.40, 0.48, 0.60, 0.56, aspect=30.0))
+    assert g.durum()["roll_ok"] is False
+
+
+def test_roll_lead_poz_yok_eski_komut():
+    """poz=None ile poz argumansiz cagri BIT-BIT ayni komut (geriye uyumlu)."""
+    det = _det(cxn=0.7, cyn=0.4)
+    a = AvciIBVS().hesapla(dict(det), Cfg)
+    b = AvciIBVS().hesapla(dict(det), Cfg, poz=None)
+    assert a == b, "poz=None eski davranisi bit-bit korumali: %s vs %s" % (a, b)
 
 
 if __name__ == "__main__":

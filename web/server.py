@@ -287,7 +287,11 @@ TUNE_ALLOW = {
     "IBVS_ILERI",        # sabit ileri itki — yaklasma hizinin ana knob'u
     "IBVS_K_YAW",        # yatay kazanc (cizginin yatay bileseni -> yaw)
     "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
+    "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)
     "IBVS_MERKEZ_FREN",  # sapma buyuyunce ileriyi kis (0=hep tam gaz)
+    "IBVS_K_ROLL_LEAD",  # ongorulu yaw lead kazanci (pose hedef bank -> erken donus)
+    "IBVS_SIGN_ROLL",    # ongoru YONU (roll->yaw isareti): FPV oku gercek donusle ters ise cevir
+    "IBVS_ROLL_CONF_MIN",# ongoru kapisi: iki kanat ucu icin asgari keypoint guveni
     "VIS_EMA",           # ex/ey yumusatma (titriyorsa dusur=daha yumusak... buyuk=daha tepkili)
     "YAW_MAX",           # yaw tavani (doygunluk)
     "VIS_CONF_MIN",      # tespit guven esigi
@@ -664,7 +668,8 @@ _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock 
 # dosyasi yoksa veya yuklenemezse sessizce kapali (hazir=False deseni).
 # Kalite notu (pose/degerlendir_foto.py, egitim karelerinde iyimser): <10 m'de
 # mesafe medyan ~%8, yaw medyan ~6 der; 15 m+ guvenilmez -> terminal faz araci.
-POSE_MODEL_PATH = os.path.join(PROJ_ROOT, "models", "talon_pose.pt")
+POSE_MODEL_PATH = getattr(Cfg, "VIS_POSE_MODEL_PATH",
+                          os.path.join(PROJ_ROOT, "models", "talon_pose.pt"))
 poz_dedektor = None        # PozDedektor | None (lazy; ilk gorev tikinde denenir)
 poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
 _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
@@ -823,6 +828,8 @@ def dedektor_dongusu():
             onceki_ui = (ui_det["cx"], ui_det["cy"], t_det)
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det_beyin)
+            if poz_kostu and poz_ui is not None:      # TAZE poz -> beyne (ongorulu yaw lead besler)
+                beyin.set_gorsel_poz(poz_ui)          # GORSEL veri (kameradan keypoint); GPS/J DEGIL
             _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle

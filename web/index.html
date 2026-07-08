@@ -538,7 +538,10 @@
           <div class="row"><span class="k">Çizgi açısı</span><span class="v mono" id="ibvsAci">—</span></div>
           <div class="row"><span class="k">Yatay / dikey (ex·ey)</span><span class="v mono" id="ibvsExEy">—</span></div>
           <div class="row"><span class="k">İleri itki (kısma)</span><span class="v mono" id="ibvsIleri">—</span></div>
+          <div class="row"><span class="k">🎯 Dikey nişan (ey_ref)</span><span class="v mono" id="ibvsNisan">—</span></div>
           <div class="row"><span class="k">Yaw / gaz komutu</span><span class="v mono" id="ibvsCmd">—</span></div>
+          <div class="row"><span class="k">🛩️ Hedef bank (roll)</span><span class="v mono" id="ibvsRoll">—</span></div>
+          <div class="row"><span class="k">⏩ Öngörü (yaw lead)</span><span class="v mono" id="ibvsLead">—</span></div>
         </div>
 
         <div class="card drone">
@@ -705,7 +708,11 @@
       ["IBVS_ILERI","★★★ İleri itki   (yaklaşma hızının ana knob'u; ıskalıyor/sert giriyorsa DÜŞÜR)",0,1.0,0.025],
       ["IBVS_K_YAW","★★★ Yatay kazanç   (hedef sağ/sol kenarda kalıyorsa ARTIR; yatay salınım varsa DÜŞÜR)",0,2.0,0.05],
       ["IBVS_K_DIKEY","★★★ Dikey kazanç   (hedef üst/alt kenardan kaçıyorsa ARTIR; dikey salınım varsa DÜŞÜR)",0,3.0,0.05],
+      ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (0=hedefi MERKEZDE tut/altta kal-gökyüzü · 1=HIZ VEKTÖRÜNÜ hedefe nişanla/terminal çarpışma)",0,1.2,0.05],
       ["IBVS_MERKEZ_FREN","★★ Merkez freni   (sapma büyüyünce ileriyi kısar: önce ortala sonra ilerle; 0=hep tam gaz)",0,2.0,0.05],
+      ["IBVS_K_ROLL_LEAD","★★ Öngörü gücü (pose bank→yaw lead)   (hedef dönüşünü geç yakalıyorsa ARTIR; erken/salınım→DÜŞÜR; 0=kapalı)",0,2.0,0.05],
+      ["IBVS_SIGN_ROLL","★ Öngörü YÖNÜ (roll→yaw işareti)   (GÖRSEL modda FPV oku hedefin GERÇEK dönüşüyle TERS ise ÇEVİR: −1 ↔ +1)",-1,1,2],
+      ["IBVS_ROLL_CONF_MIN","Öngörü kapısı (kanat ucu güveni)   (yanlış bank sıçraması varsa ARTIR)",0.2,0.9,0.05],
       ["VIS_EMA","★ Tespit yumuşatma   (bbox titrek→komut titrekse DÜŞÜR; tepki gecikiyorsa ARTIR)",0.05,1.0,0.05],
       ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
       ["VIS_CONF_MIN","Tespit güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
@@ -889,15 +896,23 @@
         ctx.strokeRect(bx-bw/2, by-bh/2, bw, bh);
         ctx.setLineDash([]);
         ctx.fillStyle=AH; ctx.beginPath(); ctx.arc(bx,by,4,0,6.2832); ctx.fill();
-        // IBVS HATA ÇİZGİSİ: görüntü merkezi → bbox merkezi = güdümün TEK girdisi.
-        // Açısı düzeltme yönü, büyüklüğü merkeze sapma; güdüm bu çizgiyi sıfıra sürer.
-        const iex=(det.cx-0.5)*2, iey=(det.cy-0.5)*2;
+        // NİŞAN NOKTASI (tilt-farkında): kamera +25° yukarı baktığından hız vektörü kadraj
+        // merkezinin ALTINDA (ey_ref). Güdüm hedefi bu noktaya sürer = "burun hedefe kilitli".
+        const gd_ibvs=(t.gudum && t.gudum.ibvs) || {};
+        const eyRef=(gd_ibvs.ey_ref!=null)?Number(gd_ibvs.ey_ref):0;
+        const aimX=mcx, aimY=mcy + eyRef*rc.h/2;
+        // nişan referans çizgisi (yatay, kesikli) + FOE noktası
+        ctx.strokeStyle="rgba(120,200,255,.5)"; ctx.lineWidth=1; ctx.setLineDash([7,5]);
+        ctx.beginPath(); ctx.moveTo(rc.x+6,aimY); ctx.lineTo(rc.x+rc.w-6,aimY); ctx.stroke(); ctx.setLineDash([]);
+        if(eyRef>0.02) halo("⊕ HIZ VEKTÖRÜ (nişan)", aimX+70, aimY-4, "rgba(120,200,255,.9)", "left", "10px monospace");
+        // IBVS HATA ÇİZGİSİ: NİŞAN noktası → bbox merkezi = güdümün sürdüğü sapma.
+        const iex=(det.cx-0.5)*2, iey=(det.cy-0.5)*2-eyRef;   // dikey: nişandan sapma
         const ir=Math.hypot(iex,iey), iaci=Math.atan2(-iey,iex)*180/Math.PI;
         ctx.strokeStyle="rgba(255,170,60,.9)"; ctx.lineWidth=2; ctx.setLineDash([]);
-        ctx.beginPath(); ctx.moveTo(mcx,mcy); ctx.lineTo(bx,by); ctx.stroke();
-        ctx.fillStyle="rgba(255,170,60,.9)"; ctx.beginPath(); ctx.arc(mcx,mcy,3,0,6.2832); ctx.fill();
+        ctx.beginPath(); ctx.moveTo(aimX,aimY); ctx.lineTo(bx,by); ctx.stroke();
+        ctx.fillStyle="rgba(255,170,60,.9)"; ctx.beginPath(); ctx.arc(aimX,aimY,3,0,6.2832); ctx.fill();
         halo("IBVS: sapma "+ir.toFixed(2)+" · açı "+iaci.toFixed(0)+"°",
-             (mcx+bx)/2, (mcy+by)/2-8, "rgba(255,170,60,.95)", "center", "11px monospace");
+             (aimX+bx)/2, (aimY+by)/2-8, "rgba(255,170,60,.95)", "center", "11px monospace");
         halo("≥ %"+lockPct.toFixed(0)+" yatay", bx, by-bh/2-15, AH, "center", "10px monospace");
         halo("≥ %"+lockPct.toFixed(0)+" dikey", bx+bw/2+6, by, AH, "left", "10px monospace");
         ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
@@ -926,6 +941,25 @@
         ctx.fillStyle=PK[i]; ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.fill();
         ctx.strokeStyle="rgba(0,0,0,.8)"; ctx.lineWidth=1;
         ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.stroke(); }
+      // ÖNGÖRÜ: kanat çizgisi (kp1↔kp2) vurgusu + hedefin bir an sonra döneceği yön oku.
+      // Bank açısı + yaw lead güdümden (gudum.ibvs); kanat çizgisi = bank'in görsel kanıtı.
+      const _ib=(t.gudum && t.gudum.ibvs) || {};
+      if(P[1] && P[2]){
+        ctx.strokeStyle="rgba(110,231,255,.95)"; ctx.lineWidth=2.5;   // kanat çizgisi (camgöbeği)
+        ctx.beginPath(); ctx.moveTo(P[1][0],P[1][1]); ctx.lineTo(P[2][0],P[2][1]); ctx.stroke();
+        // ÖNGÖRÜ oku YALNIZ GÖRSEL GÜDÜM'de (canlı) çizilir. GPS modunda ibvs_tlm güncellenmez
+        // -> bayat/yanıltıcı ok çizilmesin (kanat çizgisi yine de gösterilir).
+        if(gs.durum==="GORSEL_GUDUM" && _ib.roll_ok===true && _ib.lead!=null && Math.abs(_ib.lead)>0.01){
+          const mx=(P[1][0]+P[2][0])/2, my=(P[1][1]+P[2][1])/2;      // kanat orta noktası
+          const dir=_ib.lead>0?1:-1, uz=Math.min(Math.abs(_ib.lead)*90,60)+18;  // ok uzunluğu ∝ |lead|
+          const ex2=mx+dir*uz;
+          ctx.strokeStyle="rgba(255,205,25,.95)"; ctx.lineWidth=3;   // öngörü oku (sarı)
+          ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(ex2,my); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(ex2,my); ctx.lineTo(ex2-dir*9,my-6);
+          ctx.lineTo(ex2-dir*9,my+6); ctx.closePath(); ctx.fillStyle="rgba(255,205,25,.95)"; ctx.fill();
+          halo("↳ ÖNGÖRÜ: "+(dir>0?"SAĞA":"SOLA")+" dönecek", mx, my-12, "rgba(255,205,25,.95)", "center", "11px monospace");
+        }
+      }
       if(pz.ok && pz.mesafe_ema_m!=null){
         ctx.font="bold 13px monospace"; ctx.fillStyle="#6ee7ff";
         let s="MESAFE (KAM): "+Number(pz.mesafe_ema_m).toFixed(1)+" m";
@@ -1129,8 +1163,19 @@
       ? (Number(ib.ex).toFixed(2)+" · "+Number(ib.ey).toFixed(2)) : "—";
     $("ibvsIleri").innerHTML = ib.ileri!=null
       ? Number(ib.ileri).toFixed(2)+' <small>×'+(ib.kisma!=null?Number(ib.kisma).toFixed(2):"1.00")+' kısma</small>' : "—";
+    $("ibvsNisan").innerHTML = (ib.ey_ref!=null)
+      ? Number(ib.ey_ref).toFixed(2)+' <small>'+(Math.abs(ib.ey_ref)<0.02?"merkez (altta kal)":"hız vektörü (çarpışma)")+'</small>' : "—";
     $("ibvsCmd").textContent = (ib.yaw!=null && ib.dikey!=null)
       ? ("yaw "+Number(ib.yaw).toFixed(2)+" · gaz "+Number(ib.dikey).toFixed(2)) : "—";
+    // ÖNGÖRÜ: pose kanat uçlarından hedef bank (roll) + yaw lead. roll_ok=false ise pasif.
+    const rok=(ib.roll_ok===true);
+    $("ibvsRoll").innerHTML = (ib.roll_deg!=null)
+      ? '<span style="color:'+(rok?"var(--accent2)":"var(--muted)")+'">'+Number(ib.roll_deg).toFixed(0)+'°'
+        +(rok?"":" <small>(pasif)</small>")+'</span>' : "—";
+    if(ib.lead!=null && rok){
+      const yon = ib.lead>0.001?"→ sağa" : (ib.lead<-0.001?"← sola":"düz");
+      $("ibvsLead").innerHTML = '<span style="color:var(--accent)">'+Number(ib.lead).toFixed(2)+' <small>'+yon+'</small></span>';
+    } else $("ibvsLead").innerHTML = '<span style="color:var(--muted)">—</span>';
   }
 
   // ---- Görev olay günlüğü (dedup: sadece yeni id'ler DOM'a; renk sınıfı sv'den) ----

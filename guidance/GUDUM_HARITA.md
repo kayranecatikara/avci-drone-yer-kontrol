@@ -26,6 +26,8 @@ GÖRSEL TESPİT (ayrı thread, server.py dedektor_dongusu):
   windows-capture pencere karesi → detection/gorsel_tespit.py (best.pt, YOLO)
   → conf≥VIS_CONF_MIN ise beyin.set_gorsel_tespit(det)   [güdüm kapısı]
   → conf≥0.25 zayıf tespitler yalnız ARAYÜZE (turuncu kutu)
+  POZ (ilave, seyrek POZ_HER_N): detection/poz_tespit.py (talon_pose.pt, 6 keypoint)
+  → beyin.set_gorsel_poz(poz)  [kanat uçlarından hedef ROLL → öngörülü yaw lead; GÖRSEL veri]
 ```
 
 ## 2) FSM (self.durum)
@@ -76,16 +78,36 @@ ey = (cy − H/2) / (H/2)      −1..+1  (+ = hedef aşağıda)   [EMA: VIS_EMA]
 büyüklük r = hypot(ex, ey)   (0 = merkez; merkeze sapma "mesafesi")
 açı        = atan2(−ey, ex)  (0° = sağ, +90° = yukarı; telemetri/UI)
 
-yaw   = IBVS_SIGN_YAW  · IBVS_K_YAW  · ex     (clamp ±YAW_MAX)
-thr   = IBVS_SIGN_DIKEY· IBVS_K_DIKEY· (−ey)  (clamp THR_DN..THR_UP)
+ey_ref= IBVS_DIKEY_NISAN · tan(IBVS_TILT_DEG)/tan(VFOV_yarı)   (tilt-farkında dikey nişan; ~0.43@25°)
+eyy   = ey − ey_ref                                   (NİŞAN noktasına göre dikey sapma)
+r     = hypot(ex, eyy)                                (nişandan sapma; 0 = hedef nişanda)
+lead  = IBVS_SIGN_ROLL · IBVS_K_ROLL_LEAD · roll_f    (pose kanat uçlarından; kapı düşük→0)
+yaw   = IBVS_SIGN_YAW  · IBVS_K_YAW  · ex  + lead      (clamp ±YAW_MAX)
+thr   = IBVS_SIGN_DIKEY· IBVS_K_DIKEY· (−eyy) (clamp THR_DN..THR_UP; hedefi ey_ref'e sürer)
 pitch = PITCH_SIGN · IBVS_ILERI · max(0, 1 − IBVS_MERKEZ_FREN·r)
 roll  = 0   (bank YOK — çerçeveleme yaw'ın işi; eski PN'de bank hedefi
              kadrajdan atıp kamerayı yere çeviriyordu)
 ```
 
-- **⛔ Görsel fazda GPS/J YASAK (diskalifiye):** `hesapla(det, p)` imzasına konum/
-  hız/rotasyon parametresi bile girmez — kural YAPISAL olarak sağlanır
-  (`tests/test_ibvs_gorsel.test_gps_siz_imza` bunu kilitler).
+**TILT-FARKINDA DİKEY NİŞAN (v8+):** kamera +25° yukarı sabit → hedefi kadraj MERKEZİNDE tutmak
+hız vektörünü hedefin 25° altına nişanlar (undershoot). `ey_ref` (tilt'ten türetilir) hedefi hız
+vektörünün görüntüdeki yerine (FOE) çeker → "hedefte" = "burun hedefe kilitli". `IBVS_DIKEY_NISAN`:
+0=merkez/altta-kal (gökyüzü), 1=hız-vektörü nişan (terminal çarpışma; default). ey_ref=0 → eski davranış.
+
+**ÖNGÖRÜLÜ YAW LEAD (pose'dan hedef ROLL, v8):** hedefi ARKADAN takip ederken iki kanat
+ucu pikselinden (poz["kp"][1]=sol, [2]=sağ) görüntü-uzayı bank açısı `roll_img =
+atan2((v_sağ−v_sol)·H, (u_sağ−u_sol)·W)` (normalize kp W/H ile piksel-orana ölçeklenir).
+Banklı uçak alçak kanadı yönüne döner → hedefin GİDECEĞİ yön yaw'a ileri-beslenir. Kapılar
+(iki kanat conf ≥ `IBVS_ROLL_CONF_MIN`, `aspect_deg ≥ IBVS_ASPECT_MIN` [yalnız PnP çözülünce],
+bayatlık ≤ `IBVS_POZ_STALE_S`) düşerse `lead=0` → saf IBVS. Roll PnP'ye BAĞIMLI DEĞİL
+(2 keypoint yeter). İşaret VERİYLE (`SIGN_ROLL=−1`, `pose_ongoru_analiz.py` corr=−0.86). **Ego-motion
+telafisi:** `roll_comp = roll_img − IBVS_EGO_ROLL_GAIN·own_roll` (kendi IMU roll'ü; kamera gövdeye
+sabit → biz yatınca kirlenir). Detay: `guidance/ibvs_gorsel.kanat_roll_img`/`_roll_lead`.
+
+- **⛔ Görsel fazda GPS/J YASAK (diskalifiye):** `hesapla(det, p, poz=None, own_roll_rad=None)` —
+  det (bbox px) + poz (kamera keypoint) görsel; `own_roll_rad` = kendi IMU roll'ü (ego-motion
+  telafisi, HEDEF konumu DEĞİL). GPS/J HEDEF kestirimi (son_temiz/son_hiz) ve drone_pos/v_own GİRMEZ.
+  Kural (`tests/test_ibvs_gorsel.test_gps_siz_imza`: izinli set {det,p,poz,own_roll_rad} + yasak hedef-kinematik).
 - **Alttan yaklaşma bedava:** kamera gövdeye +25° yukarı tilt'li; hedefi kadraj
   MERKEZİNDE tutmak = LOS'un ufka göre +25° olması = araç hedefin ALTINDA uçar
   (gökyüzü arka plan). Kapandıkça dikey ayrım R·sin25° ile kendiliğinden küçülür.
@@ -107,11 +129,16 @@ LOOKUP_MIN_ALT_CM, KP_H, KD_H, KP_Z, KI_Z, KD_Z, INT_Z_BAND, INT_Z_MAX,
 KP_YAW, HOLD_TICKS` (LOOKUP_* yalnız GPS dikey nişanında yaşıyor — görsel fazda
 karşılığı yok artık)
 
-**[GÖRSEL — tespit/kayıp]** `VIS_MODEL_PATH, PROP_MASKE, VIS_CONF_MIN⚙,
+**[GÖRSEL — tespit/kayıp]** `VIS_MODEL_PATH, VIS_POSE_MODEL_PATH, PROP_MASKE, VIS_CONF_MIN⚙,
 VIS_N_LOCK, VIS_STALE_S, VIS_LOST_TO_GPS_S⚙, VIS_EMA⚙`
 
 **[GÖRSEL — BASİT IBVS]** `IBVS_K_YAW⚙, IBVS_SIGN_YAW, IBVS_K_DIKEY⚙,
-IBVS_SIGN_DIKEY, IBVS_ILERI⚙, IBVS_MERKEZ_FREN⚙`
+IBVS_SIGN_DIKEY, IBVS_ILERI⚙, IBVS_MERKEZ_FREN⚙, IBVS_DIKEY_NISAN⚙ (0=merkez/altta-kal,
+1=hız-vektörü nişan), IBVS_TILT_DEG=25, IBVS_VFOV_HALF_DEG=47.2`
+
+**[GÖRSEL — ÖNGÖRÜLÜ YAW LEAD (pose hedef roll)]** `IBVS_K_ROLL_LEAD⚙, IBVS_SIGN_ROLL=−1
+(veriyle), IBVS_ROLL_CONF_MIN⚙, IBVS_ROLL_EMA, IBVS_ASPECT_MIN, IBVS_POZ_STALE_S,
+IBVS_EGO_ROLL_GAIN (ego-motion telafisi; araclar/pose_ongoru_analiz ego A/B ile doğrula)`
 
 **[GÖRSEL — KİLİTLENME İSTERİ (salt gözlem)]** `VIS_LOCK_PCT (0.06; şartname
 ≥0.05, tavsiye 0.06), VIS_AV_X/VIS_AV_Y (0.25/0.10 şartname sabiti),
