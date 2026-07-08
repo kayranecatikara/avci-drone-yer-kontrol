@@ -841,6 +841,28 @@ _perf = {"det_ms": None, "det_p95": None, "poz_ms": None, "fps": None, "gpu": No
 _perf_det = deque(maxlen=120)     # best.pt inference ms
 _perf_poz = deque(maxlen=60)      # pose inference ms (seyrek kosar)
 _perf_dongu = deque(maxlen=120)   # dongu periyodu (s) -> FPS
+# KALICI PERF LOGU: ~1 Hz veri/perf_log_*.csv (uctan sonra Claude buradan analiz eder;
+# konsol/FPV anlik, bu kalici). Her gorev basinda yeni dosya.
+_perf_log_f = None
+_perf_log_path = None
+
+
+def _perf_log_yaz(det_ms, det_p95, poz_ms, fps, gpu):
+    global _perf_log_f, _perf_log_path
+    if _perf_log_f is None:
+        try:
+            _perf_log_path = os.path.join(VERI_DIR, time.strftime("perf_log_%Y%m%d_%H%M%S.csv"))
+            _perf_log_f = open(_perf_log_path, "w", encoding="utf-8")
+            _perf_log_f.write("t_wall,det_ms,det_p95,poz_ms,fps,gpu\n")
+        except Exception:
+            _perf_log_f = None
+            return
+    try:
+        _perf_log_f.write("%.1f,%s,%s,%s,%s,%s\n" % (
+            time.time(), det_ms, det_p95, poz_ms, fps, gpu))
+        _perf_log_f.flush()
+    except Exception:
+        pass
 
 
 def _cuda_senkron():
@@ -1005,9 +1027,11 @@ def dedektor_dongusu():
                                     if torch.cuda.is_available() else "CPU")
                 except Exception:
                     _perf["gpu"] = "?"
-            # periyodik konsol ozeti (her ~3 sn; canli takip)
-            if _now - _t_konsol > 3.0:
+            # periyodik konsol ozeti + KALICI CSV (her ~1 sn; uctan sonra analiz)
+            if _now - _t_konsol > 1.0:
                 _t_konsol = _now
+                _perf_log_yaz(_perf["det_ms"], _perf["det_p95"], _perf["poz_ms"],
+                              _perf["fps"], _perf["gpu"])
                 print("[PERF] DET %s ms (p95 %s) | POZ %s ms | dongu %s FPS | %s"
                       % (_perf["det_ms"], _perf["det_p95"], _perf["poz_ms"],
                          _perf["fps"], _perf["gpu"]))
@@ -1311,7 +1335,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
     def do_POST(self):
-        global gorev_aktif, manuel_aktif, manuel_son_giris
+        global gorev_aktif, manuel_aktif, manuel_son_giris, _perf_log_f
         if self.path == "/api/command":
             length = int(self.headers.get("Content-Length", 0))
             raw = self.rfile.read(length).decode("utf-8") if length else "{}"
@@ -1328,6 +1352,11 @@ class Handler(BaseHTTPRequestHandler):
                     beyin.log_dondur()        # KOSULSUZ yeni ucus logu: ayni kaynak
                     # ust uste secilse de her "Gorev Baslat" = ayri ucus dosyasi/klasoru
                     _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
+                # yeni gorev -> yeni perf logu (ucusla ayni ritim; kapat, sonraki tik acar)
+                if _perf_log_f is not None:
+                    try: _perf_log_f.close()
+                    except Exception: pass
+                    _perf_log_f = None
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
                 _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
