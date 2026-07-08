@@ -62,6 +62,12 @@ CAM_JPEG_QUALITY = 60
 UI_CONF_MIN = 0.25    # dedektor predict esigi: zayif tespit arayuzde TURUNCU gorunur;
                       # gudum/kilit yalnizca conf>=Cfg.VIS_CONF_MIN gorur (dedektor_dongusu kapisi)
 POZ_HER_N = 3         # poz inference'i her N dedektor turunda bir (gozlemci; GPU dedektore kalsin)
+DEDEKTOR_HEDEF_HZ = 15.0   # dedektor dongusu UST SINIRI (Hz); 0 = sinirsiz (eski serbest kosu).
+                      # 8 Tem teshisi: serbest kosu GPU'yu doyurup sim'le kapismayi buyutuyordu
+                      # (bench sim-only 40.6 ms; +dedektor/bench yigilinca 57-86 ms). Canli olcum
+                      # zaten ~11-16 Hz'ti -> tavan gudum kadansini DUSURMEZ (kilit 5 ardisik
+                      # tespit = 0.33 s @15 Hz, VIS_STALE_S=0.5 icinde); bosta kalan GPU sim'e
+                      # doner -> hem oyun FPS'i hem inference suresi iyilesir (TESHIS_CANLI_INFERENCE.md).
 
 
 # ----------------------------------------------------------
@@ -1000,7 +1006,13 @@ def dedektor_dongusu():
             _teshis_kare_dump(bgr)                    # A/B dumpi EN SONDA (olcume karismaz)
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
-        # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
+        elif DEDEKTOR_HEDEF_HZ > 0:
+            # HIZ TAVANI (8 Tem teshis duzeltmesi): dongu hedeften hizliysa kalani uyu
+            # -> GPU sim'e nefes alir. Contention'da dongu zaten yavas -> sleep 0'a
+            # duser, davranis eskisiyle birebir (tavan yalniz BOL GPU'da devreye girer).
+            kalan_s = (1.0 / DEDEKTOR_HEDEF_HZ) - (time.perf_counter() - t0)
+            if kalan_s > 0:
+                time.sleep(kalan_s)
 
 
 # ----------------------------------------------------------

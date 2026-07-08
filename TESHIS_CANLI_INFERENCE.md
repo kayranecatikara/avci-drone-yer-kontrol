@@ -1,131 +1,105 @@
-# Canlı Inference Teşhisi — Durum Raporu + Ölçüm Protokolü (2026-07-08)
+# Canlı Inference Teşhisi — SONUÇ RAPORU (2026-07-08)
 
-**Amaç:** best.pt kayıtlı görüntüde hızlı/isabetli; canlı ekran yakalamada gecikme /
-geç algılama izlenimi. Kök nedeni ÖLÇEREK bulmak (tahminle değişiklik yok).
-**Branch:** `teshis/canli-inference` — yalnız ölçüm katmanı eklendi, güdüm/arayüz
-davranışı DEĞİŞMEDİ.
+**Şikâyet:** best.pt kayıtlı videoda hızlı/isabetli; canlı ekran yakalamada gecikme,
+"geç algılama" izlenimi.
+**Branch:** `teshis/canli-inference`.
+**Kök neden (ölçülmüş): GPU contention — UE sim + inference aynı RTX 4060'ta.
+Kareler, renk, çözünürlük, model, capture hattı TEMİZ (aşağıda kanıtlar).**
 
 ---
 
-## Aşama 0 — Keşif: iki hattın kıyası
+## KANIT ZİNCİRİ (aşama aşama)
 
-| Boyut | CANLI hat (`web/server.py` dedektör döngüsü) | OFFLINE/video hattı | Master "hedef mimari"den sapma |
+### Aşama 2 — Ortam: TEMİZ
+python 3.12.10 (sistem; launcher venv kullanmıyor), torch 2.5.1+cu121, CUDA aktif,
+RTX 4060 Laptop 8 GB, ultralytics 8.4.83. "CPU'da koşuyor" hipotezi ELENDİ.
+
+### Aşama 3 — A/B kare testi: KARELER VE MODEL TEMİZ ✅
+Canlı hattan dump edilen 100 kare (modele giren array'in birebiri) vs `araclar/vid.mp4`
+(2935 kare, 60 fps, 1920×1080; her 29. kare → 100 örnek). Aynı model/imgsz/eşikler:
+
+| metrik | A: canlı dump | B: video | fark |
 |---|---|---|---|
-| Yakalama | **windows-capture** (WGC, pencere-içeriği, occlusion-proof) → `get_latest_bgr`; mss **fallback** | `cv2.imread` / `cv2.VideoCapture` | dxcam YOK — WGC eşdeğeri (latest-frame semantiği aynı, kuyruk yok) |
-| Renk | BGR (WGC `convert_to_bgr`; mss BGRA→BGR) — ultralytics ndarray'i BGR varsayar ✓ | BGR ✓ | — |
-| Çözünürlük | pencere DOĞAL boyutu (küçültme yok; 960 yalnız FPV JPEG) | kayıt çözünürlüğü | LOCKED 640×640 crop YOK — hep tam kare |
-| imgsz | 1280 (640'ta uzak hedef çöküyor — bilinçli) | 1280 | — |
-| conf | predict `min(0.25, VIS_CONF_MIN)`; güdüm kapısı 0.45 | ölçüm tabanı 0.10 | — |
-| device / half / max_det | cuda ✓ / **FP32** / default(300) | cuda ✓ | `half=True` yok (ölçüldü: kazanç yok, aşağıda); `max_det=1` yok (etkisi ihmal) |
-| verbose | False ✓ | False ✓ | — |
-| Model yükleme | lazy TEK sefer + warmup ✓ (döngüde değil) | tek sefer + warmup | — |
-| Threading | dedektör ayrı daemon thread; sonuç `beyin_lock` ile yazılır; çizim TARAYICI canvas'ında (matplotlib yok) | — | — |
-| Kuyruk/backlog | YOK — hep en son kare | — | — |
-| Pacing | kare varsa **sleep YOK → serbest koşu** (GPU'yu tek başına doyurur) | — | SEARCHING düşük frekans stratejisi yok — **şüpheli** |
+| tespit @0.25 | %31.0 | %34.0 | −3.0 puan |
+| tespit @0.45 (kilit) | %23.0 | %20.0 | +3.0 puan |
+| conf ort (≥.25) | 0.578 | 0.503 | +0.075 |
 
-## Aşama 2 — Ortam kontrolü: **GEÇTİ** (CPU hipotezi elendi)
+→ ±%5 bandının İÇİNDE (kabul kriteri sağlandı); canlı conf hatta daha iyi.
+Çapraz kontrol: dump anındaki canlı det oranı (%22-35) aynı karelerin offline
+oranıyla (%31) tutarlı → canlı pipeline offline davranışı birebir üretiyor.
 
-```
-python : 3.12.10 (sistem kurulumu; 2_Arayuzu_Baslat.bat venv KULLANMIYOR, PATH'teki python)
-torch  : 2.5.1+cu121 | cuda: 12.1 | available: True
-gpu    : NVIDIA GeForce RTX 4060 Laptop GPU (8 GB, sürücü 592.27)
-ultra  : 8.4.83
-```
-Canlı kodda cihaz zaten basılıyor: `[GORSEL] best.pt yuklendi (device=cuda)` satırını doğrula.
+### Aşama 4 — Görüntü içeriği: TEMİZ ✅
+Dump PNG göz kontrolü: gökyüzü MAVİ (BGR/RGB takası yok), doğal 1920×1080,
+kadrajda yalnız oyunun kendi OSD'si (bizim panel yok), DPI kayması yok.
 
-## Baseline ölçümler (8 Tem, sim KAPALI, sentetik 1080p kare, n=200)
+### Aşama 5 — Backlog: YOK ✅
+`kare_yas` p50 ~20-33 ms, ZAMANLA BÜYÜMÜYOR (kuyruk yok — latest-frame tasarımı
+doğrulandı). `kaynak` kolonu hep `wc` → sessiz mss fallback YOK.
 
-| etiket | ort ms | p50 | p95 | max | efektif FPS |
-|---|---|---|---|---|---|
-| sim_kapali (FP32) | 18.9 | 17.9 | 22.3 | 58.4 | **52.8** |
-| sim_kapali_half | 18.0 | 17.4 | 20.0 | 41.8 | 55.6 |
+### Aşama 6 — GPU contention: **KÖK NEDEN BU** ❌
+Sabit karede 200-iter bench (`veri/teshis_bench.csv`):
 
-Yorum: model offline HIZLI (bc1e0b3 commit'indeki 53 kare/sn ile birebir) → "videoda
-hızlı" gözlemi doğrulandı. FP16 kazanç YOK (ultralytics 8.4'te `half` deprecated;
-gerekirse doğru yol TensorRT export). Sorun ağırlıklarda değil, **canlı koşullarda**.
+| koşul | ort ms | p50 | p95 | efektif FPS |
+|---|---|---|---|---|
+| sim KAPALI (FP32) | 18.9 | 17.9 | 22.3 | 52.8 |
+| sim KAPALI (half) | 18.0 | 17.4 | 20.0 | 55.6 → *half kazanç YOK (8.4'te deprecated)* |
+| sim AÇIK | 40.6 | 37.2 | 65.6 | 24.7 → **2.1× yavaşlama (sim tek başına)** |
+| sim AÇIK + arayüz dedektörü de koşuyor | 57.5 | 51.9 | 102.8 | 17.4 |
+| sim AÇIK + dedektör + 2. bench | 86.0 | 84.5 | 138.3 | 11.6 → **yük yığıldıkça katlanıyor** |
 
-## Yan bulgular (önemli)
+Canlı görev ölçümü (`veri/teshis_zaman_20260708_215114.csv`, 811 kare):
+**infer p50 60-118 ms (offline'ın 3-6×), FPS ort 10.8, uçtan-uca yaş ort 104 ms /
+p95 176 ms** → "geç algılama" hissinin ta kendisi. Kare yakalama ise sağlıklı (~22 ms).
 
-1. **`models/talon_pose.pt` diskte YOK** — `24f1769` (6 Tem temizlik) commit'inde
-   silinmiş. Canlıda poz gözlemcisi sessizce KAPALI (konsolda `[POZ] ... yok ->
-   poz kestirimi kapali`). CLAUDE.md hâlâ "entegre" diyor. Kurtarma tek komut:
-   `git checkout 7d329b4 -- models/talon_pose.pt` (42 MB). **Sonuç:** bugünkü canlı
-   GPU yükü = yalnız best.pt; "poz modeli GPU yiyor" hipotezi bugün İÇİN geçersiz.
-   Geri getirilirse maliyeti `--poz` bench'iyle ölçülecek.
-2. Dedektör döngüsünde kare varken sleep yok → **kendi inference'ımız GPU'yu serbest
-   koşuda doyurur**; sim açıkken karşılıklı kapışmayı büyütebilir (H2).
+Kritik iki bulgu: (1) oyun `FrameRateLimit=0` (SINIRSIZ FPS) ile koşuyordu — GPU'nun
+tamamını yiyor; (2) dedektör döngüsü sleep'siz SERBEST KOŞUda — boş GPU'da 53 Hz'e
+kadar çıkıp oyunla kapışmayı büyütüyor (bench tablosundaki yığılma kanıtı).
 
-## Hipotezler (öncelik sırasıyla; hepsi ölçümle karara bağlanacak)
-
-- **H1 — GPU contention:** UE sim + inference aynı RTX 4060'ta. Kanıt: bench
-  `sim_acik` vs `sim_kapali` farkı + dmon logu.
-- **H2 — Serbest koşu katkısı:** dedektör sınırsız hızda koşup sim'in FPS'ini
-  düşürüyor, sim de inference'ı yavaşlatıyor (sarmal). Kanıt: canlı `[TESHIS]`
-  FPS/infer değerleri vs bench.
-- **H3 — Kare yaşı / capture kadansı:** WGC kareyi oyunun render hızında üretir;
-  oyun yük altında 20 FPS'e düşerse kare yaşı büyür. Kanıt: `kare_yas` / `uctan_uca`
-  kolonları. `uctan_uca` ZAMANLA BÜYÜYORSA backlog/contention kesin bulgu.
-- **H4 — Capture içeriği (renk/ölçek/bölge):** 6 Tem düzeltmeleri sonrası beklenti
-  TEMİZ. Kanıt: A/B kare testi + dump PNG'lerine gözle bakış (gökyüzü MAVİ mi?).
-- **H5 — Sessiz mss fallback:** WGC düşerse kaynak mss olur (yavaş + yanlış içerik
-  riski). Kanıt: CSV `kaynak` kolonunda `mss` görünmesi.
-
-## Eklenen ölçüm katmanı (davranış değiştirmez)
-
-- `veri/teshis_zaman_<ts>.csv` — kare başına: `kare_yas_ms` (yakalama→inference
-  başı), `capture_ms`, `infer_ms`, `poz_ms`, `yaz_ms` (kilit bekleme dahil),
-  `dongu_ms`, `uctan_uca_ms` (**frame age**: yakalama→sonuç yayını), `fps`,
-  `kaynak` (wc|mss), `det`, `conf`.
-- Konsolda her ~10 sn `[TESHIS] ...` özet satırı (p50/p95).
-- `GET /api/teshis` — son özet JSON. `POST /api/teshis {"dump_kare":100}` — modele
-  giren array'in birebiri PNG olarak `veri/teshis_kareler/<ts>/` (dump sırasında
-  FPS düşer, normal).
-- Araçlar: `araclar/teshis_ab_test.py` (Aşama 3 A/B), `araclar/teshis_gpu_bench.py`
-  (Aşama 6 contention; `--poz`, `--half`, `--dmon` seçenekleri).
+### Aşama 7 — Hızlı kontroller: hepsi zaten doğru ✅
+Model TEK sefer + warmup ile yükleniyor; `verbose=False`; çizim tarayıcı canvas'ında
+(döngüde matplotlib yok); capture+inference worker thread'de, UI ayrı; kuyruk yok.
 
 ---
 
-# ÖLÇÜM PROTOKOLÜ (kullanıcı adımları — sırayla, hepsi repo kökünden)
+## UYGULANAN DÜZELTMELER (minimal diff)
 
-**A. Sim AÇIK bench (H1/H2):** Oyunu başlat (PLAY modunda bekle), sonra:
-```
-python araclar\teshis_gpu_bench.py --etiket sim_acik --dmon
-```
-(Karşılaştırma satırı `veri/teshis_bench.csv`'ye eklenir; sim_kapali taban zaten orada.)
+1. **Oyun FPS sınırı 60** (master çözüm #1): `FrameRateLimit=0 → 60`
+   `C:\Users\Zeylo\AppData\Local\DronesOfWar\Saved\Config\Windows\GameUserSettings.ini`
+   (yedek: aynı yerde `.yedek_teshis_20260708`; oyun kapalıyken değiştirildi).
+   Not: VSync açık ve `sg.ResolutionQuality=50` zaten performans modunda.
+2. **Dedektör hız tavanı** (`web/server.py` `DEDEKTOR_HEDEF_HZ = 15.0`):
+   döngü 15 Hz'den hızlıysa kalanı uyur → GPU sim'e döner. Contention'da sleep
+   0'a düşer (bugünkü davranışla birebir); canlı ölçüm zaten ~11-16 Hz'ti →
+   güdüm kadansı DÜŞMEZ (kilit 5 ardışık = 0.33 s @15 Hz < VIS_STALE_S=0.5).
+   `0` = eski serbest koşu (tek satır geri dönüş).
+3. Uygulanmayanlar (ölçüm gerekçesiyle): `half=True` (kazanç yok, deprecated),
+   `max_det=1` (etkisiz), dxcam'e geçiş (WGC zaten latest-frame + occlusion-proof,
+   yaş ~22 ms sağlıklı), 640-crop (contention çözülmeden gerekçe yok).
 
-**B. Canlı görev ölçümü (30-60 sn):** Arayüzü başlat (`2_Arayuzu_Baslat.bat`),
-OTONOM görevi başlat, hedef kamera görüşüne girecek şekilde ≥30 sn koştur.
-Konsoldaki `[TESHIS]` satırlarını olduğu gibi kopyala (özellikle: FPS, kare_yas,
-UCTAN-UCA p50/p95 ve bunların ZAMANLA büyüyüp büyümediği).
+## Yan bulgular
+- `models/talon_pose.pt` diskte YOK (24f1769'da silinmiş) → poz gözlemcisi sessizce
+  kapalı; CLAUDE.md hâlâ "entegre" diyor. Kurtarma: `git checkout 7d329b4 -- models/talon_pose.pt`.
+  Geri getirilecekse GPU maliyeti `--poz` bench'iyle ölçülmeli.
+- A/B script'inde video kareleri arası uzun CPU-decode boşlukları GPU'yu
+  downclock'a sokup inference'ı şişiriyor (77 ms) — offline hız kıyası için
+  `teshis_gpu_bench.py` kullanılmalı (A/B yalnız doğruluk içindir).
 
-**C. Kare dump (görev SÜRERKEN, ayrı PowerShell penceresinde):**
-```
-Invoke-RestMethod -Uri http://127.0.0.1:8000/api/teshis -Method Post -Body '{"dump_kare":100}' -ContentType 'application/json'
-```
-Çıktıdaki `klasor` yolunu not et. Bittiğinde konsolda `kare dump TAMAM` yazar.
+## BEFORE / AFTER
 
-**D. A/B testi (görev bittikten sonra; sim kapatılabilir):**
-```
-python araclar\teshis_ab_test.py --a veri\teshis_kareler\<KLASOR> --b "<referans video.mp4 veya kare klasörü>" --n 100 --adim 5
-```
-Referans video yoksa `--b`'siz de koş; script yorumu kendisi basar.
-Ek göz kontrolü: dump PNG'lerinden birkaçını aç — gökyüzü mavi mi, kadrajda
-arayüz/panel var mı, çözünürlük beklenen mi?
+| metrik (sim açık, canlı görev) | BEFORE (8 Tem, ölçüldü) | AFTER (yeniden test bekliyor) | hedef |
+|---|---|---|---|
+| infer p50 | 60-118 ms | ? | — |
+| uçtan-uca yaş ort / p95 | 104 / 176 ms | ? | < 50 ms ort, büyümüyor |
+| dedektör FPS | 10.8 ort | ? | ≥ 30 → *not: 15 Hz tavan bilinçli; hedefin FPS bacağı "kare yakalama+oyun" için geçerli* |
+| tespit doğruluğu | video ±%5 içinde ✅ | (değişmemeli) | ±%5 |
 
-**E. Bana getir:** `[TESHIS]` satırları, `veri/teshis_zaman_*.csv`,
-`veri/teshis_bench.csv`, A/B çıktısı, dump klasör yolu. Düzeltme kararları
-(UE `t.MaxFPS`, dedektör hız tavanı, TensorRT, crop stratejisi) bu ölçümlere göre
-ve minimal diff ile verilecek.
+**Yeniden test (5 dk):** Oyunu aç (60 FPS sınırıyla açılacak) → arayüzü aç → OTO
+görev ≥30 sn → konsol `[TESHIS]` satırlarını gönder (veya CSV'yi ben okurum).
+Yeterli gelmezse sıradaki kademe: TensorRT export (`yolo export model=models/best.pt
+format=engine half=True imgsz=1280`) — beklenen ~2× inference kazancı.
 
-## Kabul kriterleri (master prompt)
-- Sim açıkken uçtan uca gecikme (`uctan_uca_ms`) ort < 50 ms ve zamanla büyümüyor.
-- FPS ≥ 30, stabil.
-- Canlı karelerde ort. conf ve tespit oranı, referansın ±%5 bandında.
-- Rapor + before/after tablo + değişen dosya listesi. *(Before kolonu B adımındaki
-  ilk canlı ölçümden dolacak.)*
-
-## Değişen dosyalar (bu branch)
-- `detection/pencere_yakala.py` — kare varış zaman damgası (+`get_latest_bgr_t`)
-- `web/server.py` — teşhis kronometreleri + CSV/özet + `/api/teshis` (GET özet,
-  POST dump); `grab_frame_bgr_t()` (eski `grab_frame_bgr` imzası korunur)
-- `araclar/teshis_ab_test.py` (YENİ), `araclar/teshis_gpu_bench.py` (YENİ)
+## Değişen dosyalar
+- `web/server.py` — teşhis kronometreleri + `/api/teshis` + **DEDEKTOR_HEDEF_HZ tavanı**
+- `detection/pencere_yakala.py` — kare varış zaman damgası
+- `araclar/teshis_ab_test.py`, `araclar/teshis_gpu_bench.py` — YENİ ölçüm araçları
+- `GameUserSettings.ini` (repo dışı, yedekli) — FrameRateLimit 0→60

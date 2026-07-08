@@ -36,13 +36,14 @@ GORSEL_UZANTI = (".png", ".jpg", ".jpeg", ".bmp")
 def kareler(kaynak, n_max, adim):
     """Kaynaktan BGR kareler uret: klasor (PNG/JPG), video dosyasi veya tek gorsel.
     (ad, ndarray) ikilileri uretir; cv2 hem imread hem VideoCapture icin BGR doner
-    -> canli hatla (grab_frame_bgr BGR) ayni renk duzeni, adil kiyas."""
+    -> canli hatla (grab_frame_bgr BGR) ayni renk duzeni, adil kiyas.
+    NOT: --adim YALNIZ videoya uygulanir (dump klasoru zaten tam set; 100 karelik
+    dumpin seyreltilmesi kiyasi carpitir — 8 Tem ilk kosuda yasandi)."""
     import cv2
     kaynak = os.path.abspath(kaynak)
     if os.path.isdir(kaynak):
         yollar = sorted(p for p in glob.glob(os.path.join(kaynak, "*"))
                         if p.lower().endswith(GORSEL_UZANTI))
-        yollar = yollar[::max(1, adim)]
         if n_max:
             yollar = yollar[:n_max]
         for p in yollar:
