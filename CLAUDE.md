@@ -200,6 +200,35 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
   Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
   tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
 
+## TUNE RAPORU — "DEĞERLERİ YAZDIR" → EXCEL (2026-07-08)
+Tune panelindeki **Değerleri Yazdır** artık Cfg dökümüne EK olarak `/api/tune_rapor`'u
+çağırır: `web/tune_rapor.py` aktif (yoksa en yeni) `veri/ucus_log_*.csv`'yi okuyup
+GÖRSEL-faz performans metriklerini çıkarır ve `veri/tune_rapor_<zaman>.xlsx` yazar
+(3 sayfa: Özet / Tune Değerleri [slider + `TUNE_SABIT_RAPOR` sabitleri] / Performans).
+Metrikler: ilk tespit süresi+mesafesi, tespit oranı, kayıp sayısı, en uzun kesintisiz
+takip, kilit penceresi max + isteri SAĞLANDI/SAĞLANMADI + kilide ulaşma süresi,
+|ex|/|ey|/ibvs_r merkezleme, yaw pürüzlülüğü/std + yatay salınım (tutarlılık),
+mesafe ilk/min/son + kapanma hızı, öngörü aktif% + |lead|. Kısa özet arayüzde
+dump'ın altında görünür. Güdüm koduna dokunulmadı (salt log okuma). Bağımlılık:
+`openpyxl` (requirements'ta; yoksa arayüz sebebi söyler, sistem çökmez).
+**UÇUŞ-İÇİ A/B TESTİ (kullanıcı isteği, aynı gün):** slider değerleri 1 Hz
+`veri/tune_log_*.csv`'ye yazılır (`server.tune_log_dongusu`); rapor uçuş loguyla
+t_wall üzerinden hizalar → **"Segment Kıyas"** sayfası: her parametre değişimi
+uçuşu segmente böler, her segment ayrı satır (değişiklik metni + o dilimin tespit%/
+kayıp/r_ort/merkez%/yaw pürüzlülük/kapanma + tam parametre seti) → "artırınca
+iyileşti mi?" TEK uçuşta görünür. **"Saniye Detay"** sayfası: saniye başına metrik
++ o saniyedeki tune değerleri (Excel'de grafiklenebilir). 3 sn içi ardışık
+değişimler (slider sürükleme) tek segment sayılır (`_SEG_BIRLESTIR_S`).
+**UÇUŞ KLASÖRÜ (aynı gün):** rapor basıldığında her uçuşun TÜM verileri
+`veri/tune_parametreler/ucus_N/` altında toplanır (uçuş logu kopyası + tune logu
+kopyası + Excel raporları). Aynı uçuş logu hep aynı klasöre eşlenir
+(`kayit.json` registry, `tune_rapor.ucus_klasoru`); yeni uçuş logu → sıradaki
+numara. Kopyalar her rapor basımında tazelenir (kaynak hâlâ yazılıyor olabilir).
+**Her "Görev Başlat" = yeni uçuş:** server start komutunda `beyin.log_dondur()`
+KOŞULSUZ çağrılır (`ana_kontrol.py`'de güdüm-dışı küçük metod; aynı kaynak üst
+üste seçilse bile log dosyası döner → her görev ayrı ucus_N klasörü alır).
+Test: `tests/test_tune_rapor.py` (20/20, sentetik uçuş+tune logu).
+
 ## PERVANE YANLIŞ-POZİTİF MASKESİ (2026-07-07 — clutter değil, kendi aracımız)
 Avcının KENDİ pervanesi arada bir "uçak" olarak algılanıyor (dedektör sınıf-agnostik
 en-yüksek-conf seçer → bir karede pervane hedefi bastırabilir). Pervane kadrajda SABIT

@@ -754,7 +754,17 @@
     let s="    # --- Tune ile bulunan degerler (ana_kontrol.py Cfg'ye yapistir) ---\n";
     for(const [,rows] of TUNE_DEFS)
       for(const [key,,,,st] of rows) if(key in cur && cur[key]!=null) s+="    "+key+" = "+tuneFmt(cur[key],st)+"\n";
-    const d=$("tuneDump"); d.style.display="block"; d.textContent=s;
+    const d=$("tuneDump"); d.style.display="block"; d.textContent=s+"\n⏳ Excel raporu hazırlanıyor…";
+    // EXCEL RAPORU: server bu ucusun logundan performans metriklerini cikarip
+    // tune degerleriyle birlikte veri/tune_rapor_*.xlsx dosyasina yazar.
+    try{
+      const r=await (await fetch("/api/tune_rapor",{method:"POST"})).json();
+      if(r.ok){
+        s+="\n📁 UÇUŞ KLASÖRÜ: "+r.klasor+"\n📊 EXCEL RAPORU: "+r.dosya+(r.log?"\n    (log: "+r.log+")":"")+"\n";
+        for(const [k,v] of Object.entries(r.ozet||{})) s+="    "+k+": "+v+"\n";
+      } else s+="\n⚠️ Rapor yazılamadı: "+(r.hata||"bilinmeyen hata")+"\n";
+    }catch(e){ s+="\n⚠️ Rapor isteği başarısız: "+e+"\n"; }
+    d.textContent=s;
   }
 
   // Hız slideri: anlık olarak çarpanı güncelle ve komutu tazele

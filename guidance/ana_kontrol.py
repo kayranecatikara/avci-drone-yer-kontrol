@@ -473,7 +473,17 @@ class AvciKontrol:
         self.kilit_boyut = None
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
         # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
-        # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
+        # donmez; server "Gorev Baslat"ta log_dondur()'u AYRICA kosulsuz cagirir
+        # (her gorev = ayri ucus_log dosyasi = veri/tune_parametreler/ucus_N klasoru).
+        self.log_dondur()
+
+    # ----------------------------------------------------------------
+    #  UCUS LOGUNU DONDUR (gudum-disi; salt dosya yasam dongusu): acik log
+    #  dosyasini kapatir; sonraki tik taze zaman-damgali dosya acar. Server
+    #  her "Gorev Baslat"ta cagirir -> her gorev kendi ucus_log dosyasini
+    #  (dolayisiyla kendi tune_parametreler/ucus_N klasorunu) alir.
+    # ----------------------------------------------------------------
+    def log_dondur(self):
         if self._log_f is not None:
             try: self._log_f.close()
             except Exception: pass

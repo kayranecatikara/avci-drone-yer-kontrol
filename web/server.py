@@ -299,6 +299,51 @@ TUNE_ALLOW = {
 }
 
 # ----------------------------------------------------------
+#  TUNE LOGU (1 Hz): slider degerleri SANIYE BAZINDA veri/tune_log_*.csv'ye yazilir.
+#  Amac: ucus SIRASINDA parametre degistirip "iyilesti mi?" bakabilmek — rapor
+#  (web/tune_rapor.py) bu logu ucus loguyla t_wall uzerinden hizalar ve her
+#  parametre-degisim SEGMENTI icin metrikleri ayri satirda kiyaslar. Boylece tek
+#  ucusta bircok tune denemesi test edilir (ucus basina tek set kisiti kalkar).
+# ----------------------------------------------------------
+_TUNE_LOG_PATH = None
+_TUNE_LOG_KOLON = None   # sirali param listesi (baslikla ayni sira garanti)
+
+
+def tune_log_dongusu():
+    global _TUNE_LOG_PATH, _TUNE_LOG_KOLON
+    _TUNE_LOG_KOLON = sorted(TUNE_ALLOW)
+    _TUNE_LOG_PATH = os.path.join(VERI_DIR, time.strftime("tune_log_%Y%m%d_%H%M%S.csv"))
+    try:
+        f = open(_TUNE_LOG_PATH, "w", encoding="utf-8")
+        f.write("t_wall," + ",".join(_TUNE_LOG_KOLON) + "\n")
+        f.flush()
+    except Exception as e:
+        print("[TUNE_LOG] acilamadi:", e)
+        _TUNE_LOG_PATH = None
+        return
+    while True:
+        try:
+            vals = [getattr(Cfg, k) for k in _TUNE_LOG_KOLON]
+            # DEGISMEDIYSE de yazilir (saniye bazli kesintisiz zaman ekseni);
+            # dosya kucuk kalir (~saatte 300 KB'den az), rapor hizalamasi basit olur.
+            f.write("%.3f," % time.time()
+                    + ",".join("%g" % float(v) for v in vals) + "\n")
+            f.flush()
+        except Exception:
+            pass
+        time.sleep(1.0)
+
+
+# "Degerleri Yazdir" Excel raporuna slider setine EK yazilan sabitler: kosu kosullarini
+# tam kayda gecirmek icin (isaretler + ongoru kapilari + kilit isteri esikleri).
+# hasattr ile okunur -> Cfg'den kalkan bir isim raporu KIRMAZ, sadece dusurulur.
+TUNE_SABIT_RAPOR = (
+    "IBVS_SIGN_YAW", "IBVS_SIGN_DIKEY", "IBVS_EGO_ROLL_GAIN", "IBVS_ROLL_EMA",
+    "IBVS_ASPECT_MIN", "IBVS_POZ_STALE_S", "IBVS_TILT_DEG", "IBVS_VFOV_HALF_DEG",
+    "VIS_WIN_NEED_S", "VIS_LOCK_PCT", "VIS_STALE_S",
+)
+
+# ----------------------------------------------------------
 #  MANUEL MOD (klavyeyle kontrol)
 #  Tarayici klavye tuslarini okuyup eksen komutuna cevirir ve /api/manuel
 #  ile buraya akitir. Kontrol dongusu bu komutu drona uygular.
@@ -1141,6 +1186,8 @@ class Handler(BaseHTTPRequestHandler):
                 kaynak = {"start": "v2", "start_v2": "v2", "start_gercek": "gercek"}[cmd]
                 with beyin_lock:
                     beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
+                    beyin.log_dondur()        # KOSULSUZ yeni ucus logu: ayni kaynak
+                    # ust uste secilse de her "Gorev Baslat" = ayri ucus dosyasi/klasoru
                     _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
@@ -1246,6 +1293,43 @@ class Handler(BaseHTTPRequestHandler):
                     ok = False
             self._send(200, json.dumps({"ok": ok, "param": p, "value": val}).encode("utf-8"),
                        "application/json")
+        elif self.path == "/api/tune_rapor":
+            # "DEGERLERI YAZDIR" RAPORU: canli tune degerleri + bu ucusun gorsel-faz
+            # performans metrikleri (ilk tespit / kilit / takip surekliligi / merkezleme /
+            # hareket tutarliligi / yaklasma) -> veri/tune_rapor_*.xlsx (web/tune_rapor.py).
+            # Metrik kaynagi: beynin yazdigi AKTIF ucus logu (yoksa en yeni ucus_log_*.csv).
+            try:
+                from web.tune_rapor import (rapor_uret, en_yeni_log,
+                                            ucus_klasoru, dosyayi_klasore_al)
+                tune_vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
+                sabit_vals = {k: getattr(Cfg, k) for k in TUNE_SABIT_RAPOR if hasattr(Cfg, k)}
+                with beyin_lock:
+                    lf = getattr(beyin, "_log_f", None)
+                    log_path = lf.name if lf is not None else None
+                    if lf is not None:
+                        try:
+                            lf.flush()        # son tikler de rapora girsin
+                        except Exception:
+                            pass
+                if log_path is None:
+                    log_path = en_yeni_log(VERI_DIR)
+                # UCUS KLASORU: veri/tune_parametreler/ucus_N -> bu ucusun TUM
+                # verileri tek yerde (log kopyalari + raporlar; kiyas kolay).
+                klasor = ucus_klasoru(os.path.join(VERI_DIR, "tune_parametreler"),
+                                      log_path)
+                dosyayi_klasore_al(log_path, klasor)
+                dosyayi_klasore_al(_TUNE_LOG_PATH, klasor)
+                yol, ozet = rapor_uret(tune_vals, sabit_vals, log_path, klasor,
+                                       kilit_gerek_s=float(getattr(Cfg, "VIS_WIN_NEED_S", 5.0)),
+                                       tune_log_path=_TUNE_LOG_PATH)
+                self._send(200, json.dumps({"ok": True, "dosya": yol,
+                                            "klasor": klasor,
+                                            "log": os.path.basename(log_path) if log_path else None,
+                                            "ozet": ozet}).encode("utf-8"), "application/json")
+            except Exception as e:
+                # openpyxl yok / log okunamadi vb. -> arayuze sebebi soyle, cokme yok
+                self._send(200, json.dumps({"ok": False, "hata": str(e)}).encode("utf-8"),
+                           "application/json")
         else:
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
@@ -1265,6 +1349,9 @@ def main():
     threading.Thread(target=kontrol_dongusu, daemon=True).start()
     # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
+    # Tune logu (1 Hz): slider degerlerini saniye bazinda kaydet -> raporda
+    # parametre-degisim segmentleri ucus performansiyla kiyaslanir.
+    threading.Thread(target=tune_log_dongusu, daemon=True).start()
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
