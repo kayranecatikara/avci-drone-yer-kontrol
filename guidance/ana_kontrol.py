@@ -237,7 +237,7 @@ class Cfg:
     # ================= [GORSEL] (basit IBVS + kilit isteri sayaci) =================
     # --- GORSEL GUDUM — gorsel temas SONRASI yonelim (YALNIZCA kamera) ---
     # Gecis: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec.
-    # Kayipta: HOVER (yeniden tespit bekle) -> (OTO'da) VIS_LOST_TO_GPS_S sonra GPS'e don.
+    # Kayipta (OTO): VIS_LOST_TO_GPS_S kadar hover, sonra GPS'e don (0 = ANINDA don).
     VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "best.pt")   # tespit modeli (task=detect, sinif: talon)
     VIS_POSE_MODEL_PATH = os.path.join(_PROJ_ROOT, "models", "talon_pose.pt")  # poz modeli (task=pose, 6 keypoint)
     # PERVANE MASKESI (yanlis-pozitif engelleme): avcinin KENDI pervanesi arada bir
@@ -252,10 +252,12 @@ class Cfg:
     VIS_CONF_MIN     = 0.45     # kilit/komut icin asgari guven
     VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
-    VIS_LOST_TO_GPS_S = 2.0     # kayip bu sureyi asarsa GPS guduumune GERI DON (yeniden yaklas +
-                               # gorseli yeniden kilitle). 0 = asla donme. Sure _vis_lost_count
-                               # ile olculur -> son gorusten itibaren ~(VIS_STALE_S + bu) toplam
-                               # kayipta doner. Kayip boyunca komut = HOVER (yerinde bekle).
+    VIS_LOST_TO_GPS_S = 0.0     # kayipta GPS'e donmeden once hover suresi (yalniz OTO).
+                               # 0 = ANINDA GPS'e don (hover fazi yok; kullanici istegi
+                               # 2026-07-08 — ara bekleme kafa karistiriyordu). Dedektor
+                               # titremesi (tek-kare atlama) zaten VIS_STALE_S ile koprulenir;
+                               # son gorusten itibaren toplam ~(VIS_STALE_S + bu) sn'de doner.
+                               # Manuel GORSEL switch'te donus YOK (revert_izin=False), hep hover.
     VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
     # --- BASIT IBVS (2026-07-07): goruntu merkezi -> bbox merkezi cizgisi ---
     # TEK gorsel yasa (guidance/ibvs_gorsel.py): cizginin YATAY bileseni yaw'a,
@@ -845,10 +847,12 @@ class AvciKontrol:
             komut = self.ibvs.hesapla(tespit, Cfg, poz=poz, own_roll_rad=own_roll_rad)
             self.ibvs_tlm = self.ibvs.durum()
             return komut
-        # --- KAYIP: HOVER (yeniden tespit bekle) -> uzarsa (yalniz OTO) GPS'e don ---
+        # --- KAYIP: (OTO) VIS_LOST_TO_GPS_S kadar HOVER, sonra GPS'e don.
+        #     0 = ANINDA GPS (hover fazi yok; dedektor titremesini zaten VIS_STALE_S
+        #     koprular — buraya dusen GERCEK kayiptir). Manuel GORSEL'de HEP hover. ---
         self._vis_lost_count += 1
         lost_s = self._vis_lost_count * Cfg.DT
-        if (not revert_izin) or Cfg.VIS_LOST_TO_GPS_S <= 0 or lost_s <= Cfg.VIS_LOST_TO_GPS_S:
+        if (not revert_izin) or lost_s <= float(Cfg.VIS_LOST_TO_GPS_S):
             return 0.0, 0.0, 0.0, 0.0            # hover: ararken bekle (manuel GORSEL'de HEP)
         # UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
         print("[GORSEL] Hedef %.1fs kayip -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)

@@ -760,7 +760,10 @@ def _normalize_poz(pdet, poz, yaw_pitch):
         u, v = pdet["kp_xy"][i]
         kp_ref[r] = [u / W, v / H, round(float(pdet["kp_conf"][i]), 3)]
     d = {"kp": kp_ref, "conf": float(pdet.get("conf", 0.0)),
-         "ok": poz is not None}                      # ok=False: nokta var, PnP oturmadi
+         "ok": poz is not None,                      # ok=False: nokta var, PnP oturmadi
+         # kare zamani: /api/gorsel yas_s hesaplar -> arayuz iskeleti tespit hiziyla
+         # ILERI kaydirir (poz POZ_HER_N=3 seyrekliginde kosar, bbox'tan da bayattir).
+         "t_poz": float(pdet.get("t", time.perf_counter()))}
     if poz is not None:
         d["mesafe_m"] = poz["mesafe_cm"] / 100.0
         d["mesafe_ema_m"] = poz["mesafe_ema_cm"] / 100.0
@@ -771,6 +774,53 @@ def _normalize_poz(pdet, poz, yaw_pitch):
             d["yaw_deg"] = yaw_pitch[0] % 360.0
             d["pitch_deg"] = yaw_pitch[1]
     return d
+
+
+# ----------------------------------------------------------
+#  DEDEKTOR DEBUG PENCERESI (istege bagli):  set AVCI_DEBUG_PENCERE=1  ile ac.
+#  Dedektorun ISLEDIGI karenin uzerine AYNI karenin tespit/poz ciktisini cizip
+#  yerel bir OpenCV penceresinde gosterir -> kutu/iskelet hedefin TAM ustunde
+#  (kare<->cikti %100 senkron). Arayuzde "kutu geride kaliyor" gorunumu, canli
+#  ekran paylasimi (~0 ms) ile inference cikisi (~100-300 ms) arasindaki fizik
+#  farkidir; bu pencere o farki SIFIRLAR (pencere butunuyle inference suresi
+#  kadar geridedir ama kendi icinde gecikmesizdir). Guduma etkisi YOK (salt
+#  gosterim; bayrak kapaliyken sifir maliyet). Yalniz gorev aktifken gunceller
+#  (dedektor dongusu o zaman calisir).
+# ----------------------------------------------------------
+DEBUG_PENCERE = os.environ.get("AVCI_DEBUG_PENCERE", "0").strip() == "1"
+_DEBUG_PENCERE_W = 960          # gosterim genisligi px (oran korunur)
+
+
+def _debug_pencere_goster(bgr, det, det_gecti, poz):
+    """dedektor_dongusu icinden cagrilir (ayni thread; imshow tek thread'de kalmali).
+    det: gorsel_tespit ciktisi (PIKSEL cx/cy/w/h) | None. poz: normalize kp'li dict | None."""
+    h, w = bgr.shape[:2]
+    s = _DEBUG_PENCERE_W / float(w)
+    hd = int(h * s)
+    img = cv2.resize(bgr, (_DEBUG_PENCERE_W, hd))
+    for m in (getattr(Cfg, "PROP_MASKE", None) or []):       # pervane maskesi (koyu kirmizi)
+        cv2.rectangle(img, (int(m[0] * _DEBUG_PENCERE_W), int(m[1] * hd)),
+                      (int(m[2] * _DEBUG_PENCERE_W), int(m[3] * hd)), (0, 0, 180), 1)
+    if det is not None:
+        renk = (0, 220, 0) if det_gecti else (0, 165, 255)   # yesil=gudume gitti, turuncu=zayif(UI-only)
+        x0 = int((det["cx"] - det["w"] / 2) * s); y0 = int((det["cy"] - det["h"] / 2) * s)
+        x1 = int((det["cx"] + det["w"] / 2) * s); y1 = int((det["cy"] + det["h"] / 2) * s)
+        cv2.rectangle(img, (x0, y0), (x1, y1), renk, 2)
+        cv2.putText(img, "%.2f" % float(det.get("conf", 0.0)), (x0, max(14, y0 - 6)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, renk, 1, cv2.LINE_AA)
+    if poz is not None and poz.get("kp"):
+        pts = [None if (p is None or p[2] < 0.25) else
+               (int(p[0] * _DEBUG_PENCERE_W), int(p[1] * hd)) for p in poz["kp"]]
+        for a, b in ((0, 5), (1, 2), (0, 1), (0, 2), (3, 5), (4, 5), (3, 4)):
+            if pts[a] and pts[b]:
+                cv2.line(img, pts[a], pts[b], (230, 230, 90), 1, cv2.LINE_AA)
+        for p in pts:
+            if p:
+                cv2.circle(img, p, 3, (255, 200, 0), -1)
+    cv2.putText(img, "DEDEKTOR GOZU (kare<->tespit senkron)", (8, 18),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1, cv2.LINE_AA)
+    cv2.imshow("AVCI dedektor", img)
+    cv2.waitKey(1)                                           # pencere olay dongusu (1 ms)
 
 
 def dedektor_dongusu():
@@ -878,6 +928,13 @@ def dedektor_dongusu():
             _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle
+        # DEBUG PENCERESI: islenen karenin uzerine AYNI karenin ciktisi (senkron gosterim).
+        if DEBUG_PENCERE and cv2 is not None and bgr is not None:
+            try:
+                _debug_pencere_goster(bgr, det, det_beyin is not None,
+                                      poz_ui if poz_ui is not None else _son_poz_ui)
+            except Exception:
+                pass                                  # gosterim hatasi dedektoru ASLA durdurmaz
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
@@ -1148,9 +1205,13 @@ class Handler(BaseHTTPRequestHandler):
             # yas_s: tespitin bu yaniti urettigimiz andaki yasi (istemci lead-cizim yapar).
             with beyin_lock:
                 det = dict(_son_tespit_ui) if _son_tespit_ui is not None else None
-                poz = _son_poz_ui
+                poz = dict(_son_poz_ui) if _son_poz_ui is not None else None
             if det is not None and "t_det" in det:
                 det["yas_s"] = round(max(0.0, time.perf_counter() - det.pop("t_det")), 3)
+            if poz is not None and "t_poz" in poz:
+                # iskelet yas telafisi: poz seyrek (POZ_HER_N) -> bbox'tan da bayat;
+                # istemci kp'leri bbox hiziyla yas kadar ILERI kaydirir.
+                poz["yas_s"] = round(max(0.0, time.perf_counter() - poz.pop("t_poz")), 3)
             self._send(200, json.dumps({"tespit": det, "poz": poz}).encode("utf-8"),
                        "application/json")
         elif self.path == "/api/tune":
@@ -1363,6 +1424,8 @@ def main():
     print("  AVCI DRONE - YER KONTROL ISTASYONU calisiyor")
     print("  Tarayicida ac:  http://127.0.0.1:%d" % WEB_PORT)
     print("  Kapatmak icin:  Ctrl + C")
+    if DEBUG_PENCERE:
+        print("  DEBUG PENCERE: ACIK (dedektor gozu; gorev aktifken gorunur)")
     print("=" * 52)
     try:
         server.serve_forever()

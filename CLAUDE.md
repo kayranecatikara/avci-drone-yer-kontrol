@@ -210,8 +210,11 @@ SİLİNDİ (git geçmişinde). Yeni tek yasa: **`guidance/ibvs_gorsel.py` (AvciI
 - **Alt-FSM SİLİNDİ:** YAKLASMA/TAKIP/TERMINAL yok — tek davranış, hep ileri. Kilit isteri
   sayacı (5/10 sn pencere, `_kilit_degerlendir`) **SALT GÖZLEM** olarak yaşar: kırmızı dörtgen,
   ANGAJMAN çipi, olay günlüğü kanıtı üretir ama HİÇBİR komuta girmez.
-- **Kayıp yönetimi sade:** tespit yok → HOVER; `VIS_LOST_TO_GPS_S`(2 s) aşılırsa (yalnız OTO)
-  GPS'e revert. Kör-devam/yakın-yapışkanlık katmanları silindi.
+- **Kayıp yönetimi sade:** tespit yok → (OTO) `VIS_LOST_TO_GPS_S` kadar hover, sonra GPS'e
+  revert. **Default 0 = kayıpta ANINDA GPS (2026-07-08 kullanıcı isteği: ara hover beklemesi
+  kafa karıştırıyordu);** dedektör titremesini `VIS_STALE_S`(0.5 s) köprüsü emer → tek-kare
+  atlamalar revert tetiklemez. Manuel GÖRSEL switch'te revert yok (hep hover). Kör-devam/
+  yakın-yapışkanlık katmanları silindi.
 - **Telemetri:** `gudum.png`→`gudum.ibvs` {ex,ey,buyukluk,aci_deg,kisma,dikey,ileri,yaw};
   UI'da PN kartı→IBVS kartı, FPV'de merkez→bbox turuncu HATA ÇİZGİSİ (sapma+açı etiketi).
   Log: png_R_m/Vc/omega + vis_faz artık BOŞ; yeni `ibvs_r`/`ibvs_aci` kolonları.
@@ -276,6 +279,19 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
 - Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 14/14).
   Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
   tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
+
+## ARAYÜZ GECİKME TELAFİSİ + DEDEKTÖR DEBUG PENCERESİ (2026-07-08)
+Kullanıcı gözlemi: bbox/iskelet FPV'de hedefin GERİSİNDE kalıyor (pose daha da geç).
+Sebep: FPV = tarayıcı ekran paylaşımı (~0 ms), tespit = yakala+inference (~100-300 ms),
+poz ayrıca `POZ_HER_N=3` seyrek → yapısal olarak daha bayat. **GÜDÜM BUNDAN ETKİLENMEZ:**
+beyin tespiti inference biter bitmez `set_gorsel_tespit` ile alır (UI polling/çizim hattı
+güdüme girmez); poz da `IBVS_POZ_STALE_S` kapısıyla yalnız tazeyken yaw lead'e katkı verir.
+Düzeltmeler: (1) bbox'taki YAŞ TELAFİSİ (vx,vy ile ileri çizim) İSKELETE de uygulandı —
+`/api/gorsel` poz'a `yas_s` ekler (`t_poz` damgası `_normalize_poz`'da), index.html kp'leri
+bbox hızıyla poz yaşı kadar kaydırır (cap 500 ms). (2) `set AVCI_DEBUG_PENCERE=1` →
+server'da OpenCV "dedektör gözü" penceresi: işlenen karenin üzerine AYNI karenin
+tespit/poz çıktısı (kare↔çıktı %100 senkron; yeşil=güdüme giden, turuncu=zayıf/UI-only,
+kırmızı=pervane maskesi). Yalnız görev aktifken güncellenir; kapalıyken sıfır maliyet.
 
 ## TUNE RAPORU — "DEĞERLERİ YAZDIR" → EXCEL (2026-07-08)
 Tune panelindeki **Değerleri Yazdır** artık Cfg dökümüne EK olarak `/api/tune_rapor`'u
