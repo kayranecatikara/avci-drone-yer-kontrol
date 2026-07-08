@@ -842,24 +842,11 @@
       ctx.fillText("PERVANE (elenir)", mx+4, my+13);
       ctx.restore();
     }
-    ctx.strokeStyle=AK_YESIL; ctx.lineWidth=2; ctx.strokeRect(rc.x+1, rc.y+1, rc.w-2, rc.h-2);   // Ak
-    ctx.strokeStyle=AV_SARI;  ctx.lineWidth=2; ctx.strokeRect(avX0, avY0, avX1-avX0, avY1-avY0);  // Av
-    // pay ölçü çizgileri (kesikli, Şekil 2'deki oklar gibi)
-    ctx.setLineDash([4,4]); ctx.lineWidth=1; ctx.strokeStyle="rgba(255,205,25,.5)";
-    ctx.beginPath();
-    ctx.moveTo(rc.x,mcy);  ctx.lineTo(avX0,mcy);          // sol %25
-    ctx.moveTo(avX1,mcy);  ctx.lineTo(rc.x+rc.w,mcy);     // sağ %25
-    ctx.moveTo(mcx,rc.y);  ctx.lineTo(mcx,avY0);          // üst %10
-    ctx.moveTo(mcx,avY1);  ctx.lineTo(mcx,rc.y+rc.h);     // alt %10
-    ctx.stroke(); ctx.setLineDash([]);
-    halo("%25 yatay", (rc.x+avX0)/2, mcy-8, AV_SARI, "center");
-    halo("%25 yatay", (avX1+rc.x+rc.w)/2, mcy-8, AV_SARI, "center");
-    halo("%10 dikey", mcx, (rc.y+avY0)/2, AV_SARI, "center");
-    halo("%10 dikey", mcx, (avY1+rc.y+rc.h)/2, AV_SARI, "center");
-    halo("%100 yatay", mcx, rc.y+rc.h-10, AK_YESIL, "center");
-    halo("%100 dikey", rc.x+rc.w-8, mcy, AK_YESIL, "right");
-    halo("Ak: Kamera Görüş Alanı", rc.x+8, rc.y+rc.h-10, AK_YESIL, "left");
-    halo("Av: Hedef Vuruş Alanı", mcx, avY1-10, AV_SARI, "center");
+    ctx.strokeStyle=AK_YESIL; ctx.lineWidth=2; ctx.strokeRect(rc.x+1, rc.y+1, rc.w-2, rc.h-2);   // Ak (Kamera Görüş Alanı)
+    ctx.strokeStyle=AV_SARI;  ctx.lineWidth=2; ctx.strokeRect(avX0, avY0, avX1-avX0, avY1-avY0);  // Av (Hedef Vuruş Alanı)
+    // (FPV sadeliği için statik pay ölçü çizgileri + "%25 yatay / %10 dikey / %100 /
+    //  Ak: / Av:" metin etiketleri kaldırıldı — 2026-07-08 kullanıcı isteği. İki çerçeve
+    //  kalır; kilit KANITI zaten tespit edilen hedefin üzerindeki kırmızı dörtgen + kaplama %'si.)
     // (Eski VIS_EY_REF "HEDEF ÇİZGİSİ" + lookup DİKEY göstergesi basit-IBVS geçişinde
     //  kaldırıldı: dikey artık doğrudan merkez→bbox çizgisinin dikey bileşeninden sürülür.)
     // TESPİT: hızlı kanaldan (/api/gorsel, ~15 Hz) — 200ms telemetri döngüsünü beklemez.
