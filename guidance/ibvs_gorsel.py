@@ -23,6 +23,17 @@ yaklasma) — bunun icin ekstra kod GEREKMEZ, geometriden bedava gelir.
                                          (eski PN'de bank hedefi kadrajdan
                                           atip kamerayi yere ceviriyordu)
 
+KILIT-TUT — BOYUT-REGULELI ILERI ITKI (2026-07-08, Faz 2 sartname 6.1.2/6.1.4):
+Ileri kanal artik VURUS icin degil KILIT icin calisir: bbox eksen orani
+boyut = max(w/W, h/H) (kilit sayaci metrigiyle AYNI olcu) P-yasayla HEDEF'e surulur:
+    ileri = clamp(K_BOYUT * (BOYUT_HEDEF - boyut_f), -GERI_MAX, ILERI)
+Uzakta istek doygun -> ILERI tavaniyla yaklas (eski davranisla bit-ayni); hedef
+boyutta cruise dengesi (boyut_eq = HEDEF - ileri_eq/K >= kilit esigi %6) -> hedefin
+gerisinde ISTASYON TUT, 10 sn'de 5 sn kilit penceresi dolsun; fazla yakinsa hafif
+GERI kacis (hedef frenleyince ustune binme). K_BOYUT=0 -> regulasyon KAPALI (eski
+sabit-ileri yasa; canli A/B). Girdi yalniz bbox pikselleri -> GPS yasagina uygun.
+Terminal vurus AYRI faz olarak sonra eklenecek (kilit_ok sonrasi karar).
+
 ONGORULU (LEAD) YAW — POSE'DAN HEDEF ROLL (2026-07-07):
 Pose modeli (talon_pose.pt) hedefin 6 keypoint'ini verir. Hedefi ARKADAN takip
 ederken iki KANAT UCU pikselinden (kp[1]=sol, kp[2]=sag) goruntu-uzayi bank acisi
@@ -73,6 +84,7 @@ class AvciIBVS:
         """Gorev basi / kaynak degisimi / GPS'e donus: filtreyi taze basla."""
         self.ex_f = 0.0              # EMA yatay sapma (-1 sol .. +1 sag)
         self.ey_f = 0.0              # EMA dikey sapma (-1 ust .. +1 alt)
+        self.boyut_f = 0.0           # EMA bbox eksen orani max(w/W,h/H) — KILIT-TUT girdisi
         self._had = False            # ilk kare EMA'siz alinir
         self.roll_f = 0.0            # EMA hedef bank (EGO-TELAFILI roll, rad; pose kanat uclarindan)
         self._roll_had = False       # ilk gecerli roll EMA'siz alinir
@@ -128,12 +140,17 @@ class AvciIBVS:
         W = float(det["W"]); H = float(det["H"])
         ex = (float(det["cx"]) - W / 2.0) / (W / 2.0) if W > 1 else 0.0
         ey = (float(det["cy"]) - H / 2.0) / (H / 2.0) if H > 1 else 0.0
+        # bbox eksen orani — kilit sayaci metriginin (ana_kontrol._kilit_degerlendir)
+        # birebir aynisi; KILIT-TUT ileri kanali bunu HEDEF'e surer.
+        boyut = (max(float(det["w"]) / W, float(det["h"]) / H)
+                 if (W > 1 and H > 1) else 0.0)
         a = clamp(float(p.VIS_EMA), 0.0, 1.0)
         if self._had:
             self.ex_f = (1.0 - a) * self.ex_f + a * ex
             self.ey_f = (1.0 - a) * self.ey_f + a * ey
+            self.boyut_f = (1.0 - a) * self.boyut_f + a * boyut
         else:
-            self.ex_f, self.ey_f = ex, ey
+            self.ex_f, self.ey_f, self.boyut_f = ex, ey, boyut
             self._had = True
 
         # DIKEY NISAN (tilt-farkinda): kamera +TILT derece YUKARI baktigindan, hedefi kadraj
@@ -189,7 +206,20 @@ class AvciIBVS:
         # durma, biraz kapanis kalsin. Girdi yalniz goruntu buyuklugu (eyy) -> kural uygun.
         alcal = clamp(1.0 - float(getattr(p, "IBVS_ALCAL_FREN", 2.0)) * max(0.0, eyy),
                       float(getattr(p, "IBVS_ALCAL_TABAN", 0.2)), 1.0)
-        pitch = float(p.PITCH_SIGN) * clamp(float(p.IBVS_ILERI), 0.0, 1.0) * kisma * alcal
+        # KILIT-TUT (Faz 2): ileri kanal boyut-reguleli P-yasa. Uzakta istek doygun
+        # (tavan = IBVS_ILERI -> eski yaklasma hiziyla bit-ayni); hedef boyutta cruise
+        # dengesi (boyut_eq = HEDEF - ileri_eq/K); fazla yakinsa GERI kacis (tavan
+        # GERI_MAX). kisma/alcal YALNIZ ILERI yonu frenler: geri = kacis manevrasi,
+        # frenlenmez (kenardayken/yuksekken bile mesafe ACILABILMELI; GERI_MAX zaten
+        # kucuk tavan). K_BOYUT<=0 -> regulasyon KAPALI, eski sabit-ileri yasa (A/B).
+        ileri_cap = clamp(float(p.IBVS_ILERI), 0.0, 1.0)
+        kb = float(getattr(p, "IBVS_K_BOYUT", 0.0))
+        hedef_boyut = float(getattr(p, "IBVS_BOYUT_HEDEF", 0.09))
+        geri = max(0.0, float(getattr(p, "IBVS_GERI_MAX", 0.0)))
+        ileri_istek = (clamp(kb * (hedef_boyut - self.boyut_f), -geri, ileri_cap)
+                       if kb > 0.0 else ileri_cap)
+        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma * alcal
+                                       + min(ileri_istek, 0.0))
         roll = 0.0
 
         self._tlm = {
@@ -201,6 +231,11 @@ class AvciIBVS:
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)
             "kisma": round(kisma, 3),         # ileri itki carpani (1=tam gaz)
             "alcal": round(alcal, 3),         # alcalma freni carpani (1=serbest; eyy>0'da kisar)
+            # KILIT-TUT: EMA'li bbox eksen orani + hedefi + regulator istegi
+            # (istek tavanda = yaklasiyor, bantta = tutuyor, -geri'de = kacisiyor)
+            "boyut": round(self.boyut_f, 4),
+            "boyut_hedef": round(hedef_boyut, 3),
+            "ileri_istek": round(ileri_istek, 3),
             "dikey": round(thr, 3), "ileri": round(pitch, 3), "yaw": round(yaw, 3),
             # ONGORU (pose kanat uclarindan hedef bank -> yaw lead)
             "roll_deg": round(math.degrees(self.roll_f), 1),  # hedef bank (EGO-TELAFILI, EMA'li)

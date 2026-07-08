@@ -47,9 +47,10 @@ def _ey_ref(p=Cfg):
             / math.tan(math.radians(float(p.IBVS_VFOV_HALF_DEG))))
 
 
-def _tek(cxn, cyn, p=CFG0):
-    """Tek kare besle (ilk kare EMA'siz). Varsayilan CFG0 (nisan=merkez) -> cekirdek yasa."""
-    return AvciIBVS().hesapla(_det(cxn=cxn, cyn=cyn), p)
+def _tek(cxn, cyn, p=CFG0, wp=0.08, hp=0.04):
+    """Tek kare besle (ilk kare EMA'siz). Varsayilan CFG0 (nisan=merkez) -> cekirdek yasa.
+    wp/hp: bbox oranlari — KILIT-TUT boyut yasasini etkiler (kucuk=uzak=istek doygun)."""
+    return AvciIBVS().hesapla(_det(cxn=cxn, cyn=cyn, wp=wp, hp=hp), p)
 
 
 class _CfgVar:
@@ -76,12 +77,13 @@ def test_yon_eslemesi():
 
 
 def test_nisanda_tam_ileri():
-    """Hedef NISAN noktasinda (ex=0, ey=ey_ref) -> yaw~0, thr~0, tam ileri (r=0)."""
+    """UZAK hedef NISAN noktasinda (ex=0, ey=ey_ref) -> yaw~0, thr~0, tam ileri TAVAN
+    (r=0; kucuk bbox -> boyut istegi doygun -> pitch = ILERI)."""
     ey_ref = _ey_ref(Cfg)
     cyn = 0.5 + ey_ref / 2.0                       # ey = ey_ref
-    thr, pitch, roll, yaw = _tek(0.5, cyn, p=Cfg)
+    thr, pitch, roll, yaw = _tek(0.5, cyn, p=Cfg, wp=0.02, hp=0.01)
     assert abs(yaw) < 1e-9 and abs(thr) < 2e-3, "nisan noktasinda yaw~0 thr~0"
-    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6, "nisanda ileri itki tam (kisma=1)"
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6, "uzakta ileri itki TAVAN (kisma=1)"
 
 
 def test_dikey_nisan_tilt_farkinda():
@@ -129,18 +131,19 @@ def test_nisan_clamp_negatif():
 
 def test_alcalma_freni_ustteyken_ileriyi_kisar():
     """Hedef nisanin ALTINDA (eyy>0 = fazla yuksekteyiz) -> ileri itki carpimsal kisilir
-    (lift carry kirilir), thr<0. MERKEZ_FREN=0 ile carpan birebir dogrulanir."""
+    (lift carry kirilir), thr<0. MERKEZ_FREN=0 + UZAK bbox (istek doygun=TAVAN) ile
+    carpan birebir dogrulanir."""
     p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
     g = AvciIBVS()
-    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.65), p)     # ey=eyy=+0.3
+    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.65, wp=0.02, hp=0.01), p)  # ey=eyy=+0.3
     beklenen = Cfg.PITCH_SIGN * Cfg.IBVS_ILERI * (1.0 - 2.0 * 0.3)
     assert abs(pitch - beklenen) < 1e-6, "pitch=ILERI*alcal bekleniyordu: %.3f vs %.3f" % (pitch, beklenen)
     assert thr < 0
     assert abs(g.durum()["alcal"] - 0.4) < 1e-3
     # fren buyudukce pitch kuculur (ayni sapmada)
     _, pitch_sert, _, _ = AvciIBVS().hesapla(
-        _det(cxn=0.5, cyn=0.65), _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0,
-                                         IBVS_ALCAL_FREN=3.0))
+        _det(cxn=0.5, cyn=0.65, wp=0.02, hp=0.01),
+        _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=3.0))
     assert abs(pitch_sert) < abs(pitch)
 
 
@@ -148,7 +151,7 @@ def test_alcalma_freni_tirmanista_dokunmaz():
     """Hedef nisanin USTUNDE (eyy<0 = alttayiz, tirman) -> alcal=1, ileri itki etkilenmez."""
     p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
     g = AvciIBVS()
-    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.35), p)     # ey=eyy=-0.3
+    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.35, wp=0.02, hp=0.01), p)  # ey=eyy=-0.3
     assert g.durum()["alcal"] == 1.0, "tirmanista alcal=1 bekleniyordu"
     assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6
     assert thr > 0
@@ -158,9 +161,77 @@ def test_alcalma_taban():
     """Buyuk sapmada fren TABANA oturur (asla tam durma; biraz kapanis kalir)."""
     p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
     g = AvciIBVS()
-    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.95), p)       # eyy=+0.9 -> 1-1.8 < taban
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.95, wp=0.02, hp=0.01), p)  # eyy=+0.9
     assert abs(g.durum()["alcal"] - float(Cfg.IBVS_ALCAL_TABAN)) < 1e-6
     assert abs(pitch) > 0, "tabanda bile ileri itki tam SIFIRLANMAZ"
+
+
+# ---------------------------------------------------------------------------
+#  KILIT-TUT: boyut-reguleli ileri itki (Faz 2, sartname 6.1.2/6.1.4)
+# ---------------------------------------------------------------------------
+def test_boyut_uzakta_tavan():
+    """Uzak hedef (boyut %2) -> istek doygun -> pitch = ILERI TAVAN (eski yaklasma hizi)."""
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.02, hp=0.01), CFG0)
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6
+    assert g.durum()["ileri_istek"] == round(float(Cfg.IBVS_ILERI), 3), "istek tavanda olmali"
+
+
+def test_boyut_hedefte_dur():
+    """boyut == BOYUT_HEDEF -> ileri istek 0 (istasyon tut; hata sifir)."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_BOYUT_HEDEF=0.08)
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.08, hp=0.04), p)
+    assert abs(pitch) < 1e-9, "hedef boyutta pitch=0 bekleniyordu: %.4f" % pitch
+    assert g.durum()["boyut"] == 0.08
+
+
+def test_boyut_fazla_yakin_geri_tavanli():
+    """boyut >> hedef -> GERI itki (kacis), tavani GERI_MAX; kenarda/yuksekte bile
+    AYNI geri (kisma/alcal GERI'yi FRENLEMEZ — kacis manevrasi); GERI_MAX=0 -> geri yok."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0)
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.30, hp=0.15), p)
+    assert abs(pitch - (-Cfg.PITCH_SIGN * Cfg.IBVS_GERI_MAX)) < 1e-6, \
+        "geri kacis -GERI_MAX bekleniyordu: %.3f" % pitch
+    # kenarda + fazla yuksekte (kisma~0, alcal<1) -> geri AYNI kalmali
+    g2 = AvciIBVS()
+    _, pitch2, _, _ = g2.hesapla(_det(cxn=0.95, cyn=0.95, wp=0.30, hp=0.15), p)
+    assert abs(pitch2 - pitch) < 1e-6, "geri komut frenlenmemeli: %.3f vs %.3f" % (pitch2, pitch)
+    # geri kapatilabilir
+    g3 = AvciIBVS()
+    _, pitch3, _, _ = g3.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.30, hp=0.15),
+                                 _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_GERI_MAX=0.0))
+    assert pitch3 == 0.0, "GERI_MAX=0 -> asla geri: %.3f" % pitch3
+
+
+def test_boyut_k0_eski_sabit_ileri():
+    """IBVS_K_BOYUT=0 -> regulasyon KAPALI: dev bbox'ta bile eski sabit-ileri yasa."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_K_BOYUT=0.0)
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.30, hp=0.15), p)
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6, "K=0 eski yasa: %.3f" % pitch
+
+
+def test_boyut_ema_ve_sifirla():
+    """boyut ex/ey ile ayni EMA'dan gecer; sifirla() taze baslatir."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0)
+    g = AvciIBVS()
+    g.hesapla(_det(wp=0.02, hp=0.01), p)
+    assert g.boyut_f == 0.02, "ilk kare EMA'siz alinmali"
+    g.hesapla(_det(wp=0.10, hp=0.05), p)
+    assert 0.02 < g.boyut_f < 0.10, "ikinci kare EMA'li olmali: %.3f" % g.boyut_f
+    g.sifirla()
+    assert g.boyut_f == 0.0
+
+
+def test_boyut_telemetri():
+    """durum() kilit-tut alanlarini tasir: boyut / boyut_hedef / ileri_istek."""
+    g = AvciIBVS()
+    g.hesapla(_det(wp=0.08, hp=0.04), Cfg)
+    d = g.durum()
+    assert d["boyut"] == 0.08 and d["boyut_hedef"] == round(float(Cfg.IBVS_BOYUT_HEDEF), 3)
+    assert "ileri_istek" in d
 
 
 def test_ego_pitch_telafi():

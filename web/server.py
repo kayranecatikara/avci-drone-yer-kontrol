@@ -284,7 +284,10 @@ gorev_aktif = False
 #  yasayla birlikte SILINDI. Yapisal sabitler (isaretler, FSM zamanlamalari, GPS PD)
 #  Cfg'de sabit (gerekirse ana_kontrol.py'den duzenle). Yeni slider = TUNE_DEFS ile ES.
 TUNE_ALLOW = {
-    "IBVS_ILERI",        # sabit ileri itki — yaklasma hizinin ana knob'u
+    "IBVS_ILERI",        # ileri itki TAVANI — yaklasma hizi siniri (boyut yasasi asamaz)
+    "IBVS_BOYUT_HEDEF",  # kilit-tut: bbox eksen orani hedefi (kilit esiginin ustunde tut)
+    "IBVS_K_BOYUT",      # kilit-tut: boyut hatasi -> ileri kazanci (0=KAPALI/eski yasa)
+    "IBVS_GERI_MAX",     # kilit-tut: fazla yakinken geri itki tavani (0=asla geri)
     "IBVS_K_YAW",        # yatay kazanc (cizginin yatay bileseni -> yaw)
     "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
     "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)

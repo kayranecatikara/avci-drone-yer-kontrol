@@ -8,8 +8,13 @@
 
 | Belirti (videoda/logda gördüğün) | Knob | Yön | Etki |
 |---|---|---|---|
-| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızının ana knob'u) | ★★★ |
-| Hedefe sert dalıp **ıskalıyor / kilit penceresi dolmadan varıyor** | `IBVS_ILERI` | **DÜŞÜR** | ★★★ |
+| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızı TAVANI) | ★★★ |
+| Hedefe sert dalıp **ıskalıyor / kilit penceresi dolmadan varıyor** | `IBVS_ILERI` | **DÜŞÜR** (tavan) | ★★★ |
+| **KİLİT-TUT: çok uzakta duruyor, kilit saymıyor** (boyut < %6 platosu) | `IBVS_BOYUT_HEDEF` | **ARTIR** (0.10-0.12); yetmezse `IBVS_K_BOYUT` ARTIR | ★★★ |
+| **KİLİT-TUT: fazla sokuluyor / vuracak gibi** | `IBVS_BOYUT_HEDEF` | **DÜŞÜR** | ★★★ |
+| **Mesafede sörf** (ileri-geri salınım, boyut inip çıkıyor) | `IBVS_K_BOYUT` | **DÜŞÜR** (sonra `VIS_EMA` DÜŞÜR) | ★★ |
+| Hedef **frenleyince üstüne biniyor** | `IBVS_GERI_MAX` | **ARTIR** (geri kaçış tavanı; 0=asla geri) | ★★ |
+| Boyut yasasından **şüphe** (eski davranışla kıyas) | `IBVS_K_BOYUT` | **0 = KAPALI** → eski sabit-ileri yasa (Segment Kıyas A/B) | — |
 | Hedef **yatayda** (sağ/sol kenar) kaçıyor | `IBVS_K_YAW` | **ARTIR**; hâlâ yetmiyorsa `YAW_MAX` ARTIR | ★★★ |
 | **Yatay salınım** (sağa-sola sarkaç) | `IBVS_K_YAW` | **DÜŞÜR** (önce), sonra `VIS_EMA` DÜŞÜR | ★★ |
 | Hedef **üst/alt kenardan** kaçıyor | `IBVS_K_DIKEY` | **ARTIR** | ★★★ |

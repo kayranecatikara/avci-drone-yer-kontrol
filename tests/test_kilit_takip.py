@@ -254,6 +254,17 @@ def test_kopru_hiz_yoksa_ve_fazdisi_kapali():
     assert b2._gorsel_tespit_oku() is None, "ARAMA'da kopru olmamali"
 
 
+def test_kopru_boyut_donuk():
+    """Koprude w/h DONUK -> boyut istegi son gercek olcumde kalir; ileri surer, thr=0."""
+    b = _kopru_beyin(Cfg.VIS_STALE_S + 0.3)
+    d = b._gorsel_tespit_oku()
+    assert d is not None and d.get("kopru")
+    r = b._gorsel_guduum(d, 0.0)
+    assert b.ibvs_tlm.get("boyut") == 0.08, "koprude boyut donuk kalmali: %s" % b.ibvs_tlm.get("boyut")
+    assert r[1] > 0, "boyut<hedef -> koprude ileri surmeli (yatay takip): %s" % (r,)
+    assert r[0] == 0.0, "koprude dikey-tut (thr=0)"
+
+
 def test_kopru_hiz_ema_gercek_tespitten():
     """set_gorsel_tespit ardisik GERCEK tespitlerden hiz cikarir (isaret dogru);
     uzun delik sonrasi ilk tespit hizi SIFIRLAR (bayat hizla kopru kurulmaz)."""

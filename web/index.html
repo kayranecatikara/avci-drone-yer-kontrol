@@ -538,6 +538,7 @@
           <div class="row"><span class="k">Çizgi açısı</span><span class="v mono" id="ibvsAci">—</span></div>
           <div class="row"><span class="k">Yatay / dikey (ex·ey)</span><span class="v mono" id="ibvsExEy">—</span></div>
           <div class="row"><span class="k">İleri itki (kısma)</span><span class="v mono" id="ibvsIleri">—</span></div>
+          <div class="row"><span class="k">📏 Bbox boyutu / hedef</span><span class="v mono" id="ibvsBoyut">—</span></div>
           <div class="row"><span class="k">🎯 Dikey nişan (ey_ref)</span><span class="v mono" id="ibvsNisan">—</span></div>
           <div class="row"><span class="k">Yaw / gaz komutu</span><span class="v mono" id="ibvsCmd">—</span></div>
           <div class="row"><span class="k">🛩️ Hedef bank (roll)</span><span class="v mono" id="ibvsRoll">—</span></div>
@@ -705,7 +706,10 @@
   // Eski PN slider yığını yasayla birlikte silindi. Sıra = ayarlama sırası.
   const TUNE_DEFS = [
     ["GÖRSEL GÜDÜM · BASİT IBVS (sırayla dene)", [
-      ["IBVS_ILERI","★★★ İleri itki   (yaklaşma hızının ana knob'u; ıskalıyor/sert giriyorsa DÜŞÜR)",0,1.0,0.025],
+      ["IBVS_ILERI","★★★ İleri TAVAN   (yaklaşma hızı sınırı — boyut yasası bunu aşamaz; sert giriyorsa DÜŞÜR)",0,1.0,0.025],
+      ["IBVS_BOYUT_HEDEF","★★★ Boyut hedefi (KİLİT-TUT)   (bbox max ekseni bu orana sürülür; kilit eşiği %6'nın ÜSTÜNDE tut — uzak tutuyorsa ARTIR, fazla sokuluyorsa DÜŞÜR)",0.06,0.20,0.005],
+      ["IBVS_K_BOYUT","★★★ Boyut kazancı   (mesafe tutma sertliği; ileri komut sörf yapıyorsa DÜŞÜR; 0=KAPALI→eski sabit-ileri yasa)",0,40,1],
+      ["IBVS_GERI_MAX","★★ Geri kaçış tavanı   (fazla yakınken geri itki sınırı; hedef frenleyince üstüne biniyorsa ARTIR; 0=asla geri)",0,0.40,0.025],
       ["IBVS_K_YAW","★★★ Yatay kazanç   (hedef sağ/sol kenarda kalıyorsa ARTIR; yatay salınım varsa DÜŞÜR)",0,2.0,0.05],
       ["IBVS_K_DIKEY","★★★ Dikey kazanç   (hedef üst/alt kenardan kaçıyorsa ARTIR; dikey salınım varsa DÜŞÜR)",0,3.0,0.05],
       ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (−0.3=ALTTAN VUR: hedefi merkez ÜSTÜNDE tut, araç altta+gökyüzü · 0=merkez · 1=HIZ VEKTÖRÜNÜ hedefe nişanla)",-0.8,1.2,0.05],
@@ -1188,7 +1192,16 @@
     $("ibvsExEy").textContent = (ib.ex!=null && ib.ey!=null)
       ? (Number(ib.ex).toFixed(2)+" · "+Number(ib.ey).toFixed(2)) : "—";
     $("ibvsIleri").innerHTML = ib.ileri!=null
-      ? Number(ib.ileri).toFixed(2)+' <small>×'+(ib.kisma!=null?Number(ib.kisma).toFixed(2):"1.00")+' kısma</small>' : "—";
+      ? Number(ib.ileri).toFixed(2)+' <small>×'+(ib.kisma!=null?Number(ib.kisma).toFixed(2):"1.00")+' kısma'
+        +(ib.ileri_istek!=null?' · istek '+Number(ib.ileri_istek).toFixed(2):'')+'</small>' : "—";
+    // KİLİT-TUT: bbox boyutu hedefe sürülür (yeşil=hedefte/üstünde, turuncu=fazla yakın→geri)
+    if(ib.boyut!=null){
+      const bh=(ib.boyut_hedef!=null?Number(ib.boyut_hedef):0.09);
+      const renk = ib.boyut>1.5*bh ? "var(--warn,#ffb01f)" : (ib.boyut>=bh ? "var(--accent2)" : "inherit");
+      $("ibvsBoyut").innerHTML = '<span style="color:'+renk+'">%'+(100*ib.boyut).toFixed(1)+'</span>'
+        +' <small>/ hedef %'+(100*bh).toFixed(1)
+        +(ib.boyut>1.5*bh?' · GERİ kaçış':(ib.boyut>=bh?' · TUTUYOR':' · yaklaşıyor'))+'</small>';
+    } else $("ibvsBoyut").textContent = "—";
     $("ibvsNisan").innerHTML = (ib.ey_ref!=null)
       ? Number(ib.ey_ref).toFixed(2)+' <small>'+(Math.abs(ib.ey_ref)<0.02?"merkez (altta kal)"
           :(ib.ey_ref<0?"ALTTAN VUR (araç altta)":"hız vektörü (çarpışma)"))+'</small>'

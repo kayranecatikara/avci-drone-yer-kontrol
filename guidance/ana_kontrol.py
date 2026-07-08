@@ -93,6 +93,9 @@ _LOG_COLS = [
     # EGO-PITCH TELAFISI (2026-07-08): yasanin kullandigi ego-telafili dikey hata
     # (vis_ey ham kalir; ikisinin farki = telafinin o tik sildigi kirlilik).
     "ibvs_eyego",
+    # KILIT-TUT (2026-07-08 Faz 2): EMA'li bbox eksen orani (ileri kanal bunu
+    # BOYUT_HEDEF'e surer; kilit esigi VIS_LOCK_PCT ile ayni olcu).
+    "ibvs_boyut",
 ]
 
 
@@ -297,7 +300,20 @@ class Cfg:
                                 # 0.65 yetersiz kaldi — episod kiyasi r_ort medyan ~0.21).
     IBVS_SIGN_DIKEY  = +1.0     # hedef YUKARIDA (ey<0) -> TIRMAN (thr>0; GPS faziyla ayni kanon).
                                 # SIM'de dikey TERS tepki gorursen -1 yap (tek isaret, tek yer).
-    IBVS_ILERI       = 0.45     # sabit ileri itki komutu (0..1; pitch kanali) ⚙
+    IBVS_ILERI       = 0.45     # ileri itki TAVANI (0..1; boyut yasasi bunu asamaz) ⚙
+    # --- KILIT-TUT / BOYUT REGULASYONU (2026-07-08, Faz 2 sartname 6.1.2/6.1.4) ---
+    # VURUS degil MESAFE TUTMA: bbox eksen orani (max(w/W,h/H) — kilit sayaci metriğiyle
+    # AYNI olcu) HEDEF'e P-yasayla surulur:
+    #   ileri = clamp(K_BOYUT*(BOYUT_HEDEF - boyut_f), -GERI_MAX, IBVS_ILERI)
+    # Uzakta istek doygun -> tavan hiziyla yaklas (eski davranis); hedef boyutta cruise
+    # dengesi boyut_eq = HEDEF - ileri_eq/K (0.09 - 0.25/15 ~ 0.073 >= VIS_LOCK_PCT) ->
+    # hedefin gerisinde istasyon tut, kilit penceresi dolsun; fazla yakinsa GERI kacis.
+    # K_BOYUT=0 -> regulasyon KAPALI = eski sabit-ileri yasa (canli A/B + kacis kapisi).
+    # Girdi yalniz bbox pikselleri -> gorsel-faz GPS yasagina uygun. Terminal vurus AYRI
+    # faz olarak sonra (kilit_ok sonrasi karar; o zaman NISAN/ILERI ayri banda gecer).
+    IBVS_BOYUT_HEDEF = 0.09     # bbox eksen orani hedefi (>= VIS_LOCK_PCT 0.06 + marj) ⚙
+    IBVS_K_BOYUT     = 15.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
+    IBVS_GERI_MAX    = 0.15     # fazla yakinken geri itki tavani (0=asla geri gitme) ⚙
     IBVS_MERKEZ_FREN = 1.4      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
                                 # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙
                                 # 1.0->1.4 (8 Tem ucus_2: fren artisi sonrasi episodlar oturakli).
@@ -876,6 +892,7 @@ class AvciKontrol:
             # alttan-vurus teshisi: dikey nisan + alcalma freni carpani (tune analizi)
             d["ibvs_eyref"] = it.get("ey_ref"); d["ibvs_alcal"] = it.get("alcal")
             d["ibvs_eyego"] = it.get("ey_ego")    # ego-pitch telafili dikey (yasa girdisi)
+            d["ibvs_boyut"] = it.get("boyut")     # kilit-tut: EMA'li bbox eksen orani
         self._log("VISUAL", d)
 
     # ----------------------------------------------------------------

@@ -240,6 +240,32 @@ karşılığı YOKTU → irtifa mandallanıyordu. Çözüm (ikisi de SALT görü
   log kolonu `ibvs_eyego` (vis_ey ham kalır; fark = silinen kirlilik). Testler:
   `test_ego_pitch_telafi`, `test_ego_pitch_yokken_eski_davranis` (21/21) + köprü testleri (16/16).
 
+## ⭐ KİLİT-TUT — BOYUT-REGÜLELİ İLERİ İTKİ (2026-07-08, Faz 2 / şartname 6.1.2+6.1.4)
+Kullanıcı kararı: GPS fazı (Faz 1) tamam; sıradaki iş VURUŞ DEĞİL **kilitlenme**. Eski yasa
+sabit ileri itkiyle sürekli kapanıyordu (vuruşa gidiyordu). Yeni ileri kanal, bbox eksen
+oranını (boyut = max(w/W, h/H) — **kilit sayacı metriğiyle AYNI ölçü**) hedefe süren P-yasa:
+`ileri = clamp(IBVS_K_BOYUT·(IBVS_BOYUT_HEDEF − boyut_f), −IBVS_GERI_MAX, IBVS_ILERI)`.
+- **Uzakta** istek doygun → `IBVS_ILERI` **TAVANIYLA** yaklaş (eski davranışla bit-aynı) —
+  "%5 olana kadar yaklaş" isteri kendiliğinden.
+- **Hedef boyutta** cruise dengesi: `boyut_eq = HEDEF − ileri_eq/K` (0.09 − 0.25/15 ≈ 0.073 ≥
+  kilit eşiği 0.06) → hedefin gerisinde **istasyon tut**, 10 sn'de 5 sn pencere dolar.
+- **Fazla yakınsa** hafif **GERİ kaçış** (tavan `IBVS_GERI_MAX=0.15`; kullanıcı onayı) —
+  hedef frenleyince üstüne binme. **kisma/alcal YALNIZ ileri yönü frenler** (geri = kaçış
+  manevrası; kenardayken/yüksekken bile mesafe açılabilmeli).
+- **`IBVS_K_BOYUT=0` = regülasyon KAPALI** → eski sabit-ileri yasa (canlı A/B + kaçış kapısı;
+  Segment Kıyas'ta tek uçuşta kıyaslanır).
+- boyut ex/ey ile aynı `VIS_EMA`'dan geçer (`boyut_f`, sifirla'da temiz). Girdi yalnız bbox
+  pikselleri → GPS yasağına uygun; `hesapla` imzası DEĞİŞMEDİ (`test_gps_siz_imza` dokunulmadan).
+- Cfg: `IBVS_BOYUT_HEDEF=0.09⚙` (slider 0.06-0.20), `IBVS_K_BOYUT=15⚙` (0-40),
+  `IBVS_GERI_MAX=0.15⚙` (0-0.40); `IBVS_ILERI` artık **TAVAN** (etiket güncellendi).
+- Telemetri `gudum.ibvs.boyut/boyut_hedef/ileri_istek`; UI IBVS kartında "📏 Bbox boyutu /
+  hedef" satırı (TUTUYOR/yaklaşıyor/GERİ kaçış); log kolonu `ibvs_boyut`. Köprüde w/h donuk →
+  istek donuk (thr zaten 0). Kilit sayacı/AV/pencere aritmetiğine DOKUNULMADI (salt gözlem).
+- Testler: `tests/test_ibvs_gorsel.py` 27/27 (6 yeni boyut testi + 3 uyarlama: uzak-det ile
+  doygunluk korunur), `tests/test_kilit_takip.py` 17/17 (`test_kopru_boyut_donuk`).
+- **Terminal vuruş SONRAKİ faz:** kilit_ok sonrası bilinçli angajman kararıyla ayrı banda
+  geçilecek (NISAN→1, boyut regülasyonu kapat/İLERİ tam) — şimdilik YOK.
+
 ## ⭐ GÖRÜNTÜ-DÜZLEMİ KÖPRÜ / ÖLÜ-HESAP (2026-07-08, kullanıcı onayı)
 İki tune uçuşunun verisi netti: güdüm parametreleri işini yapıyor (en iyi episodlarda
 r=0.07-0.2) ama **dedektör 15-40 m'de düzenli 0.5+ sn delik açıyor** → görsel episodlar
@@ -340,9 +366,11 @@ FPV'de maske pervaneyi tam örtmüyorsa `PROP_MASKE`'yi düzenle (sol-üstte zay
   → İLK ADIM ATILDI: poz kestirimi gözlemci modda entegre (üstteki bölüm). Sıradaki karar:
   poz çıktısı güdüme girsin mi (kamera-mesafeli angajman / hedef-yaw lead)?
 - **Otonom angajman/vuruş (İster 9/10):** `Cfg.AUTO_VISUAL_HANDOFF=True` AÇIK — OTO uçuşta
-  yakınlık+YOLO kilidiyle görsel faza otonom geçiyor; terminal vuruş kamera verisiyle basit
-  IBVS yasasında (`guidance/ibvs_gorsel.py` — hedefi merkezde tutup ileri uç). Kalan iş:
-  CANLI TUNE (aşağıdaki madde) — IBVS_ILERI + K_YAW/K_DIKEY ile hedefi merkezde tutup vuruşa götür.
+  yakınlık+YOLO kilidiyle görsel faza otonom geçiyor. **2026-07-08 Faz-2 kararı: görsel yasa
+  şimdilik KİLİT-TUT modunda** (boyut-regüleli ileri; yukarıdaki bölüm) — hedefi AV içinde ve
+  bbox ≥%6'da tutup kilit penceresini doldurur, VURMAZ. Kalan iş: kilit isteri canlıda
+  doğrulanınca TERMİNAL VURUŞ fazı (kilit_ok sonrası bilinçli angajman kararı: NISAN→1,
+  boyut regülasyonu kapat/İLERİ tam; şartname 6.1.3 kanıt zinciriyle).
 - **⭐ CANLI TUNE + İŞARET DOĞRULAMA (basit IBVS — SIRADAKİ İLK İŞ):** yeni yasa sim'de
   33 birim testten geçti ama CANLI davranışı hiç görülmedi. İlk uçuşta: (1) yaw/dikey İŞARET
   doğrula (ters ise `IBVS_SIGN_YAW`/`IBVS_SIGN_DIKEY`=-1, Cfg'den); (2) `IBVS_ILERI` ile yaklaşma

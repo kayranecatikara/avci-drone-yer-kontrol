@@ -84,7 +84,11 @@ r     = hypot(ex, eyy)                                (nişandan sapma; 0 = hede
 lead  = IBVS_SIGN_ROLL · IBVS_K_ROLL_LEAD · roll_f    (pose kanat uçlarından; kapı düşük→0)
 yaw   = IBVS_SIGN_YAW  · IBVS_K_YAW  · ex  + lead      (clamp ±YAW_MAX)
 thr   = IBVS_SIGN_DIKEY· IBVS_K_DIKEY· (−eyy) (clamp THR_DN..THR_UP; hedefi ey_ref'e sürer)
-pitch = PITCH_SIGN · IBVS_ILERI · max(0, 1 − IBVS_MERKEZ_FREN·r)
+boyut = max(w/W, h/H)  (EMA'lı; kilit sayacı metriğiyle AYNI ölçü)
+istek = clamp(IBVS_K_BOYUT·(IBVS_BOYUT_HEDEF − boyut_f), −IBVS_GERI_MAX, IBVS_ILERI)
+pitch = PITCH_SIGN · ( max(istek,0) · kisma · alcal  +  min(istek,0) )
+        (KİLİT-TUT: uzakta doygun=TAVAN yaklaş; hedef boyutta istasyon tut;
+         fazla yakınsa GERİ kaçış — geri FRENLENMEZ; K_BOYUT=0 → eski sabit-ileri)
 roll  = 0   (bank YOK — çerçeveleme yaw'ın işi; eski PN'de bank hedefi
              kadrajdan atıp kamerayı yere çeviriyordu)
 ```
@@ -133,8 +137,13 @@ karşılığı yok artık)
 VIS_N_LOCK, VIS_STALE_S, VIS_LOST_TO_GPS_S⚙, VIS_EMA⚙`
 
 **[GÖRSEL — BASİT IBVS]** `IBVS_K_YAW⚙, IBVS_SIGN_YAW, IBVS_K_DIKEY⚙,
-IBVS_SIGN_DIKEY, IBVS_ILERI⚙, IBVS_MERKEZ_FREN⚙, IBVS_DIKEY_NISAN⚙ (0=merkez/altta-kal,
-1=hız-vektörü nişan), IBVS_TILT_DEG=25, IBVS_VFOV_HALF_DEG=47.2`
+IBVS_SIGN_DIKEY, IBVS_ILERI⚙ (ileri TAVAN), IBVS_MERKEZ_FREN⚙, IBVS_DIKEY_NISAN⚙
+(−=alttan vur/hedef merkez üstünde, 0=merkez, 1=hız-vektörü nişan), IBVS_TILT_DEG=25,
+IBVS_VFOV_HALF_DEG=47.2, IBVS_ALCAL_FREN⚙/IBVS_ALCAL_TABAN (alçalma freni),
+IBVS_EGO_PITCH_GAIN (ego-pitch telafisi)`
+
+**[GÖRSEL — KİLİT-TUT (Faz 2)]** `IBVS_BOYUT_HEDEF⚙ (0.09; bbox eksen oranı hedefi),
+IBVS_K_BOYUT⚙ (15; 0=KAPALI→eski sabit-ileri yasa), IBVS_GERI_MAX⚙ (0.15; geri kaçış tavanı)`
 
 **[GÖRSEL — ÖNGÖRÜLÜ YAW LEAD (pose hedef roll)]** `IBVS_K_ROLL_LEAD⚙, IBVS_SIGN_ROLL=−1
 (veriyle), IBVS_ROLL_CONF_MIN⚙, IBVS_ROLL_EMA, IBVS_ASPECT_MIN, IBVS_POZ_STALE_S,
@@ -155,10 +164,10 @@ dönüyorsa `IBVS_SIGN_YAW=-1`, dikey ters tepkiyse `IBVS_SIGN_DIKEY=-1`
 
 ## 7) Bilinen gerilimler / dikkat noktaları
 
-- **Kilit isteri vs sürekli kapanma:** IBVS hep ileri uçar; 5/10 sn kilit
-  penceresi dolmadan hedefe varılabilir. Şartname akışını videoda göstermek
-  için `IBVS_ILERI`'yi pencere dolacak kadar yavaş tut (veya handoff'u uzaktan
-  başlat). Eski "TAKIP menzil tutma" katmanı bilinçli silindi — gerekirse git'te.
+- **Kilit isteri vs sürekli kapanma: ÇÖZÜLDÜ (2026-07-08 KİLİT-TUT).** İleri kanal
+  artık boyut-regüleli: uzakta tavan hızla yaklaşır, `IBVS_BOYUT_HEDEF`'te istasyon
+  tutar (pencere dolar), fazla yakında geri kaçar. Eski davranış `IBVS_K_BOYUT=0` ile
+  geri gelir. Terminal vuruş ayrı faz olarak eklenecek (kilit_ok sonrası karar).
 - **`APPROACH_ALT_OFFSET` + `LOOKUP_ELEV_DEG`** yalnız GPS dikey nişanını şekillendirir
   (handoff'ta araç hedefin altında başlar). Görsel fazda dikey tamamen `ey`'den.
 - **Fren/speed_cap** görsel faza karışmaz ama handoff HIZINI belirler.
