@@ -133,8 +133,11 @@ SİLİNDİ (git geçmişinde). Yeni tek yasa: **`guidance/ibvs_gorsel.py` (AvciI
 - **Alt-FSM SİLİNDİ:** YAKLASMA/TAKIP/TERMINAL yok — tek davranış, hep ileri. Kilit isteri
   sayacı (5/10 sn pencere, `_kilit_degerlendir`) **SALT GÖZLEM** olarak yaşar: kırmızı dörtgen,
   ANGAJMAN çipi, olay günlüğü kanıtı üretir ama HİÇBİR komuta girmez.
-- **Kayıp yönetimi sade:** tespit yok → HOVER; `VIS_LOST_TO_GPS_S`(2 s) aşılırsa (yalnız OTO)
-  GPS'e revert. Kör-devam/yakın-yapışkanlık katmanları silindi.
+- **Kayıp yönetimi sade:** tespit yok → (OTO) `VIS_LOST_TO_GPS_S` kadar hover, sonra GPS'e
+  revert. **Default 0 = kayıpta ANINDA GPS (2026-07-08 kullanıcı isteği: ara hover beklemesi
+  kafa karıştırıyordu);** dedektör titremesini `VIS_STALE_S`(0.5 s) köprüsü emer → tek-kare
+  atlamalar revert tetiklemez. Manuel GÖRSEL switch'te revert yok (hep hover). Kör-devam/
+  yakın-yapışkanlık katmanları silindi.
 - **Telemetri:** `gudum.png`→`gudum.ibvs` {ex,ey,buyukluk,aci_deg,kisma,dikey,ileri,yaw};
   UI'da PN kartı→IBVS kartı, FPV'de merkez→bbox turuncu HATA ÇİZGİSİ (sapma+açı etiketi).
   Log: png_R_m/Vc/omega + vis_faz artık BOŞ; yeni `ibvs_r`/`ibvs_aci` kolonları.

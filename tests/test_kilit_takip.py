@@ -132,17 +132,39 @@ def _kayip_kos(b, t_bas, sure_s, revert_izin=True):
 
 
 def test_kayipta_hover_sonra_gps_revert():
-    b = _beyin(); b.durum = "GORSEL_GUDUM"
-    b._gorsel_guduum(_det(t=0.0), 0.0)
-    # kisa kayip: HOVER komutu (0,0,0,0), GPS'e donmez
-    r = b._gorsel_guduum(None, 0.02)
-    assert r == (0.0, 0.0, 0.0, 0.0), "kisa kayipta hover bekleniyordu: %s" % (r,)
-    assert b.durum == "GORSEL_GUDUM"
-    # uzun kayip: VIS_LOST_TO_GPS_S asilinca None + ARAMA
-    reverted, sure = _kayip_kos(b, 0.02, Cfg.VIS_LOST_TO_GPS_S + 1.0)
-    assert reverted, "uzun kayipta GPS'e donmeliydi"
-    assert b.durum == "ARAMA"
-    assert sure > Cfg.VIS_LOST_TO_GPS_S - 0.1, "cok erken revert: %.2f s" % sure
+    # VIS_LOST_TO_GPS_S > 0 secilirse: once hover, sure asilinca GPS'e don
+    eski = Cfg.VIS_LOST_TO_GPS_S
+    Cfg.VIS_LOST_TO_GPS_S = 2.0
+    try:
+        b = _beyin(); b.durum = "GORSEL_GUDUM"
+        b._gorsel_guduum(_det(t=0.0), 0.0)
+        # kisa kayip: HOVER komutu (0,0,0,0), GPS'e donmez
+        r = b._gorsel_guduum(None, 0.02)
+        assert r == (0.0, 0.0, 0.0, 0.0), "kisa kayipta hover bekleniyordu: %s" % (r,)
+        assert b.durum == "GORSEL_GUDUM"
+        # uzun kayip: VIS_LOST_TO_GPS_S asilinca None + ARAMA
+        reverted, sure = _kayip_kos(b, 0.02, Cfg.VIS_LOST_TO_GPS_S + 1.0)
+        assert reverted, "uzun kayipta GPS'e donmeliydi"
+        assert b.durum == "ARAMA"
+        assert sure > Cfg.VIS_LOST_TO_GPS_S - 0.1, "cok erken revert: %.2f s" % sure
+    finally:
+        Cfg.VIS_LOST_TO_GPS_S = eski
+
+
+def test_kayipta_sifir_aninda_gps():
+    """VIS_LOST_TO_GPS_S=0 (yeni default): kayipta HOVER YOK, ILK tikte GPS'e don.
+    (Kullanici istegi 2026-07-08: ara hover beklemesi kafa karistiriyordu; dedektor
+    titremesini zaten VIS_STALE_S koprusu emer — buraya dusen gercek kayiptir.)"""
+    eski = Cfg.VIS_LOST_TO_GPS_S
+    Cfg.VIS_LOST_TO_GPS_S = 0.0
+    try:
+        b = _beyin(); b.durum = "GORSEL_GUDUM"
+        b._gorsel_guduum(_det(t=0.0), 0.0)
+        r = b._gorsel_guduum(None, 0.02)     # ilk kayip tiki
+        assert r is None, "aninda GPS'e donmeliydi (None), gelen: %s" % (r,)
+        assert b.durum == "ARAMA"
+    finally:
+        Cfg.VIS_LOST_TO_GPS_S = eski
 
 
 def test_manuel_gorselde_gps_revert_yok():
