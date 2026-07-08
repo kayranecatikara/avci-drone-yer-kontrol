@@ -1,25 +1,5 @@
-# Avci Drone - Yer Kontrol Istasyonu : Python bagimliliklari
-# Kurulum:  pip install -r requirements.txt
-numpy
 mss
 Pillow
-
-# --- Windows'a ozel (Linux'ta gerekmez, otomatik atlanir) ---
-# pygetwindow oyun penceresini bulmak icindir. Linux'ta yuklenmezse
-# server.py tum ekrani yakalar (kod bunu try/except ile otomatik yapar).
 pygetwindow; platform_system == "Windows"
-
-# --- Gorsel gudum (IBVS) fazi: YOLO nesne tespiti (models/best.pt) ---
-# NOT (CUDA/GPU): torch'u ONCE dogru wheel'den kur, sonra bu dosyayi yukle:
-#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-# (CPU-only ise: pip install torch torchvision)  Ardindan: pip install -r requirements.txt
-# ultralytics/torch YOKSA sistem zarif bozulur: gorsel faz pasif, saf GPS calisir.
 ultralytics
 opencv-python
-
-# --- windows-capture: SU AN KULLANILMIYOR (kurma) ---
-# Pencere-icerigi yakalama motoru bazi Windows surumlerinde (orn. Win10 LTSC)
-# kararsiz oldugundan bilincli KAPALI (web/server.py: PENCERE_YAKALA_AKTIF=False).
-# FPV goruntusu tarayici ekran paylasimiyla (Goruntuyu Bagla), YOLO karesi mss ile
-# alinir. Win11'de denemek istersen: pip install windows-capture + bayragi True yap.
-# windows-capture
