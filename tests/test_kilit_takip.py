@@ -185,6 +185,87 @@ def test_revert_kilit_ok_latch_korunur():
     assert b.kilit_sure == 0.0 and len(b.kilit_win) == 0
 
 
+# ---------------------------------------------------------------------------
+#  5) GORUNTU-DUZLEMI KOPRU (olu-hesap): dedektor deliginde sanal bbox
+# ---------------------------------------------------------------------------
+import time as _time
+
+
+def _kopru_beyin(yas_s, vx_px=200.0, vy_px=0.0):
+    """GORSEL_GUDUM'da beyin: son GERCEK tespit 'yas_s' saniye once, hiz olculmus."""
+    b = _beyin(); b.durum = "GORSEL_GUDUM"
+    now = _time.perf_counter()
+    b.son_tespit = _det(cxn=0.5, cyn=0.5, t=now - yas_s)
+    b.son_tespit_t = now - yas_s
+    b._vis_v = (vx_px, vy_px)
+    return b
+
+
+def test_kopru_sentetik_tespit_uretir():
+    """Bayat tespit + hiz var -> oku KOPRU det dondurur; cx hiz*yas kadar ilerlemis,
+    cy ise DONMUS (dikey ekstrapole edilmez: olculen vy cogunlukla ego-pitch urunu;
+    8 Tem kacak-tirmanma dersi)."""
+    yas = Cfg.VIS_STALE_S + 0.4                    # stale asildi, kopru penceresi icinde
+    b = _kopru_beyin(yas, vx_px=200.0, vy_px=300.0)
+    d = b._gorsel_tespit_oku()
+    assert d is not None and d.get("kopru") is True, "kopru det bekleniyordu: %s" % (d,)
+    assert b.vis_kopru is True
+    beklenen = 0.5 * W + 200.0 * yas
+    assert abs(d["cx"] - beklenen) < 1.0, "cx hizla ilerlemeliydi: %.1f vs %.1f" % (d["cx"], beklenen)
+    assert abs(d["cy"] - 0.5 * H) < 1e-6, "cy DONMALIYDI (vy uygulanmaz): %.1f" % d["cy"]
+    # kopru det ile gorsel yasa KOMUT uretir (revert/hover degil) ve faz korunur;
+    # DIKEY komut koprude 0 (irtifa-tut) — tahminle tirmanis/alcalis entegre edilmez.
+    r = b._gorsel_guduum(d, 0.0)
+    assert r is not None and b.durum == "GORSEL_GUDUM"
+    assert r[0] == 0.0, "koprude thr=0 (irtifa-tut) bekleniyordu: %s" % (r,)
+    assert b.ibvs_tlm.get("dikey") == 0.0
+
+
+def test_kopru_kilit_sayaci_saymaz():
+    """DURUSTLUK: kopru tikleri kilit penceresine SURE BIRIKTIRMEZ."""
+    b = _kopru_beyin(Cfg.VIS_STALE_S + 0.2)
+    d = b._gorsel_tespit_oku()
+    assert d is not None and d.get("kopru")
+    for i in range(50):                            # 1 sn kopru tiki isle
+        b._gorsel_guduum(dict(d), i * Cfg.DT)
+    assert b.kilit_sure == 0.0, "kopru kilit biriktirdi: %.2f" % b.kilit_sure
+    assert b.kilit_anlik is False
+
+
+def test_kopru_bitince_kayip_mantigi():
+    """Kopru suresi de dolunca oku None -> (LOST=0 default) ilk tikte GPS'e don."""
+    yas = Cfg.VIS_STALE_S + float(Cfg.VIS_KOPRU_S) + 0.2
+    b = _kopru_beyin(yas)
+    assert b._gorsel_tespit_oku() is None, "kopru penceresi disinda None beklenirdi"
+    eski = Cfg.VIS_LOST_TO_GPS_S
+    Cfg.VIS_LOST_TO_GPS_S = 0.0
+    try:
+        assert b._gorsel_guduum(None, 0.02) is None and b.durum == "ARAMA"
+    finally:
+        Cfg.VIS_LOST_TO_GPS_S = eski
+
+
+def test_kopru_hiz_yoksa_ve_fazdisi_kapali():
+    """Hiz olculmemisse ya da GORSEL_GUDUM disindaysa kopru DEVREYE GIRMEZ."""
+    yas = Cfg.VIS_STALE_S + 0.3
+    b = _kopru_beyin(yas); b._vis_v = None
+    assert b._gorsel_tespit_oku() is None, "hiz yokken kopru olmamali"
+    b2 = _kopru_beyin(yas); b2.durum = "ARAMA"     # OTO kilit sayaci sismesin
+    assert b2._gorsel_tespit_oku() is None, "ARAMA'da kopru olmamali"
+
+
+def test_kopru_hiz_ema_gercek_tespitten():
+    """set_gorsel_tespit ardisik GERCEK tespitlerden hiz cikarir (isaret dogru);
+    uzun delik sonrasi ilk tespit hizi SIFIRLAR (bayat hizla kopru kurulmaz)."""
+    b = _beyin()
+    t0 = _time.perf_counter()
+    b.set_gorsel_tespit(_det(cxn=0.50, t=t0))
+    b.set_gorsel_tespit(_det(cxn=0.52, t=t0 + 0.1))          # saga hareket
+    assert b._vis_v is not None and b._vis_v[0] > 0, "saga hiz bekleniyordu: %s" % (b._vis_v,)
+    b.set_gorsel_tespit(_det(cxn=0.60, t=t0 + 0.1 + Cfg.VIS_STALE_S + 1.0))  # uzun delik
+    assert b._vis_v is None, "uzun delik sonrasi hiz sifirlanmali"
+
+
 if __name__ == "__main__":
     fns = [(n, f) for n, f in sorted(globals().items())
            if n.startswith("test_") and callable(f)]

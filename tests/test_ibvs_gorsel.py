@@ -52,6 +52,17 @@ def _tek(cxn, cyn, p=CFG0):
     return AvciIBVS().hesapla(_det(cxn=cxn, cyn=cyn), p)
 
 
+class _CfgVar:
+    """Cfg kopyasi + secilen alanlar override (negatif-nisan / alcalma-freni testleri)."""
+    def __init__(self, **kw):
+        self._kw = kw
+
+    def __getattr__(self, k):
+        if k == "_kw":
+            raise AttributeError(k)
+        return self._kw[k] if k in self._kw else getattr(Cfg, k)
+
+
 def test_yon_eslemesi():
     # CFG0 (nisan=merkez): cekirdek yon eslemesi (ey_ref=0 -> merkez setpoint)
     thr, _, _, yaw = _tek(0.75, 0.5)             # hedef SAGDA
@@ -74,15 +85,113 @@ def test_nisanda_tam_ileri():
 
 
 def test_dikey_nisan_tilt_farkinda():
-    """ey_ref = tan(TILT)/tan(VFOV_yari) (~0.43 @25); hedef nisan ustunde -> tirman, altinda -> alcal."""
-    ey_ref = _ey_ref(Cfg)
-    assert 0.35 < ey_ref < 0.55, "tilt=25 icin ey_ref ~0.43 bekleniyordu: %.3f" % ey_ref
-    g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.5 + ey_ref / 2.0), Cfg)
-    assert abs(g.durum()["ey_ref"] - round(ey_ref, 3)) < 1e-3
-    # nisanin USTUNDE (ey<ey_ref): tirman (thr>0); ALTINDA (ey>ey_ref): alcal (thr<0)
-    thr_ust = _tek(0.5, 0.5, p=Cfg)[0]             # ey=0 < ey_ref -> tirman
-    thr_alt = _tek(0.5, 0.95, p=Cfg)[0]            # ey=0.9 > ey_ref -> alcal
-    assert thr_ust > 0 and thr_alt < 0, "nisan ustu tirman / alti alcal (thr %.2f/%.2f)" % (thr_ust, thr_alt)
+    """ey_ref = NISAN*tan(TILT)/tan(VFOV_yari) (~0.43 @25 ve NISAN=1); nisan ustunde tirman,
+    altinda alcal. NISAN default'u tune ile degisir (8 Tem: 0.1) -> mekanizma NISAN=1'de denenir."""
+    eski = Cfg.IBVS_DIKEY_NISAN
+    Cfg.IBVS_DIKEY_NISAN = 1.0
+    try:
+        ey_ref = _ey_ref(Cfg)
+        assert 0.35 < ey_ref < 0.55, "tilt=25 icin ey_ref ~0.43 bekleniyordu: %.3f" % ey_ref
+        g = AvciIBVS(); g.hesapla(_det(cxn=0.5, cyn=0.5 + ey_ref / 2.0), Cfg)
+        assert abs(g.durum()["ey_ref"] - round(ey_ref, 3)) < 1e-3
+        # nisanin USTUNDE (ey<ey_ref): tirman (thr>0); ALTINDA (ey>ey_ref): alcal (thr<0)
+        thr_ust = _tek(0.5, 0.5, p=Cfg)[0]             # ey=0 < ey_ref -> tirman
+        thr_alt = _tek(0.5, 0.95, p=Cfg)[0]            # ey=0.9 > ey_ref -> alcal
+        assert thr_ust > 0 and thr_alt < 0, "nisan ustu tirman / alti alcal (thr %.2f/%.2f)" % (thr_ust, thr_alt)
+    finally:
+        Cfg.IBVS_DIKEY_NISAN = eski
+
+
+def test_negatif_nisan_altta_kal():
+    """ALTTAN VURUS onermesi: NISAN=-0.25 -> ey_ref<0 (hedef merkez USTUNDE tutulur).
+    Hedef MERKEZDE gorunuyorsa (ey=0) 'fazla yuksektesin' demektir -> thr<0 (ALCAL)."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=-0.25)
+    g = AvciIBVS()
+    thr, _, _, yaw = g.hesapla(_det(cxn=0.5, cyn=0.5), p)
+    d = g.durum()
+    assert d["ey_ref"] < 0, "negatif nisanda ey_ref<0 bekleniyordu: %s" % d["ey_ref"]
+    assert thr < 0, "merkezdeki hedef = fazla yuksek -> alcal (thr<0), gelen: %.3f" % thr
+    assert abs(yaw) < 1e-9
+    # hedef tam nisan noktasindaysa (merkezin USTUNDE) thr~0 (denge alttan-takipte)
+    cyn = 0.5 + d["ey_ref"] / 2.0
+    thr2, _, _, _ = AvciIBVS().hesapla(_det(cxn=0.5, cyn=cyn), p)
+    assert abs(thr2) < 2e-3, "nisan noktasinda thr~0 bekleniyordu: %.3f" % thr2
+
+
+def test_nisan_clamp_negatif():
+    """Asiri negatif NISAN koddaki -1.0 tabanina oturur (guvenlik siniri)."""
+    g = AvciIBVS()
+    g.hesapla(_det(), _CfgVar(IBVS_DIKEY_NISAN=-5.0))
+    beklenen = -1.0 * math.tan(math.radians(float(Cfg.IBVS_TILT_DEG))) \
+        / math.tan(math.radians(float(Cfg.IBVS_VFOV_HALF_DEG)))
+    assert abs(g.durum()["ey_ref"] - round(beklenen, 3)) < 1e-3, g.durum()["ey_ref"]
+
+
+def test_alcalma_freni_ustteyken_ileriyi_kisar():
+    """Hedef nisanin ALTINDA (eyy>0 = fazla yuksekteyiz) -> ileri itki carpimsal kisilir
+    (lift carry kirilir), thr<0. MERKEZ_FREN=0 ile carpan birebir dogrulanir."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
+    g = AvciIBVS()
+    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.65), p)     # ey=eyy=+0.3
+    beklenen = Cfg.PITCH_SIGN * Cfg.IBVS_ILERI * (1.0 - 2.0 * 0.3)
+    assert abs(pitch - beklenen) < 1e-6, "pitch=ILERI*alcal bekleniyordu: %.3f vs %.3f" % (pitch, beklenen)
+    assert thr < 0
+    assert abs(g.durum()["alcal"] - 0.4) < 1e-3
+    # fren buyudukce pitch kuculur (ayni sapmada)
+    _, pitch_sert, _, _ = AvciIBVS().hesapla(
+        _det(cxn=0.5, cyn=0.65), _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0,
+                                         IBVS_ALCAL_FREN=3.0))
+    assert abs(pitch_sert) < abs(pitch)
+
+
+def test_alcalma_freni_tirmanista_dokunmaz():
+    """Hedef nisanin USTUNDE (eyy<0 = alttayiz, tirman) -> alcal=1, ileri itki etkilenmez."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
+    g = AvciIBVS()
+    thr, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.35), p)     # ey=eyy=-0.3
+    assert g.durum()["alcal"] == 1.0, "tirmanista alcal=1 bekleniyordu"
+    assert abs(pitch - Cfg.PITCH_SIGN * Cfg.IBVS_ILERI) < 1e-6
+    assert thr > 0
+
+
+def test_alcalma_taban():
+    """Buyuk sapmada fren TABANA oturur (asla tam durma; biraz kapanis kalir)."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_MERKEZ_FREN=0.0, IBVS_ALCAL_FREN=2.0)
+    g = AvciIBVS()
+    _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.95), p)       # eyy=+0.9 -> 1-1.8 < taban
+    assert abs(g.durum()["alcal"] - float(Cfg.IBVS_ALCAL_TABAN)) < 1e-6
+    assert abs(pitch) > 0, "tabanda bile ileri itki tam SIFIRLANMAZ"
+
+
+def test_ego_pitch_telafi():
+    """KACAK-TIRMANMA senaryosu (8 Tem log 204331): drone hedefin ALTINDA, govde one
+    yatiyor (burun asagi -20 derece) -> hedef goruntude sahte YUKARI ziplar (ey=-0.2).
+    Telafisiz yasa TIRMAN derdi; ego-pitch telafisi gercek bakis-hattini geri kurar
+    -> thr artik pozitife sapmamali (alcal/notr). GAIN=0 ile eski davranis kiyasi."""
+    det = _det(cxn=0.5, cyn=0.40)                    # ey = -0.2 (sahte 'yukarida')
+    p0 = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_EGO_PITCH_GAIN=0.0)
+    thr0, _, _, _ = AvciIBVS().hesapla(_det(cxn=0.5, cyn=0.40), p0,
+                                       own_pitch_rad=math.radians(-20.0))
+    assert thr0 > 0, "GAIN=0 (telafisiz): sahte 'yukarida' -> tirman beklenirdi (kok neden)"
+    p1 = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_EGO_PITCH_GAIN=1.0)
+    g = AvciIBVS()
+    thr1, _, _, _ = g.hesapla(det, p1, own_pitch_rad=math.radians(-20.0))
+    # tan(-20)/tan(47.2) ~ -0.337 -> ey_kul = -0.2 + 0.337 = +0.137 -> ALCAL (thr<0)
+    assert thr1 < 0, "telafili yasa tirmanmamali (thr=%.3f)" % thr1
+    assert abs(g.durum()["ey_ego"] - (-0.2 + math.tan(math.radians(20.0))
+                                      / math.tan(math.radians(47.2)))) < 5e-3
+    # govde duz ise telafi no-op (ey_ego == ey)
+    g2 = AvciIBVS()
+    g2.hesapla(_det(cxn=0.5, cyn=0.40), p1, own_pitch_rad=0.0)
+    assert abs(g2.durum()["ey_ego"] - (-0.2)) < 1e-6
+
+
+def test_ego_pitch_yokken_eski_davranis():
+    """own_pitch_rad verilmezse (None) yasa bit-bit eski haliyle calisir."""
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0)
+    k1 = AvciIBVS().hesapla(_det(cxn=0.6, cyn=0.4), p)
+    k2 = AvciIBVS().hesapla(_det(cxn=0.6, cyn=0.4), p, own_pitch_rad=None)
+    assert k1 == k2
 
 
 def test_merkez_freni_ileriyi_kisar():
@@ -120,12 +229,12 @@ def test_ema_yumusatma():
 
 
 def test_gps_siz_imza():
-    """hesapla girdileri: det (bbox px) + p (Cfg) + poz (kamera keypoint) + own_roll_rad
-    (KENDI IMU roll'u, ego-motion telafisi). Hedef YONU %100 kameradan; own_roll yalniz
-    gorsel OLCUMU temizler (hedefi konumlamaz). YASAK olan HEDEF GPS/J kestirimidir
-    (son_temiz/son_hiz/...) ve genel kinematik dump (drone_pos/v_own/rot)."""
+    """hesapla girdileri: det (bbox px) + p (Cfg) + poz (kamera keypoint) + own_roll_rad/
+    own_pitch_rad (KENDI IMU'muz, ego-motion telafileri). Hedef YONU %100 kameradan;
+    own_roll/pitch yalniz gorsel OLCUMU temizler (hedefi konumlamaz). YASAK olan HEDEF
+    GPS/J kestirimidir (son_temiz/son_hiz/...) ve genel kinematik dump (drone_pos/v_own/rot)."""
     params = list(inspect.signature(AvciIBVS.hesapla).parameters)
-    assert set(params) <= {"self", "det", "p", "poz", "own_roll_rad"}, \
+    assert set(params) <= {"self", "det", "p", "poz", "own_roll_rad", "own_pitch_rad"}, \
         "beklenmedik parametre: %s" % params
     yasak = {"drone_pos", "v_own", "v_own_xy", "rot", "rot_rpy", "drone_rot_rpy",
              "yaw_rad", "drone_z", "son_temiz", "son_hiz", "son_xy_anlik", "son_z_anlik"}

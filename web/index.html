@@ -708,8 +708,9 @@
       ["IBVS_ILERI","★★★ İleri itki   (yaklaşma hızının ana knob'u; ıskalıyor/sert giriyorsa DÜŞÜR)",0,1.0,0.025],
       ["IBVS_K_YAW","★★★ Yatay kazanç   (hedef sağ/sol kenarda kalıyorsa ARTIR; yatay salınım varsa DÜŞÜR)",0,2.0,0.05],
       ["IBVS_K_DIKEY","★★★ Dikey kazanç   (hedef üst/alt kenardan kaçıyorsa ARTIR; dikey salınım varsa DÜŞÜR)",0,3.0,0.05],
-      ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (0=hedefi MERKEZDE tut/altta kal-gökyüzü · 1=HIZ VEKTÖRÜNÜ hedefe nişanla/terminal çarpışma)",0,1.2,0.05],
+      ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (−0.3=ALTTAN VUR: hedefi merkez ÜSTÜNDE tut, araç altta+gökyüzü · 0=merkez · 1=HIZ VEKTÖRÜNÜ hedefe nişanla)",-0.8,1.2,0.05],
       ["IBVS_MERKEZ_FREN","★★ Merkez freni   (sapma büyüyünce ileriyi kısar: önce ortala sonra ilerle; 0=hep tam gaz)",0,2.0,0.05],
+      ["IBVS_ALCAL_FREN","★★ Alçalma freni (anti-lift-carry)   (araç hedefin ÜSTÜNE çıkıyorsa ARTIR: fazla yükselince ileriyi kısıp alçalmayı mümkün kılar; 0=kapalı)",0,4.0,0.1],
       ["IBVS_K_ROLL_LEAD","★★ Öngörü gücü (pose bank→yaw lead)   (hedef dönüşünü geç yakalıyorsa ARTIR; erken/salınım→DÜŞÜR; 0=kapalı)",0,2.0,0.05],
       ["IBVS_SIGN_ROLL","★ Öngörü YÖNÜ (roll→yaw işareti)   (GÖRSEL modda FPV oku hedefin GERÇEK dönüşüyle TERS ise ÇEVİR: −1 ↔ +1)",-1,1,2],
       ["IBVS_ROLL_CONF_MIN","Öngörü kapısı (kanat ucu güveni)   (yanlış bank sıçraması varsa ARTIR)",0.2,0.9,0.05],
@@ -717,6 +718,7 @@
       ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
       ["VIS_CONF_MIN","Tespit güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
       ["VIS_LOST_TO_GPS_S","Kayıpta bekleme (s)   (0=kayıpta ANINDA GPS'e dön; titreme koruması VIS_STALE_S'te ayrı)",0,5.0,0.25],
+      ["VIS_KOPRU_S","★ Kayıp köprüsü / ölü-hesap (s)   (dedektör deliğinde bbox son hızıyla sanal sürülür; kilit SAYMAZ; 0=kapalı)",0,2.5,0.1],
     ]],
   ];
   let tuneAcik=false;
@@ -902,6 +904,7 @@
         ctx.strokeStyle="rgba(120,200,255,.5)"; ctx.lineWidth=1; ctx.setLineDash([7,5]);
         ctx.beginPath(); ctx.moveTo(rc.x+6,aimY); ctx.lineTo(rc.x+rc.w-6,aimY); ctx.stroke(); ctx.setLineDash([]);
         if(eyRef>0.02) halo("⊕ HIZ VEKTÖRÜ (nişan)", aimX+70, aimY-4, "rgba(120,200,255,.9)", "left", "10px monospace");
+        else if(eyRef<-0.02) halo("⊕ ALTTAN VUR (nişan: hedef merkez ÜSTÜNDE)", aimX+70, aimY-4, "rgba(120,200,255,.9)", "left", "10px monospace");
         // IBVS HATA ÇİZGİSİ: NİŞAN noktası → bbox merkezi = güdümün sürdüğü sapma.
         const iex=(det.cx-0.5)*2, iey=(det.cy-0.5)*2-eyRef;   // dikey: nişandan sapma
         const ir=Math.hypot(iex,iey), iaci=Math.atan2(-iey,iex)*180/Math.PI;
@@ -982,6 +985,11 @@
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
     const fazTxt = gorev.faz ? "  · FAZ: "+gorev.faz : "";
     ctx.fillText("DURUM: "+dur+modTxt+fazTxt, rc.x+10, rc.y+22);
+    // KÖPRÜ (ölü-hesap) rozeti: dedektör deliğinde sanal bbox ile devam ediliyor
+    if(gs.kopru){
+      halo("◌ KÖPRÜ: ölü-hesap (dedektör deliği)", rc.x+10, rc.y+40,
+           "rgba(255,176,31,.95)", "left", "bold 12px monospace");
+    }
     // KARE KAYNAĞI uyarısı: dedektör mss'e düşerse (oyun penceresi arkada) yanlış yeri
     // görebilir → sağ-üstte turuncu uyarı. windows-capture ise sessiz (occlusion-proof).
     if(gs.kare_kaynak && /mss/i.test(gs.kare_kaynak)){
@@ -1169,7 +1177,9 @@
     $("ibvsIleri").innerHTML = ib.ileri!=null
       ? Number(ib.ileri).toFixed(2)+' <small>×'+(ib.kisma!=null?Number(ib.kisma).toFixed(2):"1.00")+' kısma</small>' : "—";
     $("ibvsNisan").innerHTML = (ib.ey_ref!=null)
-      ? Number(ib.ey_ref).toFixed(2)+' <small>'+(Math.abs(ib.ey_ref)<0.02?"merkez (altta kal)":"hız vektörü (çarpışma)")+'</small>' : "—";
+      ? Number(ib.ey_ref).toFixed(2)+' <small>'+(Math.abs(ib.ey_ref)<0.02?"merkez (altta kal)"
+          :(ib.ey_ref<0?"ALTTAN VUR (araç altta)":"hız vektörü (çarpışma)"))+'</small>'
+        +((ib.alcal!=null && ib.alcal<0.99)?' <small style="color:var(--warn,#ffb01f)">· alçalma freni '+Number(ib.alcal).toFixed(2)+'</small>':'') : "—";
     $("ibvsCmd").textContent = (ib.yaw!=null && ib.dikey!=null)
       ? ("yaw "+Number(ib.yaw).toFixed(2)+" · gaz "+Number(ib.dikey).toFixed(2)) : "—";
     // ÖNGÖRÜ: pose kanat uçlarından hedef bank (roll) + yaw lead. roll_ok=false ise pasif.

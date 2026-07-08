@@ -289,6 +289,7 @@ TUNE_ALLOW = {
     "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
     "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)
     "IBVS_MERKEZ_FREN",  # sapma buyuyunce ileriyi kis (0=hep tam gaz)
+    "IBVS_ALCAL_FREN",   # alcalma freni: hedef nisanin ALTINDAysa (fazla yuksek) ileriyi kis
     "IBVS_K_ROLL_LEAD",  # ongorulu yaw lead kazanci (pose hedef bank -> erken donus)
     "IBVS_SIGN_ROLL",    # ongoru YONU (roll->yaw isareti): FPV oku gercek donusle ters ise cevir
     "IBVS_ROLL_CONF_MIN",# ongoru kapisi: iki kanat ucu icin asgari keypoint guveni
@@ -296,6 +297,7 @@ TUNE_ALLOW = {
     "YAW_MAX",           # yaw tavani (doygunluk)
     "VIS_CONF_MIN",      # tespit guven esigi
     "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
+    "VIS_KOPRU_S",       # goruntu-duzlemi kopru (olu-hesap) suresi; 0 = kapali
 }
 
 # ----------------------------------------------------------
@@ -1123,6 +1125,7 @@ def build_telemetry():
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
         "kare_kaynak": _fpv_kaynak.get("ad"),      # dedektorun gordugu kaynak (windows-capture / mss)
         "conf_esik": float(Cfg.VIS_CONF_MIN),      # gudum/kilit esigi (alti = zayif, UI turuncu cizer)
+        "kopru": bool(getattr(beyin, "vis_kopru", False)),  # olu-hesap koprusu aktif mi (FPV rozeti)
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
         "kilit": b_kilit,                          # {anlik,sure,gerek,pencere,ok,esik_pct,boyut_pct}
         # PERVANE MASKESI (yanlis-poz engelleme): UI kirmizi tarama ile cizer (kullanici dogrular)

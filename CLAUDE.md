@@ -216,7 +216,8 @@ SİLİNDİ (git geçmişinde). Yeni tek yasa: **`guidance/ibvs_gorsel.py` (AvciI
   revert. **Default 0 = kayıpta ANINDA GPS (2026-07-08 kullanıcı isteği: ara hover beklemesi
   kafa karıştırıyordu);** dedektör titremesini `VIS_STALE_S`(0.5 s) köprüsü emer → tek-kare
   atlamalar revert tetiklemez. Manuel GÖRSEL switch'te revert yok (hep hover). Kör-devam/
-  yakın-yapışkanlık katmanları silindi.
+  yakın-yapışkanlık katmanları silindi → **2026-07-08: GÖRÜNTÜ-DÜZLEMİ KÖPRÜ kullanıcı
+  onayıyla GERİ GELDİ (aşağıdaki bölüm)** — v7'dekinden farkı: tek knob, kilit saymaz, log ayrıştırır.
 - **Telemetri:** `gudum.png`→`gudum.ibvs` {ex,ey,buyukluk,aci_deg,kisma,dikey,ileri,yaw};
   UI'da PN kartı→IBVS kartı, FPV'de merkez→bbox turuncu HATA ÇİZGİSİ (sapma+açı etiketi).
   Log: png_R_m/Vc/omega + vis_faz artık BOŞ; yeni `ibvs_r`/`ibvs_aci` kolonları.
@@ -272,15 +273,68 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
   (25°/47.2° → ~0.43). Dikey sapma `eyy = ey_f − ey_ref`; `thr = SIGN_DIKEY·K_DIKEY·(−eyy)`,
   `r = hypot(ex, eyy)`, `açı = atan2(−eyy, ex)`. Yani "çizgi" artık MERKEZDEN değil **NİŞAN
   noktasından** bbox'a; hedefi oraya sürmek = "burun hedefe kilitli" (doğrudan çarpışma rotası).
-- **`IBVS_DIKEY_NISAN` (0..1, ⚙ slider):** 0 = hedefi merkezde tut (altta kal / gökyüzü arka plan,
-  eski davranış); 1 = hız vektörünü hedefe nişanla (terminal çarpışma). Default **1.0**. Her ikisi
-  de çarpışmaya yakınsar (açısal bias, menzille küçülür) ama nişan=1 daha DOĞRUDAN/az-laggy rota.
+- **`IBVS_DIKEY_NISAN` (−0.8..1.2, ⚙ slider):** **NEGATİF = ALTTAN VUR: hedefi merkez ÜSTÜNDE
+  tut → LOS > TILT → araç orantılı olarak hedefin ALTINDA + gökyüzü arka plan** (2026-07-08
+  eklendi, aşağıdaki ALTTAN VURUŞ bölümü); 0 = merkezde tut; 1 = hız vektörünü hedefe nişanla
+  (terminal çarpışma). Default **−0.25** (0.1 ve 1.0'dan evrildi).
 - **Geriye uyum:** ey_ref=0 (nisan=0) → eski merkez-tabanlı yasa bit-bit aynı. Cfg: `IBVS_TILT_DEG=25`,
-  `IBVS_VFOV_HALF_DEG=47.2`, `IBVS_DIKEY_NISAN=1.0⚙`. Telemetri `gudum.ibvs.ey_ref`; FPV'de mavi
-  kesikli "⊕ HIZ VEKTÖRÜ (nişan)" çizgisi + IBVS hata çizgisi artık nişandan çizilir.
-- Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 14/14).
-  Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
-  tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
+  `IBVS_VFOV_HALF_DEG=47.2`. Telemetri `gudum.ibvs.ey_ref`; FPV'de mavi kesikli nişan çizgisi
+  (pozitif: "⊕ HIZ VEKTÖRÜ", negatif: "⊕ ALTTAN VUR") + IBVS hata çizgisi nişandan çizilir.
+- Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 19/19).
+
+## ⭐ ALTTAN VURUŞ — NEGATİF NİŞAN + ALÇALMA FRENİ (2026-07-08, kullanıcı isteği)
+Kullanıcı: görsel güdümde irtifa sürekli artıyor, araç hedefin ÜSTÜNE çıkıyor (istenen: alttan
+git, alttan vur; üstten bakınca hedef zemin clutter'ında ve dedektör kör). Kök neden İKİ yapısal
+kilit: (1) `nisan` clamp tabanı 0.0 → yasa hedefi asla merkez üstünde tutamıyordu → denge LOS ≤
+25° → menzil kapandıkça dikey ayrım co-altitude'a büzülür; (2) sabit ileri itki **lift carry**
+üretir, alçal komutu `thr=−K_DIKEY·eyy` (~−0.2) bunu yenemez (GPS dersi `THR_DN` yorumunda:
+−0.40 bile yetmiyordu) ve GPS yolundaki `alc_oncelik` pitch-kısma mekanizmasının görsel yasada
+karşılığı YOKTU → irtifa mandallanıyordu. Çözüm (ikisi de SALT görüntü verisi → GPS yasağına uygun):
+- **Negatif nişan:** `ibvs_gorsel.hesapla` clamp `(0,1.5)→(−1,1.5)`; default `−0.25`
+  (ey_ref≈−0.108 → hedef cyn≈0.45'te, kilit AV bandı içinde). Slider min −0.8.
+- **Alçalma freni (anti-lift-carry):** `alcal = clamp(1 − IBVS_ALCAL_FREN·max(0,eyy),
+  IBVS_ALCAL_TABAN, 1)`; `pitch *= kisma·alcal`. Hedef nişanın ALTINDAysa (eyy>0 = fazla
+  yüksekteyiz) ileri kısılır → negatif thr GERÇEKTEN alçaltır. Tırmanış (eyy<0) etkilenmez.
+  Cfg: `IBVS_ALCAL_FREN=2.0⚙` (slider 0..4), `IBVS_ALCAL_TABAN=0.2` (slider dışı; GPS
+  alc_oncelik 0.15 tabanının aynası — asla tam durma).
+- Telemetri `gudum.ibvs.alcal` (IBVS kartında nişan satırında turuncu "alçalma freni" eki);
+  log kolonları `ibvs_eyref`/`ibvs_alcal` (_LOG_COLS sonuna, şema-güvenli). NOT: `mean|vis_ey|`
+  artık tasarımsal ~|ey_ref| ofseti taşır — merkezleme kalitesi için `ibvs_r`/`merkez_%` kullan
+  (ibvs_r nişan-göreli olduğundan rapor KPI'ları doğru kalır).
+- Testler: `test_negatif_nisan_altta_kal` (merkezdeki hedef → thr<0), `test_alcalma_freni_*`,
+  `test_alcalma_taban`, `test_nisan_clamp_negatif`. Canlı: üste çıkma sürerse
+  NISAN −0.4 + ALCAL_FREN 3+.
+- **EGO-PITCH TELAFİSİ + KÖPRÜ DİKEY-TUT (aynı gün, 2. iterasyon — kaçak tırmanma):** ilk
+  düzeltme yetmedi; log 204331 tık-tık analizi kök nedeni gösterdi: **ileri itki gövdeyi öne
+  yatırınca (burun −20°) gövdeye sabit kamera düşüyor, hedef görüntüde sahte YUKARI zıplıyor**
+  (corr(drone_pitch, vis_ey)=0.70) → yasa drone hedefin 10 m ALTINDAYKEN +0.70 tırmanış
+  veriyordu; tespit ölünce KÖPRÜ ego-kaynaklı vy'yi sürdürüp sanal kutuyu kadraj tepesine
+  mıhlıyor, ~1.7 sn kör tam-tırmanış (+30 m fırlama; ey=−1.0 kuyrukları). Düzeltme:
+  (1) `ey_dunya = ey_f − IBVS_EGO_PITCH_GAIN·tan(own_pitch)/tan(VFOV_yarı)` — dikey hata kendi
+  pitch'ten arındırılır (`hesapla(..., own_pitch_rad=...)`; ego-roll emsali, kendi IMU = ego-motion
+  → kural OK; GAIN=1.0, 0=A/B kapalı); (2) köprüde **cy DONar** (vy ekstrapole edilmez) ve
+  **thr=0 (irtifa-tut)** — tahminle irtifa entegre edilmez, yatay takip sürer. EP5 geri-oynatma:
+  pitch sallanma anında eski thr +0.35'e sapıyor, yeni −0.45..−0.03'te kalıyor; köprü kuyruğu
+  +0.70→0.0. İmza testi allowed-set'e `own_pitch_rad` eklendi. Telemetri `gudum.ibvs.ey_ego`;
+  log kolonu `ibvs_eyego` (vis_ey ham kalır; fark = silinen kirlilik). Testler:
+  `test_ego_pitch_telafi`, `test_ego_pitch_yokken_eski_davranis` (21/21) + köprü testleri (16/16).
+
+## ⭐ GÖRÜNTÜ-DÜZLEMİ KÖPRÜ / ÖLÜ-HESAP (2026-07-08, kullanıcı onayı)
+İki tune uçuşunun verisi netti: güdüm parametreleri işini yapıyor (en iyi episodlarda
+r=0.07-0.2) ama **dedektör 15-40 m'de düzenli 0.5+ sn delik açıyor** → görsel episodlar
+1-2.4 sn'de ölüyor → kilit isteri (10 sn'de 5 sn) matematiksel imkânsız. Model ekipçe
+iyileştiriliyor (paralel iş); yazılım tarafı çözümü **köprü**: gerçek tespit `VIS_STALE_S`'i
+aşınca bbox, son iki GERÇEK tespitten ölçülen görüntü-hızıyla (px/s, `VIS_KOPRU_V_EMA`=0.5
+EMA'lı, tavan 0.8·W/s) `VIS_KOPRU_S`(1.2 s ⚙ slider) boyunca İLERİ taşınır; IBVS aynı
+yasayla sanal bbox'u izler. Gerçek tespit dönünce devralır; köprü de dolarsa kayıp mantığı
+(`VIS_LOST_TO_GPS_S`) çalışır. **Kurallara uyum:** sabit-hız varsayımı = açıklanabilir
+(kural 8); girdi = son bbox + bbox hızı (kameradan türetilmiş) → görsel-faz GPS yasağına
+uygun. **DÜRÜSTLÜK:** köprü tiki KİLİT SAYACINA SAYILMAZ (`_kilit_degerlendir`'e None gider),
+loga `vis_gordu=0, vis_kopru=1` yazılır (rapor tespit%'si gerçek kalır), yalnız GORSEL_GUDUM
+fazında kurulur (OTO kilit sayacı `_vis_pos_count` şişmez), uzun delik sonrası ilk tespitte
+hız SIFIRLANIR (bayat hızla köprü kurulmaz). UI: FPV'de turuncu "◌ KÖPRÜ" rozeti
+(`gorsel.kopru`). Mekanik: `set_gorsel_tespit` hız ölçer, `_gorsel_tespit_oku` sanal det
+üretir (`kopru=True`). Testler: `tests/test_kilit_takip.py` (16/16; 5 köprü testi).
 
 ## ARAYÜZ GECİKME TELAFİSİ + DEDEKTÖR DEBUG PENCERESİ (2026-07-08)
 Kullanıcı gözlemi: bbox/iskelet FPV'de hedefin GERİSİNDE kalıyor (pose daha da geç).

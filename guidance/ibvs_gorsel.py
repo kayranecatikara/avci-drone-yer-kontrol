@@ -124,7 +124,7 @@ class AvciIBVS:
     #  Server ayni det'i VIS_STALE_S boyunca sunar; ayni kareyi tekrar gormek
     #  zararsizdir (EMA sabit degere yakinsar = son komutu tutar).
     # ------------------------------------------------------------------
-    def hesapla(self, det, p, poz=None, own_roll_rad=None):
+    def hesapla(self, det, p, poz=None, own_roll_rad=None, own_pitch_rad=None):
         W = float(det["W"]); H = float(det["H"])
         ex = (float(det["cx"]) - W / 2.0) / (W / 2.0) if W > 1 else 0.0
         ey = (float(det["cy"]) - H / 2.0) / (H / 2.0) if H > 1 else 0.0
@@ -141,14 +141,32 @@ class AvciIBVS:
         # vektorunun goruntudeki yerine (FOE) tutmak icin dikey setpoint:
         #   ey_ref = NISAN * tan(TILT) / tan(VFOV_yari)   (NISAN=0 merkez/altta-kal, 1 hiz-vektoru).
         # Boylece "hedefte" = "burun hedefe kilitli" (dogrudan carpisma; 25-alti nisanlama biter).
-        nisan = clamp(float(getattr(p, "IBVS_DIKEY_NISAN", 1.0)), 0.0, 1.5)
+        # NEGATIF NISAN (2026-07-08, alttan-vurus): hedefi merkez USTUNDE tut -> LOS > TILT ->
+        # arac orantili olarak hedefin ALTINDA kalir + hedef gokyuzu arka planinda (zemin
+        # clutter'da tespit olumu biter). Eski 0.0 tabani yasanin "hedefin ustune cikma"
+        # egilimini yapisal kilitliyordu; -1.0'a acildi.
+        nisan = clamp(float(getattr(p, "IBVS_DIKEY_NISAN", 1.0)), -1.0, 1.5)
         tilt = math.radians(float(getattr(p, "IBVS_TILT_DEG", 25.0)))
         vfov_h = math.radians(float(getattr(p, "IBVS_VFOV_HALF_DEG", 47.2)))
         tan_v = math.tan(vfov_h)
         ey_ref = nisan * math.tan(tilt) / tan_v if abs(tan_v) > 1e-9 else 0.0
 
-        # NISAN NOKTASINDAN -> bbox cizgisi: yatay ex, dikey (ey - ey_ref) = nisandan sapma.
-        eyy = self.ey_f - ey_ref                      # dikey sapma (nisan noktasina gore)
+        # EGO-PITCH TELAFISI (2026-07-08, veri: 8 Tem 204331 logu corr(drone_pitch,vis_ey)=0.70):
+        # kamera govdeye sabit -> ileri itki govdeyi one yatirinca (burun asagi) optik eksen
+        # duser ve hedef goruntude YUKARI ziplar; yasa bunu "hedef kacti -> TIRMAN" okuyup
+        # kacak tirmanma yapiyordu (drone hedefin 10 m ALTINDAYKEN +0.70 tirmanis komutu).
+        # Duzeltme: dikey hatayi kendi pitch'imizden ARINDIR -> gercek bakis-hatti yuksekligi:
+        #   ey_dunya = ey_f - GAIN * tan(own_pitch) / tan(VFOV_yari)
+        # (own_pitch<0 = burun asagi -> tan<0 -> cikarma ey'yi YUKARI duzeltir; ego-roll
+        # telafisiyle ayni emsal: kendi IMU'muz = ego-motion, HEDEF verisi degil -> kural OK.)
+        ey_kul = self.ey_f
+        if own_pitch_rad is not None:
+            g = float(getattr(p, "IBVS_EGO_PITCH_GAIN", 1.0))
+            if g != 0.0 and abs(tan_v) > 1e-9:
+                ey_kul = self.ey_f - g * math.tan(float(own_pitch_rad)) / tan_v
+
+        # NISAN NOKTASINDAN -> bbox cizgisi: yatay ex, dikey (ey_kul - ey_ref) = nisandan sapma.
+        eyy = ey_kul - ey_ref                         # dikey sapma (ego-telafili, nisana gore)
         r = math.hypot(self.ex_f, eyy)
         aci = math.degrees(math.atan2(-eyy, self.ex_f)) if r > 1e-9 else 0.0
 
@@ -163,16 +181,26 @@ class AvciIBVS:
                     float(p.THR_DN), float(p.THR_UP))
         # ileri itki: cizgi (nisandan sapma) buyudukce kisilir (once nisanla, sonra bas gitsin)
         kisma = clamp(1.0 - float(p.IBVS_MERKEZ_FREN) * r, 0.0, 1.0)
-        pitch = float(p.PITCH_SIGN) * clamp(float(p.IBVS_ILERI), 0.0, 1.0) * kisma
+        # ALCALMA FRENI (anti-lift-carry; GPS alc_oncelik'in gorsel-faz aynasi, 2026-07-08):
+        # hedef nisan noktasinin ALTINDAysa (eyy>0 = biz cok YUKSEKTEYIZ) ileri itkiyi
+        # carpimsal kis -> ileri-ucus tasimasi (lift carry) dussun -> negatif thr GERCEKTEN
+        # alcaltsin (GPS dersi ana_kontrol.THR_DN yorumunda: tam ileri ucusta -0.40 bile
+        # tirmanmayi durduramiyordu). TIRMAN tarafi (eyy<0) DOKUNULMAZ. TABAN: asla tam
+        # durma, biraz kapanis kalsin. Girdi yalniz goruntu buyuklugu (eyy) -> kural uygun.
+        alcal = clamp(1.0 - float(getattr(p, "IBVS_ALCAL_FREN", 2.0)) * max(0.0, eyy),
+                      float(getattr(p, "IBVS_ALCAL_TABAN", 0.2)), 1.0)
+        pitch = float(p.PITCH_SIGN) * clamp(float(p.IBVS_ILERI), 0.0, 1.0) * kisma * alcal
         roll = 0.0
 
         self._tlm = {
             "law": "IBVS",
             "ex": round(self.ex_f, 3), "ey": round(self.ey_f, 3),
             "ey_ref": round(ey_ref, 3),       # dikey nisan (hiz-vektoru FOE; tilt'ten)
+            "ey_ego": round(ey_kul, 3),       # ego-pitch TELAFILI dikey hata (yasa bunu kullanir)
             "buyukluk": round(r, 3),          # nisandan sapma (0=hedef nisan noktasinda)
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)
             "kisma": round(kisma, 3),         # ileri itki carpani (1=tam gaz)
+            "alcal": round(alcal, 3),         # alcalma freni carpani (1=serbest; eyy>0'da kisar)
             "dikey": round(thr, 3), "ileri": round(pitch, 3), "yaw": round(yaw, 3),
             # ONGORU (pose kanat uclarindan hedef bank -> yaw lead)
             "roll_deg": round(math.degrees(self.roll_f), 1),  # hedef bank (EGO-TELAFILI, EMA'li)
