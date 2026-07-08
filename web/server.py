@@ -61,7 +61,12 @@ CAM_MAX_WIDTH = 960   # FPV JPEG akisini bu genislige olcekle (bant genisligi; d
 CAM_JPEG_QUALITY = 60
 UI_CONF_MIN = 0.25    # dedektor predict esigi: zayif tespit arayuzde TURUNCU gorunur;
                       # gudum/kilit yalnizca conf>=Cfg.VIS_CONF_MIN gorur (dedektor_dongusu kapisi)
-POZ_HER_N = 3         # poz inference'i her N dedektor turunda bir (gozlemci; GPU dedektore kalsin)
+POZ_HER_N = 5         # poz inference'i her N dedektor turunda bir (gozlemci; GPU dedektore kalsin)
+                      # 3->5 (8 Tem perf: pose ~180ms FP32, gudumde kullanilmiyor -> seyreltip
+                      # best.pt'ye GPU birak; ongoru acilirsa geri dusurulur)
+# FP16 (half) inference: RTX 4060 (Ada) ~2x hizlanma, dogruluk kaybi ihmal edilebilir.
+# set AVCI_FP16=0 ile FP32'ye don (A/B / dogruluk suphesi). Cpu'da zaten otomatik kapali.
+FP16_AKTIF = os.environ.get("AVCI_FP16", "1").strip() == "1"
 
 
 # ----------------------------------------------------------
@@ -901,26 +906,31 @@ def dedektor_dongusu():
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
             # imgsz=1280: yeni model (v3 pose, 5 Tem) 1280'de egitildi — 640'ta uzak/kucuk
             # hedef kacar. Sadece BBOX ciktisi kullaniliyor (pose keypoint'leri simdilik yok).
-            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN, imgsz=1280)
+            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
+                                     imgsz=1280, half=FP16_AKTIF)
             if dedektor.hazir:
-                print("[GORSEL] best.pt yuklendi (device=%s). Siniflar: %s"
-                      % (dedektor.device, dedektor.names))
+                print("[GORSEL] best.pt yuklendi (device=%s, half=%s). Siniflar: %s"
+                      % (dedektor.device, dedektor.half, dedektor.names))
             else:
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
             # POZ modeli (ILAVE gozlemci) — best.pt ile AYNI anda, bir kez denenir.
             if os.path.exists(POSE_MODEL_PATH):
                 # conf=0.35: 0.20'de eski model bos gokyuzune "talon" diyordu (canli
-                # test, 4 Tem) -> overlay'e cop iskelet ciziliyordu; canlida yanlis-
-                # alarm maliyeti yuksek. imgsz=1280: v3 model (5 Tem) 1280'de egitildi.
-                poz_dedektor = PozDedektor(POSE_MODEL_PATH, conf=0.35, imgsz=1280)
+                # test, 4 Tem) -> overlay'e cop iskelet ciziliyordu; canlida yanlis-alarm
+                # maliyeti yuksek. imgsz=960: pose modeli 960'ta EGITILDI (POSE_REHBERI);
+                # 1280'de kosmak hem yavas (~180ms) hem egitim-uyumsuz. 960 ~%40 hizli +
+                # egitimle tutarli. half=FP16 ~2x. Tespit% kotulesirse imgsz=1280 geri.
+                poz_dedektor = PozDedektor(POSE_MODEL_PATH, conf=0.35, imgsz=960,
+                                           half=FP16_AKTIF)
                 if poz_dedektor.hazir:
                     try:
                         from pose.poz_cozucu import PozCozucu, EGITIM_SIRASI
                         poz_cozucu = PozCozucu(conf_esik=0.5, ema_alpha=0.4)
                         _poz_sira = list(EGITIM_SIRASI)
-                        print("[POZ] talon_pose.pt yuklendi (device=%s) -> PnP poz "
-                              "kestirimi AKTIF (gozlemci; gudume girmez)." % poz_dedektor.device)
+                        print("[POZ] talon_pose.pt yuklendi (device=%s, half=%s, imgsz=%d) -> PnP poz "
+                              "kestirimi AKTIF (gozlemci; gudume girmez)."
+                              % (poz_dedektor.device, poz_dedektor.half, poz_dedektor.imgsz))
                     except Exception as e:
                         poz_dedektor.hazir = False
                         print("[POZ] PnP cozucu yuklenemedi (%r) -> poz kapali." % e)

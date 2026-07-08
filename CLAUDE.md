@@ -110,6 +110,23 @@ Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280
 Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
 (640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
 
+## ⭐ MODEL PERFORMANSI — DARBOĞAZ GPU PAYLAŞIMI, MODEL DEĞİL (2026-07-08)
+Kullanıcı "YZ modellerinden tam performans alamıyoruz" → ÖLÇTÜK (`veri/perf_log_*.csv`,
+`server._perf`/`_perf_log_yaz`, ~1 Hz; FPV sağ-altta canlı gösterge). **Canlı:** DET ~100 ms,
+POZ ~180 ms, döngü ~8-9 FPS. **İzole benchmark (oyun KAPALI, aynı RTX 4060):** DET best.pt
+@1280 **39 ms**, POZ @1280 **42 ms** → ~25 FPS. **Kanıt:** model zaten hızlı; canlı 2.5-4.5x
+yavaşlama tamamen **oyunun (Drones of War) GPU'yu paylaşmasından** (oyun render + inference
+aynı dGPU'da yarışıyor). → **TensorRT/FP16 bu sorunu ÇÖZMEZ** (model compute-bound değil;
+FP16 izolede 39→39 ms, KAZANÇ YOK — Ada TF32 zaten FP32 matmul'ü hızlandırıyor). **Gerçek
+çözüm kullanıcı tarafında:** oyunun grafik kalitesini/çözünürlüğünü düşür veya FPS cap koy
+(NVIDIA panel max frame rate) → GPU headroom inference'e kalsın.
+Yine de uygulanan (zararsız, contention'ı biraz azaltır): **FP16** (`quantize=fp16`/`half`
+dinamik — yeni ultralytics uyarısız, eski `half`'e düşer; `AVCI_FP16=0` ile kapatılır),
+**pose imgsz 1280→960** (eğitim imgsz'iyle uyumlu — POSE_REHBERI; doğruluk için de iyi),
+**`POZ_HER_N` 3→5** (pose gözlemci/güdümde yok — 180 ms contention spike'ı seyrekleşir,
+best.pt'ye temiz GPU kalır). best.pt imgsz=1280 KALIR (640'ta çöker). Doğruluk (uzak/küçük
+hedef recall) ayrı iş: eğitim/veri (ekip). Perf ölçüm altyapısı: `AVCI_FP16` env + FPV göstergesi.
+
 ## ⭐ BÜYÜK SIFIRLAMA — BASİT IBVS (2026-07-07 v7, kullanıcı kararı)
 Kullanıcı: "bu IBVS işine çok değişik şeyler eklemişsin (PN'i yönelime entegre etmiştik),
 en basit haliyle uygula: görüntünün orta noktasından bbox merkezine bir çizgi çek, bu çizginin

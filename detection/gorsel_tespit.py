@@ -18,13 +18,15 @@ ndarray dondurdugunden dogrudan gecmek DOGRU renktir (PIL RGB de kabul edilir).
 
 class HedefDedektor:
 
-    def __init__(self, model_path, conf=0.35, imgsz=640, device=None):
+    def __init__(self, model_path, conf=0.35, imgsz=640, device=None, half=None):
         self.hazir = False
         self.model = None
         self.names = {}
         self.conf = float(conf)
         self.imgsz = int(imgsz)
         self.device = device
+        self.half = half            # FP16 inference (None -> cuda'da otomatik AC; cpu'da kapali)
+        self._fp16_kwargs = {}      # predict'e eklenen FP16 arg'i (API'ye gore quantize/half)
         self.hata = None
         self.task = None            # 'detect' | 'pose' (yukleme sonrasi)
         self.kpt_shape = None       # pose ise (n, dim); PnP [6,3] bekler
@@ -36,6 +38,10 @@ class HedefDedektor:
                     self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 except Exception:
                     self.device = "cpu"
+            # FP16: cuda'da ~2x hizlanma, dogruluk kaybi ihmal edilebilir. CPU'da FP16
+            # anlamsiz/yavas -> otomatik kapali. Cagiran acikca half=True/False verebilir.
+            if self.half is None:
+                self.half = (self.device == "cuda")
             self.model = YOLO(model_path)
             self.names = dict(getattr(self.model, "names", {}) or {})
             self.task = getattr(self.model, "task", None)
@@ -49,9 +55,24 @@ class HedefDedektor:
             self.hata = repr(e)                           # neden yuklenemedi (log icin)
 
     def _warmup(self):
+        # FP16 API SECIMI + isitma: yeni ultralytics 'quantize="fp16"' (uyarisiz),
+        # eski surumde bu arg YOK -> TypeError -> 'half=True'ya dus (fonksiyonel).
+        # Secilen arg self._fp16_kwargs'a yazilir, tum predict'lerde kullanilir.
+        # (ilk predict yavas oldugundan warmup zaten sart; API testini birlestirdik.)
         try:
             import numpy as np
             bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
+            adaylar = ([{"quantize": "fp16"}, {"half": True}] if self.half else [{}])
+            for kw in adaylar:
+                try:
+                    self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
+                                       device=self.device, verbose=False, **kw)
+                    self._fp16_kwargs = kw
+                    return
+                except TypeError:
+                    continue                      # bu FP16 arg'i bu surumde yok -> digerini dene
+            # FP16 adaylarinin hicbiri gecmedi -> FP32 warmup (garanti)
+            self._fp16_kwargs = {}
             self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
                                device=self.device, verbose=False)
         except Exception:
@@ -94,7 +115,7 @@ class HedefDedektor:
         import numpy as np
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
-                                     device=self.device, verbose=False)[0]
+                                     device=self.device, verbose=False, **self._fp16_kwargs)[0]
         except Exception:
             return []
         boxes = getattr(res, "boxes", None)

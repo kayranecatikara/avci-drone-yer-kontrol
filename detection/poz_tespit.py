@@ -19,12 +19,14 @@ sag_kuyruk]. talon_keypoints.json REFERANS sirasina cevirme poz_cozucu
 
 class PozDedektor:
 
-    def __init__(self, model_path, conf=0.20, imgsz=960, device=None):
+    def __init__(self, model_path, conf=0.20, imgsz=960, device=None, half=None):
         self.hazir = False
         self.model = None
         self.conf = float(conf)
         self.imgsz = int(imgsz)          # egitim imgsz'ine esitle (v3 model: 1280; cagiran verir)
         self.device = device
+        self.half = half                 # FP16 (None -> cuda'da otomatik AC; cpu'da kapali)
+        self._fp16_kwargs = {}           # predict FP16 arg'i (API'ye gore quantize/half)
         self.hata = None
         try:
             from ultralytics import YOLO
@@ -34,6 +36,8 @@ class PozDedektor:
                     self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 except Exception:
                     self.device = "cpu"
+            if self.half is None:
+                self.half = (self.device == "cuda")
             self.model = YOLO(model_path)
             if getattr(self.model, "task", None) != "pose":
                 raise ValueError("model 'pose' degil: %r" % getattr(self.model, "task", None))
@@ -44,9 +48,21 @@ class PozDedektor:
             self.hata = repr(e)
 
     def _warmup(self):
+        # FP16 API secimi + isitma (gorsel_tespit ile ayni desen): yeni ultralytics
+        # 'quantize="fp16"' (uyarisiz), eski surumde TypeError -> 'half=True'ya dus.
         try:
             import numpy as np
             bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
+            adaylar = ([{"quantize": "fp16"}, {"half": True}] if self.half else [{}])
+            for kw in adaylar:
+                try:
+                    self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
+                                       device=self.device, verbose=False, **kw)
+                    self._fp16_kwargs = kw
+                    return
+                except TypeError:
+                    continue
+            self._fp16_kwargs = {}
             self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
                                device=self.device, verbose=False)
         except Exception:
@@ -60,7 +76,7 @@ class PozDedektor:
         import time as _t
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
-                                     device=self.device, verbose=False)[0]
+                                     device=self.device, verbose=False, **self._fp16_kwargs)[0]
         except Exception:
             return None
         boxes = getattr(res, "boxes", None)
