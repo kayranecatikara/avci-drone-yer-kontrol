@@ -8,9 +8,15 @@ Bu repo (avci-drone-yer-kontrol) TEKNOFEST avcı drone yer kontrol yazılımı. 
 
 **Sürüm notu (sim/SDK v0.0.5):** kamera tilt **25° yukarı** (v0.0.4'teki 0° geri alındı — FPV kamera burnu 25° yukarı eğik bakar), FOV **125° yatay (HFOV — convention netleşti)**, hedef GPS **5 Hz**, dropout 30. sn'den sonra her 10 sn'de 2 sn, gecikme değişken ve açıklanmıyor. Uçuş modeli Angle Mode: maks yatış 60°, toplam hız 120 km/h (dalışta aşılabilir), throttle dikey komut.
 
-> **SONUÇ NOTU (2026-07-06):** Bu spec büyük ölçüde UYGULANDI (tarihî belge). FSM durum
-> adları kodda sonradan yeniden adlandırıldı: `TAKIP`→`YAKLASMA`, `GORSEL_GUDUM`→`GORSEL_TAKIP`
-> (tek kaynak: `arac/fsm_adlari.py`); aşağıdaki tarihî adlar koda birebir uymaz.
+> **SONUÇ NOTU (2026-07-06):** Bu spec büyük ölçüde UYGULANDI (tarihî belge). Sonradan değişenler:
+> - FSM durum adları yeniden adlandırıldı: `TAKIP`→`YAKLASMA`, `GORSEL_GUDUM`→`GORSEL_TAKIP`
+>   (tek kaynak: `arac/fsm_adlari.py`); aşağıdaki tarihî adlar koda birebir uymaz.
+> - Pose modeli ARTIK VAR: `models/talon_pose.pt` (Berat, yolo11m-pose; registry'den hot-swap) —
+>   satır ~62'deki "henüz eğitilmedi / dataset işaretleme sürüyor" ifadesi tarihîdir. Eğitim
+>   zinciri iskeleti de hazır: `arac/egitim/dataset_dogrula.py` + `pose_egit.py`.
+> - Keypoint sırası "dataset yaml'ından doğrulanacak" varsayımı (satır ~125) yerine DENEYSEL
+>   bulundu (`pose/poz_cozucu.EGITIM_SIRASI`, 87 kare) ve 3B tablonun TEK KAYNAĞI
+>   `pose/talon_keypoints.json` oldu (satır ~119'daki "koda sabit gömülür" gömülü tablo artık yedek).
 
 **Başlamadan önce oku:** `CLAUDE.md`, `MEVCUT_DURUM.md`, `sdk/SDK_README.md` (v0.0.5 uçuş modeli, tilt, telemetri davranışı), `web/server.py`, `detection/gorsel_tespit.py`, `guidance/ana_kontrol.py`, `guidance/ibvs_guidance.py`, `sdk/drone_sdk.py` (attitude telemetrisinin alanları için), `web/index.html`. Mevcut convention'lara (Türkçe isimlendirme, Cfg deseni, thread yapısı) uy.
 

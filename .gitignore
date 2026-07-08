@@ -1,6 +1,9 @@
 # --- Oyun dosyalari (cok buyuk + yarisma materyali; repoya KONMAZ) ---
 Drones of War Teknofest/
 
+# --- Resmi yarisma belgeleri (PDF; herkeste var, ~7 MB binary; repoyu sisirmesin) ---
+docs/ham_belgeler/
+
 # --- Buyuk model ---
 # pose modeli 123 MB > GitHub 100 MB siniri (push REDDEDILIR). Aktif model best.pt (50 MB).
 bestpose.pt
@@ -10,7 +13,6 @@ models/bestpose.pt
 models/*.pt
 !models/best.pt
 !models/talon_pose.pt
-!models/best_kayra_son.pt
 # ham Colab ciktisi 126 MB (optimizer dahil) > 100 MB siniri. Calisan kopyasi
 # models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
 talon_yolo11m_pose_2_best.pt
