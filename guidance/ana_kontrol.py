@@ -285,8 +285,8 @@ class Cfg:
     # --- KILITLENME ISTERI SAYACI (sartname 6.1.2 + 6.1.4, Sekil 2) — SALT GOZLEM ---
     # Gudume KARISMAZ (eski YAKLASMA/TAKIP/TERMINAL alt-FSM'i silindi); arayuz/video
     # kaniti icin sayilir: kirmizi kilit dortgeni + 5/10 sn pencere + ANGAJMAN cipi.
-    # Kilit tanimi (her tik): hedef MERKEZI Hedef Vurus Alani (AV) icinde VE bbox
-    # ekranin EN AZ BIR ekseninde >= VIS_LOCK_PCT. Kesintili kilit sayilir.
+    # Kilit tanimi (her tik): AH (bbox) TAMAMEN Hedef Vurus Alani (AV) icinde (dort kenar
+    # da; MERKEZ degil) VE bbox EN AZ BIR ekseninde >= VIS_LOCK_PCT. Kesintili kilit sayilir.
     VIS_LOCK_PCT     = 0.06     # bbox eksen orani esigi. Sartname kurali >=0.05 ama
                                 # tam sinirda calisan algoritma hakem incelemesinde
                                 # "hatali kilit paketi" sayilabilir -> tavsiye edilen 0.06
@@ -294,11 +294,48 @@ class Cfg:
     VIS_AV_Y         = 0.10     # AV dikey kenar payi (sartname sabiti: %10-%90 bandi)
     VIS_WIN_S        = 10.0     # degerlendirme penceresi (sartname sabiti)
     VIS_WIN_NEED_S   = 5.0      # pencerede gereken kumulatif kilit (sartname sabiti)
+    # --- ZAMAN-TABANLI SEGMENT MOTORU (2026-07-08): kilit suresi wall-clock damgalarla ---
+    # Gecerli kilit karesinden sonraki bosluk BRIDGE_S altiysa koprulenir (kilide sayilir);
+    # koprulenen toplam bosluk segmentin en fazla BRIDGE_PCT'i olabilir; segment bas/sonu
+    # GERCEK gecerli tespit (temiz uc). Bosluk BRIDGE_S'i asarsa segment son gecerlide kapanir.
+    VIS_LOCK_BRIDGE_S   = 0.2    # gecerli kareler arasi koprulenebilir azami bosluk (s)
+    VIS_LOCK_BRIDGE_PCT = 0.05   # koprulenen toplam bosluk / segment suresi ust siniri (%5)
+    # --- SAHTE-POZITIF KAPISI (2026-07-08, SAF GORSEL — PnP/GPS DEGIL): uzak clutter/pervane
+    # >=%6 in-AV cikabiliyor (110m'de %6 fiziksel imkansiz). Gecerli kilit karesi icin EK sart:
+    # (1) conf >= esik; (2) bbox en/boy (w/h) talonun makul araliginda (talon GENIS; dar/dikey
+    # = sahte). 8 Tem olcum: gercek yakin conf 0.56-0.89 asp 1.6-3.2; sahte uzak asp 0.5-0.9 dikey.
+    VIS_LOCK_CONF_MIN   = 0.50   # kilit karesi asgari conf (sahte-pozitif kapisi)
+    VIS_LOCK_ASPECT_MIN = 1.5    # bbox en/boy (w/h) alt siniri (talon GENIS; dikey=sahte)
+    VIS_LOCK_ASPECT_MAX = 6.0    # bbox en/boy ust siniri
+    # --- GORSEL DEVIR (handover) ESIGI (2026-07-08): OTO/GPS'ten gorsele gecis, hedef YETERINCE
+    # YAKIN+BUYUK olana kadar OLMAZ. Devir sarti: talon_gate + bbox >= VIS_HANDOFF_PCT (kilit %6'nin
+    # altinda ama clutter'dan yukarida) + ard arda VIS_N_LOCK kare STABIL. bbox kucukse (uzak) IBVS
+    # mesafe kapatamaz -> GPS/OTO yaklasmaya devam. Devir-alti'na (histerezis) dusulurse GPS'e revert.
+    VIS_HANDOFF_PCT   = 0.035    # gorsele devir icin asgari bbox eksen orani (~%3.5; yakin+buyuk)
+    VIS_REVERT_HYST   = 0.7      # revert esigi = VIS_HANDOFF_PCT * bu (histerezis; salinim onler)
 
 
 # ==========================================================
 # HELPERS  (faz1_gnss_yaklasma'dan AYNEN)
 # ==========================================================
+def talon_gate(tespit):
+    """SAHTE-POZITIF KAPISI (SAF GORSEL — PnP/GPS DEGIL): tespit conf + en-boy (w/h) talon
+    araliginda mi. True = gercek talon adayi -> KILIT degerlendirme VE gorsel guduum (IBVS)
+    girdisi VE CSV isareti bunu kullanir (TEK dogruluk kaynagi). False = sahte (uzak clutter/
+    pervane: dar/dikey en-boy veya zayif conf). Amac: arac OLMAYAN talonu takip/kilit etmesin."""
+    if tespit is None:
+        return False
+    try:
+        h = float(tespit["h"])
+        if h <= 0:
+            return False
+        aspect = float(tespit["w"]) / h
+        return (float(tespit.get("conf", 0.0)) >= float(Cfg.VIS_LOCK_CONF_MIN)
+                and float(Cfg.VIS_LOCK_ASPECT_MIN) <= aspect <= float(Cfg.VIS_LOCK_ASPECT_MAX))
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return False
+
+
 def wrap_pi(a):
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
@@ -390,11 +427,15 @@ class AvciKontrol:
         self.ibvs_tlm = {}              # son IBVS telemetrisi (server build_telemetry okur; salt-okunur)
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
         # --- KILITLENME ISTERI SAYACI (sartname 6.1.2/6.1.4; SALT GOZLEM, komuta girmez) ---
-        self.kilit_win = deque()        # (t, kilit_anlik) ornekleri — son VIS_WIN_S penceresi
+        self.kilit_win = deque()        # KAPALI temiz segmentler (bas, son) — son VIS_WIN_S penceresi
         self.kilit_sure = 0.0           # penceredeki kumulatif kilit suresi (s)
+        self.kilit_en_uzun = 0.0        # penceredeki EN UZUN tek segment (s) = tek-geciste potansiyel
         self.kilit_anlik = False        # bu tik kilit kosulu (AV icinde + boyut >= LOCK_PCT)
         self.kilit_ok = False           # LATCH: pencere isteri (>=WIN_NEED_S) saglandi
         self.kilit_boyut = None         # bu tik bbox eksen orani max(w/W, h/H) (telemetri)
+        self.kilit_sahte = False        # bu tik >=%6+AV ama sahte-pozitif kapisinda ELENDI mi
+        self.kilit_enboy = None         # bu tik bbox en/boy orani w/h (telemetri)
+        self._kseg_reset()              # zaman-tabanli segment motoru ic durumu
 
     # ----------------------------------------------------------------
     #  Guduum kaynagini CANLI degistir (v2/Gercek butonlari)
@@ -436,9 +477,11 @@ class AvciKontrol:
         # kilitlenme isteri sayaci: yeni gorev -> pencere ve latch dahil taze basla
         self.kilit_win.clear()
         self.kilit_sure = 0.0
+        self.kilit_en_uzun = 0.0
         self.kilit_anlik = False
         self.kilit_ok = False
         self.kilit_boyut = None
+        self._kseg_reset()
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
         # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
         # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
@@ -653,9 +696,11 @@ class AvciKontrol:
         # switch = yeni deneme -> kilitlenme penceresi ve latch de taze baslasin
         self.kilit_win.clear()
         self.kilit_sure = 0.0
+        self.kilit_en_uzun = 0.0
         self.kilit_anlik = False
         self.kilit_ok = False
         self.kilit_boyut = None
+        self._kseg_reset()
         return True
 
     def set_gorsel_tespit(self, det):
@@ -725,37 +770,103 @@ class AvciKontrol:
     #  LATCH'lenir -> arayuz ANGAJMAN cipi / kirmizi dortgen / olay kaydi.
     #  SALT GOZLEM: sonucu hicbir kontrol komutuna GIRMEZ (basit IBVS tek yasa).
     # ----------------------------------------------------------------
+    def _kseg_reset(self):
+        """Zaman-tabanli segment motoru ic durumu (kilit_win ayrica temizlenir)."""
+        self._kseg_start = None          # ACIK segment basi (ilk gecerli kare)
+        self._kseg_last = None           # ACIK segment SON GECERLI karesi (temiz uc)
+        self._kseg_bridged = 0.0         # segmentte koprulenen toplam bosluk (s)
+        self._kseg_prev_valid = False    # onceki tik gecerli miydi (kesintisiz kapsama ayrimi)
+        self._kseg_prev_t = None         # onceki tik zamani (sureklilik/geri-saat korumasi)
+
+    def _kseg_kapat(self):
+        """ACIK segmenti SON GECERLI karede finalize et (temiz uc) ve pencereye ekle."""
+        if (self._kseg_start is not None and self._kseg_last is not None
+                and self._kseg_last > self._kseg_start):
+            self.kilit_win.append((self._kseg_start, self._kseg_last))
+        self._kseg_start = None
+        self._kseg_last = None
+        self._kseg_bridged = 0.0
+
+    def _kseg_metrik(self, t):
+        """Pencere(VIS_WIN_S) icindeki KAPALI + ACIK segmentlerden kilit_sure/en_uzun/ok."""
+        win = self.kilit_win
+        pb = t - float(Cfg.VIS_WIN_S)
+        while win and win[0][1] < pb:
+            win.popleft()
+        parcalar = list(win)
+        if (self._kseg_start is not None and self._kseg_last is not None
+                and self._kseg_last > self._kseg_start):
+            parcalar.append((self._kseg_start, self._kseg_last))   # ACIK segment (son gecerliye kadar)
+        sure = 0.0
+        en_uzun = 0.0
+        for (s, e) in parcalar:
+            a = s if s > pb else pb                    # pencereye kirp
+            if e > a:
+                sure += (e - a)
+            if (e - s) > en_uzun:                      # en uzun tek segment (kirpmasiz)
+                en_uzun = e - s
+        self.kilit_sure = sure
+        self.kilit_en_uzun = en_uzun
+        if (not self.kilit_ok) and sure >= float(Cfg.VIS_WIN_NEED_S):
+            self.kilit_ok = True                       # kalici latch (gorev boyunca)
+            print("[KILIT] %.0f sn pencerede %.1f sn kumulatif (zaman-tabanli segment) -> KILIT "
+                  "ISTERI SAGLANDI (sartname 6.1.4: >= %.0f sn)." % (Cfg.VIS_WIN_S, sure, Cfg.VIS_WIN_NEED_S))
+
     def _kilit_degerlendir(self, tespit, t):
+        # 1) GECERLI KILIT KARESI: taze det + AH TAMAMEN AV-ici (full-box) + en az bir eksen
+        #    >= VIS_LOCK_PCT + SAHTE-POZITIF KAPISI (conf + en/boy).
         kilit = False
-        self.kilit_boyut = None                      # bu tik bbox eksen orani (telemetri)
+        self.kilit_boyut = None
+        self.kilit_sahte = False
+        self.kilit_enboy = None
         if tespit is not None:
             W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
             if W > 1 and H > 1:
-                cxn = float(tespit["cx"]) / W
-                cyn = float(tespit["cy"]) / H
-                boyut = max(float(tespit["w"]) / W, float(tespit["h"]) / H)
+                cxn = float(tespit["cx"]) / W; cyn = float(tespit["cy"]) / H
+                wn = float(tespit["w"]) / W; hn = float(tespit["h"]) / H
+                boyut = max(wn, hn)
                 self.kilit_boyut = boyut
+                hpx = float(tespit["h"])
+                aspect = (float(tespit["w"]) / hpx) if hpx > 0 else 0.0   # en/boy w/h
+                self.kilit_enboy = aspect
                 av_x = float(Cfg.VIS_AV_X); av_y = float(Cfg.VIS_AV_Y)
-                kilit = (av_x <= cxn <= 1.0 - av_x
-                         and av_y <= cyn <= 1.0 - av_y
-                         and boyut >= float(Cfg.VIS_LOCK_PCT))
+                av_ici = (av_x <= cxn - wn / 2.0 and cxn + wn / 2.0 <= 1.0 - av_x
+                          and av_y <= cyn - hn / 2.0 and cyn + hn / 2.0 <= 1.0 - av_y)
+                boy_ok = boyut >= float(Cfg.VIS_LOCK_PCT)
+                # SAHTE-POZITIF KAPISI (saf gorsel): >=%6+AV ama zayif conf VEYA dar/dikey
+                # en-boy -> SAHTE (talon GENIS). Kilit sayilmaz; kilit_sahte isaretlenir.
+                gercek = talon_gate(tespit)               # SAHTE-POZITIF KAPISI (tek kaynak)
+                kilit = (av_ici and boy_ok and gercek)
+                self.kilit_sahte = (av_ici and boy_ok and not gercek)
         self.kilit_anlik = kilit
-        win = self.kilit_win
-        win.append((t, kilit))
-        while win and (t - win[0][0]) > float(Cfg.VIS_WIN_S):
-            win.popleft()
-        # kumulatif sure: onceki ornek kilitliyse iki ornek arasi dt sayilir
-        # (0.5 sn ustu bosluk = gorsel faz disinda gecen zaman; sayilmaz)
-        sure = 0.0
-        for i in range(1, len(win)):
-            dt = win[i][0] - win[i - 1][0]
-            if win[i - 1][1] and 0.0 < dt < 0.5:
-                sure += dt
-        self.kilit_sure = sure
-        if (not self.kilit_ok) and sure >= float(Cfg.VIS_WIN_NEED_S):
-            self.kilit_ok = True                     # kalici latch (gorev boyunca)
-            print("[KILIT] %.0f sn pencerede %.1f sn kumulatif kilit -> KILIT ISTERI SAGLANDI "
-                  "(sartname 6.1.4: >= %.0f sn)." % (Cfg.VIS_WIN_S, sure, Cfg.VIS_WIN_NEED_S))
+
+        # 2) ZAMAN-TABANLI SEGMENT (wall-clock): gecerli kareler kesintisizse dogrudan uzatilir;
+        #    aralarinda bosluk varsa (onceki tik gecersiz) bosluk BRIDGE_S altinda VE koprulenen
+        #    toplam <= BRIDGE_PCT*segment ise koprulenir, degilse segment SON GECERLI'de kapanir.
+        B = float(Cfg.VIS_LOCK_BRIDGE_S); P = float(Cfg.VIS_LOCK_BRIDGE_PCT)
+        prev_t = self._kseg_prev_t
+        self._kseg_prev_t = t
+        if prev_t is not None and (t < prev_t or (t - prev_t) > 1.0):   # sureklilik kopmasi
+            self._kseg_kapat(); self._kseg_prev_valid = False
+        if self._kseg_start is not None and (t - self._kseg_last) > B:  # bosluk BRIDGE_S'i asti -> kapat
+            self._kseg_kapat()
+        if kilit:
+            if self._kseg_start is None:
+                self._kseg_start = self._kseg_last = t; self._kseg_bridged = 0.0
+            elif self._kseg_prev_valid:
+                self._kseg_last = t                    # kesintisiz kapsama -> uzat (bosluk yok)
+            else:
+                gap = t - self._kseg_last              # bosluk bitti (onceki tik gecersizdi)
+                dur = t - self._kseg_start
+                if (self._kseg_bridged + gap) <= P * dur:   # %5 butcesi -> kopru (kilide say)
+                    self._kseg_bridged += gap; self._kseg_last = t
+                else:                                  # butce asildi -> yeni segment (temiz uc)
+                    self._kseg_kapat()
+                    self._kseg_start = self._kseg_last = t; self._kseg_bridged = 0.0
+        self._kseg_prev_valid = kilit
+
+        # 3) pencere metrigi (kilit_sure / kilit_en_uzun / kilit_ok)
+        self._kseg_metrik(t)
         return kilit
 
     # ----------------------------------------------------------------
@@ -777,17 +888,23 @@ class AvciKontrol:
         # YARISMA KURALI: gorsel temastan SONRA hareket komutu YALNIZ GORSEL veriden.
         # GPS/J (yon YA DA buyukluk) GECIRILMEZ -> diskalifiye. IBVS yalniz bbox okur.
         if tespit is not None:
-            self._vis_lost_count = 0
-            komut = self.ibvs.hesapla(tespit, Cfg)
-            self.ibvs_tlm = self.ibvs.durum()
-            return komut
-        # --- KAYIP: HOVER (yeniden tespit bekle) -> uzarsa (yalniz OTO) GPS'e don ---
+            # DEVIR-ALTI KONTROL: bbox devir esiginin altina (histerezis) dustuyse hedef UZAKLASTI;
+            # IBVS mesafe kapatamaz -> "kayip gibi" say (sustained ise GPS'e revert -> yeniden yaklas).
+            _Wd = float(tespit.get("W", 0) or 0); _Hd = float(tespit.get("H", 0) or 0)
+            _boyut = (max(float(tespit["w"]) / _Wd, float(tespit["h"]) / _Hd) if _Wd > 1 and _Hd > 1 else 0.0)
+            if _boyut >= float(Cfg.VIS_HANDOFF_PCT) * float(Cfg.VIS_REVERT_HYST):
+                self._vis_lost_count = 0
+                komut = self.ibvs.hesapla(tespit, Cfg)
+                self.ibvs_tlm = self.ibvs.durum()
+                return komut
+            # bbox devir-alti (hedef uzak) -> asagidaki kayip/revert yoluna DUS (hover -> GPS'e don)
+        # --- KAYIP veya DEVIR-ALTI: HOVER (bekle) -> uzarsa (yalniz OTO) GPS'e don ---
         self._vis_lost_count += 1
         lost_s = self._vis_lost_count * Cfg.DT
         if (not revert_izin) or Cfg.VIS_LOST_TO_GPS_S <= 0 or lost_s <= Cfg.VIS_LOST_TO_GPS_S:
-            return 0.0, 0.0, 0.0, 0.0            # hover: ararken bekle (manuel GORSEL'de HEP)
-        # UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
-        print("[GORSEL] Hedef %.1fs kayip -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)
+            return 0.0, 0.0, 0.0, 0.0            # hover: bekle (manuel GORSEL'de HEP)
+        # UZUN kayip/devir-alti (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas)
+        print("[GORSEL] Hedef %.1fs kayip/devir-alti -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)
         self.durum = "ARAMA"
         self._vis_pos_count = 0
         self._vis_lost_count = 0
@@ -797,7 +914,9 @@ class AvciKontrol:
         # gecmiste saglandiysa gecerli kalir; sayac yeniden dolmak zorunda degil).
         self.kilit_win.clear()
         self.kilit_sure = 0.0
+        self.kilit_en_uzun = 0.0
         self.kilit_anlik = False
+        self._kseg_reset()                       # segment motoru taze; kilit_ok LATCH KORUNUR
         return None                              # -> adim() GPS yoluna DUSER (bu tik)
 
     # ----------------------------------------------------------------
@@ -857,26 +976,28 @@ class AvciKontrol:
                 if not self._vis_ilan:
                     print("[GORSEL] Manuel switch -> GORSEL GUDUM (GPS yonelimi kapali).")
                     self._vis_ilan = True
-        else:  # OTO — otomatik kilit: YAKINLIK + YOLO kilidi (ikisi birden)
+        else:  # OTO — otomatik DEVIR: hedef YETERINCE YAKIN+BUYUK olunca (bbox-tabanli, saf gorsel)
             if self.durum != "GORSEL_GUDUM":
-                if tespit is not None and float(tespit.get("conf", 0.0)) >= Cfg.VIS_CONF_MIN:
-                    self._vis_pos_count += 1
-                else:
-                    self._vis_pos_count = 0
-                # HANDOFF: GPS hedefe YETERINCE YAKLASMIS OLMALI (self.handoff = d_h<HANDOFF_RANGE,
-                # onceki tikte hesaplanir) VE YOLO kilidi (ard arda VIS_N_LOCK gecerli tespit).
-                # Ikisi birden saglaninca saldiri KAMERAYA devredilir; oncesinde GPS yaklasmaya
-                # devam eder (uzaktan yanlis-kilit yok).
-                # ACIK (Cfg.AUTO_VISUAL_HANDOFF=True, 2026-07-06): kilit+yakinlik saglaninca
-                # OTONOM olarak GORSEL_GUDUM'a gecilir (Ister 9/10 angajman zinciri).
-                # Manuel GORSEL/GPS switch bu bayraktan bagimsiz calisir.
-                if (Cfg.AUTO_VISUAL_HANDOFF
-                        and self._vis_pos_count >= Cfg.VIS_N_LOCK and self.handoff):
+                # DEVIR SARTI: kapiyi gecen GERCEK tespit (talon_gate) VE bbox >= VIS_HANDOFF_PCT
+                # (yeterince BUYUK = yakin; kilit %6'nin altinda ama clutter'dan yukarida), ard arda
+                # VIS_N_LOCK kare STABIL. bbox kucukse (uzak) DEVRETME -> GPS/OTO yaklasmaya devam
+                # etsin (IBVS mesafe kapatamaz, sikisir). GPS-mesafe kapisi (self.handoff) KALDIRILDI:
+                # bbox boyutu daha guvenilir + SAF-GORSEL bir yakinlik olcusudur.
+                _dbuyuk = False
+                if talon_gate(tespit):
+                    _Wd = float(tespit.get("W", 0) or 0); _Hd = float(tespit.get("H", 0) or 0)
+                    if _Wd > 1 and _Hd > 1:
+                        _dbuyuk = (max(float(tespit["w"]) / _Wd, float(tespit["h"]) / _Hd)
+                                   >= float(Cfg.VIS_HANDOFF_PCT))
+                self._vis_pos_count = (self._vis_pos_count + 1) if _dbuyuk else 0
+                if Cfg.AUTO_VISUAL_HANDOFF and self._vis_pos_count >= Cfg.VIS_N_LOCK:
                     self.durum = "GORSEL_GUDUM"
-                    if not self._vis_ilan:
-                        print("[GORSEL] Yakinlik + gorsel kilit saglandi -> GPS YAKLASMAYI BIRAKTI, "
-                              "yonelim/saldiri yalnizca KAMERA verisiyle.")
-                        self._vis_ilan = True
+                    _db = max(float(tespit["w"]) / float(tespit["W"]),
+                              float(tespit["h"]) / float(tespit["H"]))
+                    print("[GORSEL] DEVIR: hedef yeterince yakin+buyuk (bbox=%.1f%% >= %.1f%%, %d kare "
+                          "stabil) -> gorsel guduume gecildi (GPS yaklasma birakildi)."
+                          % (_db * 100.0, Cfg.VIS_HANDOFF_PCT * 100.0, Cfg.VIS_N_LOCK))
+                    self._vis_ilan = True
 
         if self.durum == "GORSEL_GUDUM":
             sonuc = self._gorsel_guduum(tespit, t, revert_izin=(mod == "OTO"))

@@ -6,8 +6,9 @@ KILITLENME ISTERI SAYACI + gorsel kayip yonetimi dogrulama (oyunsuz) — sartnam
 kayip, soft-start) yasayla birlikte SILINDI. Kalanlar basit-IBVS mimarisine gore:
 
 Test edilenler:
-  1) Kilit kosulu: hedef merkezi AV icinde (yatay %25-75, dikey %10-90) VE bbox
-     EN AZ BIR eksende >= VIS_LOCK_PCT (tek eksen yeter).
+  1) Kilit kosulu: hedef KUTUSU (AH) TAMAMEN AV icinde (full-box: dort kenar da
+     yatay %25-75, dikey %10-90 bandinda; MERKEZ degil) VE bbox EN AZ BIR eksende
+     >= VIS_LOCK_PCT (tek eksen yeter).
   2) 10 sn pencere aritmetigi: kumulatif >= 5 sn (kesintili sayilir; sartname
      ornegi 1+2+2 sn), pencere disina dusen eski kilitler SAYILMAZ.
   3) Sayac SALT GOZLEM: kilit_ok latch'i olsun olmasin AYNI tespit AYNI komutu
@@ -53,18 +54,41 @@ def test_kilit_kosulu_tek_eksen_yeter():
 
 
 def test_kilit_kosulu_av_siniri():
-    # merkez x=%24 -> AV disi (sinir %25) -> kilit yok; x=%26 -> var
-    assert _beyin()._kilit_degerlendir(_det(cxn=0.24, wp=0.08), 0.0) is False
-    assert _beyin()._kilit_degerlendir(_det(cxn=0.26, wp=0.08), 0.0) is True
-    # dikey sinir: y=%8 -> disi; y=%12 -> ici
-    assert _beyin()._kilit_degerlendir(_det(cyn=0.08, wp=0.08), 0.0) is False
-    assert _beyin()._kilit_degerlendir(_det(cyn=0.12, wp=0.08), 0.0) is True
+    # FULL-BOX: kutunun TAMAMI AV icinde olmali (MERKEZ degil). wp=0.08 -> yatay yari 0.04;
+    # hp=0.04 (varsayilan) -> dikey yari 0.02.
+    # yatay: sol kenar >= 0.25 icin cx >= 0.29. cx=0.28 -> kenar 0.24 (disi); cx=0.32 -> 0.28 (ici)
+    assert _beyin()._kilit_degerlendir(_det(cxn=0.28, wp=0.08), 0.0) is False
+    assert _beyin()._kilit_degerlendir(_det(cxn=0.32, wp=0.08), 0.0) is True
+    # dikey: ust kenar >= 0.10 icin cy >= 0.12. cy=0.10 -> kenar 0.08 (disi); cy=0.16 -> 0.14 (ici)
+    assert _beyin()._kilit_degerlendir(_det(cyn=0.10, wp=0.08), 0.0) is False
+    assert _beyin()._kilit_degerlendir(_det(cyn=0.16, wp=0.08), 0.0) is True
 
 
 def test_kilit_kosulu_tespit_yok():
     b = _beyin()
     assert b._kilit_degerlendir(None, 0.0) is False
     assert b.kilit_boyut is None
+
+
+def test_sahte_pozitif_conf_ve_enboy_eler():
+    # >=%6 + AV + GENIS en-boy + conf yeter -> KILIT VAR (gercek talon)
+    assert _beyin()._kilit_degerlendir(_det(wp=0.10, hp=0.04, conf=0.9), 0.0) is True
+    # DUSUK conf (uzak clutter) -> SAHTE-POZITIF -> kilit YOK
+    assert _beyin()._kilit_degerlendir(_det(wp=0.10, hp=0.04, conf=0.30), 0.0) is False
+    # DAR/DIKEY en-boy (talon degil), conf yuksek olsa da -> SAHTE-POZITIF -> kilit YOK
+    assert _beyin()._kilit_degerlendir(_det(wp=0.03, hp=0.10, conf=0.9), 0.0) is False
+
+
+def test_devir_alti_kucuk_bbox_ibvs_surmez():
+    # DEVIR-ALTI: bbox devir esiginin (VIS_HANDOFF_PCT * VIS_REVERT_HYST) ALTINDA -> IBVS komut
+    # URETMEZ (hedef uzak, IBVS mesafe kapatamaz) -> hover/kayip yoluna duser.
+    b = _beyin(); b.durum = "GORSEL_GUDUM"
+    r = b._gorsel_guduum(_det(wp=0.01, hp=0.006, conf=0.9, t=0.0), 0.02)   # bbox %1 << esik
+    assert r == (0.0, 0.0, 0.0, 0.0), "devir-alti kucuk bbox'ta hover bekleniyordu: %s" % (r,)
+    # DEVIR-USTU: yeterli bbox -> IBVS komut uretir (hover DEGIL)
+    b2 = _beyin(); b2.durum = "GORSEL_GUDUM"
+    r2 = b2._gorsel_guduum(_det(wp=0.10, hp=0.04, conf=0.9, t=0.0), 0.0)   # bbox %10 >> esik
+    assert r2 is not None and r2 != (0.0, 0.0, 0.0, 0.0), "yeterli bbox'ta IBVS komut bekleniyordu: %s" % (r2,)
 
 
 # ---------------------------------------------------------------------------

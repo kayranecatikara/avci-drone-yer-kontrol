@@ -80,10 +80,11 @@ def test_yuzde6_net_ustu_kilit_var():
 
 
 def test_yuzde6_ustu_kilit_var():
-    """%6 ustu net kilit (%8 yatay)."""
+    """%6 ustu + GENIS en-boy (talon) -> kilit; DAR/DIKEY >=%6 -> SAHTE-POZITIF (kilit yok)."""
+    # %8 yatay / %4 dikey -> en-boy ~3.6 (GENIS, talon) -> KILIT VAR
     assert _beyin()._kilit_degerlendir(_det(wp=0.08, hp=0.04), 0.0) is True
-    # dikey eksen buyukse de yeter (tek eksen)
-    assert _beyin()._kilit_degerlendir(_det(wp=0.03, hp=0.07), 0.0) is True
+    # %3 yatay / %7 dikey -> en-boy ~0.76 (DIKEY, talon degil) -> SAHTE-POZITIF -> kilit YOK
+    assert _beyin()._kilit_degerlendir(_det(wp=0.03, hp=0.07), 0.0) is False
 
 
 def test_esik_alti_tespit_kilit_penceresini_doldurmaz():
