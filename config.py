@@ -12,9 +12,6 @@ her sabit baglaminda aciklanabilir (yarisma kurali 8). Parametre haritasi:
                                            (kilit isteri sayaci dahil, §6.1.4)
   guidance/ibvs_gorsel.py :: AvciIBVS   -> gorsel guduum yasasi (basit IBVS +
                                            pose roll acı-beslemesi; Cfg IBVS_*)
-  guidance/kilit_kurali.py :: KilitCfg  -> kilit kurali (§6.1.4) esik + sayaclar
-                                           (RUNTIME DISI; teslim oncesi baglanacak)
-  guidance/gudum_yasasi.py              -> APN/OIPN kazanclari (emekli aday, runtime disi)
   fusion/inovasyonlu_j_v2.py            -> GNSS filtre / hiz kestirim kazanclari
   detection/kamera_model.py             -> kamera ic parametreleri (K)
   detection/model_yonetici.py           -> model registry (hot-swap)

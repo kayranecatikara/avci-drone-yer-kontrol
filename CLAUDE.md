@@ -96,8 +96,10 @@ ASLA GPS/J tabanlı bir çözüm önerme; pose keypoint'i GÖRSEL veridir, serbe
   sonrası günceldir: PN yığını silindi, basit IBVS geldi; Cfg faz-bantlı).
 - **Bizim hat (TAŞINACAK-ADAY; runtime dışı ama repoda + testli):** `detection/`
   (takip=ByteTrack+gyro-CMC, algi_hatti, model_yonetici=registry, talon_pose_estimator=PnP),
-  `guidance/kilit_kurali.py` (**§6.1.4 ZORUNLU taşınacak**), `iletisim/hakem_istemci`,
-  `guidance/gudum_yasasi.py` (APN+OIPN — emekli aday). Taşıma planı karar dokümanında.
+  `iletisim/hakem_istemci`. **ARŞİVE TAŞINDI (kullanıcı kararı 2026-07-08):**
+  `kilit_kurali.py` (**§6.1.4 ZORUNLU — bağlanacaksa arşivden geri gelir**),
+  `gudum_yasasi.py` (APN+OIPN, emekli) + testleri ve KilitCfg'ye bağımlı arac
+  scriptleri → `arsiv/kubra-gudum/` (README'si içeriği anlatır).
 - Pose 3B keypoint TEK KAYNAĞI `pose/talon_keypoints.json` (Berat, doğrulanmış);
   koşu-zamanı üçlüsü paketlenir. `models/talon_pose.pt` = **v8 poz modeli** (7 Tem
   "eniyi_pose"; merge 2026-07-08'de main'in yenisi seçildi — roll-lead işaret
@@ -360,9 +362,10 @@ FPV'de maske pervaneyi tam örtmüyorsa `PROP_MASKE`'yi düzenle (sol-üstte zay
      `server/index` çitlenecek. O güne dek `arac/paket_kontrol.py` paketi bilerek REDDEDER
      (bekçi). **Video koşusu paketi bu temizlikten SONRA çıkar — unutma.**
   2. **Kilit §6.1.4 (şartname: 5 sn kilit + hakem bildirimi; +400 / yanlış −30):** bizim
-     `guidance/kilit_kurali.py` + `iletisim/hakem_istemci` hazır; main hattına bağlanması
-     Kayra kodunda değişiklik gerektirir → Kayra ile koordine (teslim öncesi ZORUNLU).
-     (`_kilit_degerlendir` sayacı SALT GÖZLEM — hakem BİLDİRİMİ bundan ayrı iştir.)
+     `arsiv/kubra-gudum/kilit_kurali.py` + `iletisim/hakem_istemci` hazır; main hattına
+     bağlanması Kayra kodunda değişiklik gerektirir → Kayra ile koordine (teslim öncesi
+     ZORUNLU). (`_kilit_degerlendir` sayacı SALT GÖZLEM — hakem BİLDİRİMİ ayrı iştir;
+     bağlama günü kilit_kurali arşivden `guidance/`e geri taşınır.)
   3. **ByteTrack: PUSH'landı — Kayra kendi hattında deneyecek (kullanıcı kararı):**
      modüller `detection/takip.py` + `gorsel_tespit.tespit_hepsi` (çok-kutu; `tespit_et`
      argmax geriye-uyumlu). Bağlama tarifi: `docs/BYTETRACK_ENTEGRASYON_NOTU.md`.

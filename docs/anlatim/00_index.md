@@ -17,9 +17,9 @@
 > **NOT (2026-07-08, merge sonrası düzeltildi):** 05 (Güdüm+OIPN) ve 06 (Kilit
 > Kuralı) kartları TABLODAN ÇIKARILDI — bizim görsel güdüm yasamız **basit IBVS +
 > pose roll açı-beslemesi** (`guidance/ibvs_gorsel.py`); kilit isteri sayacı
-> `ana_kontrol._kilit_degerlendir` içinde SALT GÖZLEM. APN/OIPN
-> (`guidance/gudum_yasasi.py`) ve `guidance/kilit_kurali.py` modülleri + 05/06 kart
-> dosyaları repoda RUNTIME DIŞI duruyor (taşınacak-aday; CLAUDE.md "Bizim hat").
+> `ana_kontrol._kilit_degerlendir` içinde SALT GÖZLEM. APN/OIPN (`gudum_yasasi.py`)
+> ve `kilit_kurali.py` modülleri `arsiv/kubra-gudum/` altında (2026-07-08 taşıma;
+> README'si içeriği anlatır); 05/06 kart dosyaları repoda duruyor.
 > Kilit §6.1.4 hakem bildirimi teslim öncesi bağlanınca 06 kartı tabloya geri gelir.
 
 **Akış (video anlatım sırası):** bozuk GNSS girdi (1) → füzyon temizler + hız
