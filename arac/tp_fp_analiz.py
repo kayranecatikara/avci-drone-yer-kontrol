@@ -1,0 +1,368 @@
+# -*- coding: utf-8 -*-
+"""
+================================================================================
+GELISTIRME/DOGRULAMA ARACI — gorev ucusunda ve degerlendirme kosusunda
+kullanilmaz. (Truth-tabanli TP/FP analizi; teslim paketine girmez.)
+================================================================================
+TP/FP AYRISTIRMA + KILIT ENGELI ANATOMISI (referans kosu analizi)
+================================================================================
+Soru: "cizilen bbox'lar gercekten Talon'da miydi, yoksa dag/tas uzerinde mi?"
+CSV bbox SAYISI tek basina Talon kanidi DEGILDIR.
+
+YONTEM (TP/FP): her tespit karesinde, AYNI an truth hedef konumunu kamera
+modeliyle (detection/kamera_model) goruntuye reprojekte et; bbox merkezi ile
+reprojeksiyon arasindaki mesafe ESIK altindaysa TP, degilse FP. Esik OLCEK-
+DUYARLI: k * bbox_kosegeni (varsayilan k=0.75 -> bbox'in ~0.75 kosegeni kadar
+sapma hedefi hala sarar; secim gerekce: kucuk/uzak hedefte bbox kosegeni ~tespit
+belirsizligi mertebesinde). Normalize goruntu koordinatinda calisir (W,H mutlak
+GEREKMEZ; f_x/W sabit=0.2603, aspect 16:9).
+
+VERI GEREKSINIMI: tespit satirinda (vis_gordu=1) AYNI an truth hedef konumu
+(est_x/y/z, DEV kaynakta = truth) + drone pozu. NOT: mevcut _log_gorsel truth'u
+YAZMIYOR (est_* yalniz ARAMA/TAKIP'te) -> GORSEL_GUDUM tespitlerinde truth YOK.
+Bu arac truth-yaknligi tol icinde bulunamazsa TP/FP'yi ATLAR ve raporlar; CSV
+anatomisi (conf/engel/coast/tespit-orani) HER durumda cikar. Gelecek kosu icin
+cozum: _log_gorsel'e est_* eklemek (ayni source feed; DEV'de = truth).
+
+Kullanim: python arac/tp_fp_analiz.py [ucus_log_*.csv]  (yoksa en yeni)
+================================================================================
+"""
+import bisect
+import csv
+import glob
+import math
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_PROJ = os.path.dirname(_HERE)
+sys.path.insert(0, _PROJ)
+
+import numpy as np
+from detection import kamera_model as km
+from guidance.ana_kontrol import Cfg
+from guidance.kilit_kurali import KilitCfg
+sys.path.insert(0, _HERE)
+from fsm_adlari import normalize        # FSM ad eslemesi (eski CSV = GORSEL_GUDUM -> GORSEL_TAKIP)
+
+TP_K = 0.75            # esik = TP_K * bbox_kosegeni (normalize)
+TRUTH_TOL_SN = 0.15    # tespit->truth zaman farki bu ustundeyse truth "yok" say
+KILIT_HEDEF_CONF = KilitCfg.KILIT_CONF_MIN   # kilit siki esigi (0.72) — TEK KAYNAK
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _oku(yol):
+    with open(yol, "r", encoding="utf-8", errors="replace", newline="") as f:
+        return list(csv.DictReader(f))
+
+
+def _bbox_merkez_norm(r):
+    """vis_ex/ey (IBVS hata, EMA-yumusatilmis) -> bbox merkezi normalize [0,1].
+    ex=(cx-W/2)/(W/2) -> cx_norm=(ex+1)/2. EMA lag CAVEAT (ham merkez loglanmiyor)."""
+    ex, ey = _num(r.get("vis_ex")), _num(r.get("vis_ey"))
+    if ex is None or ey is None:
+        return None
+    return (ex + 1.0) / 2.0, (ey + 1.0) / 2.0
+
+
+def _bbox_kosegen_norm(r):
+    ky, kd = _num(r.get("kaplama_yatay")), _num(r.get("kaplama_dikey"))
+    if ky is None or kd is None:
+        return None
+    return math.hypot(ky, kd)
+
+
+def _reproj_truth_norm(truth_world, drone_pos, roll, pitch, yaw_deg):
+    """truth dunya noktasi -> normalize goruntu (u_norm,v_norm) veya None (arka)."""
+    p_kam = km.dunya_to_kamera(truth_world, drone_pos, roll, pitch, yaw_deg)
+    K = km.K_matrisi(16.0, 9.0)                 # aspect 16:9; normalize icin yeterli
+    uv = km.izdusur(p_kam, K)
+    if uv is None:
+        return None
+    return uv[0] / 16.0, uv[1] / 9.0
+
+
+def _truth_zaman_serisi(rows):
+    """est_* dolu satirlardan (t_perf -> truth_world) sirali seri."""
+    ts, pts = [], []
+    for r in rows:
+        ex, t = _num(r.get("est_x")), _num(r.get("t_perf"))
+        if ex is None or t is None:
+            continue
+        ts.append(t)
+        pts.append((ex, _num(r.get("est_y")), _num(r.get("est_z"))))
+    return ts, pts
+
+
+def _en_yakin_truth(ts, pts, t):
+    if not ts:
+        return None, None
+    i = bisect.bisect_left(ts, t)
+    aday = [j for j in (i - 1, i) if 0 <= j < len(ts)]
+    if not aday:
+        return None, None
+    j = min(aday, key=lambda k: abs(ts[k] - t))
+    return pts[j], abs(ts[j] - t)
+
+
+# ---------------------------------------------------------------------------
+#  TP/FP (truth varsa)
+# ---------------------------------------------------------------------------
+def tp_fp(rows):
+    ts, pts = _truth_zaman_serisi(rows)
+    vis = [r for r in rows if r.get("vis_gordu") in ("1", "1.0")]
+    olcules = [r for r in vis if r.get("tespit_mi") in ("1", "1.0")]   # OLCULEN (coast degil)
+    sonuc = {"tp": 0, "fp": 0, "truth_yok": 0, "arka": 0, "toplam_olculen": len(olcules),
+             "tp_ofset": [], "fp_conf": []}   # tp_ofset: (du,dv,pitch,roll); fp_conf: [conf]
+    gaps = []
+    for r in olcules:
+        t = _num(r.get("t_perf"))
+        tw, gap = _en_yakin_truth(ts, pts, t) if t is not None else (None, None)
+        if gap is not None:
+            gaps.append(gap)
+        if tw is None or gap is None or gap > TRUTH_TOL_SN or None in tw:
+            sonuc["truth_yok"] += 1
+            continue
+        drone = (_num(r.get("drone_x")), _num(r.get("drone_y")), _num(r.get("drone_z")))
+        roll, pitch, yaw = _num(r.get("drone_roll")), _num(r.get("drone_pitch")), _num(r.get("drone_yaw_deg"))
+        if None in drone or None in (roll, pitch, yaw):
+            sonuc["truth_yok"] += 1
+            continue
+        uv = _reproj_truth_norm(tw, drone, roll, pitch, yaw)
+        if uv is None:
+            sonuc["arka"] += 1                     # truth kamera arkasinda (hedef gorunmuyor)
+            continue
+        mc = _bbox_merkez_norm(r)
+        kos = _bbox_kosegen_norm(r)
+        if mc is None or kos is None:
+            sonuc["truth_yok"] += 1
+            continue
+        d = math.hypot(mc[0] - uv[0], mc[1] - uv[1])
+        if d <= TP_K * max(kos, 1e-6):
+            sonuc["tp"] += 1
+            sonuc["tp_ofset"].append((mc[0] - uv[0], mc[1] - uv[1], pitch, roll))
+        else:
+            sonuc["fp"] += 1
+            c = _num(r.get("vis_conf"))
+            if c is not None:
+                sonuc["fp_conf"].append(c)
+    sonuc["gap_medyan"] = sorted(gaps)[len(gaps) // 2] if gaps else None
+    return sonuc
+
+
+def _egim(x, y):
+    """Basit en-kucuk-kareler egimi (y ~ a*x + b)."""
+    if len(x) < 4 or float(np.std(x)) < 1e-6:
+        return 0.0
+    a, _b = np.polyfit(np.asarray(x, float), np.asarray(y, float), 1)
+    return float(a)
+
+
+def ofset_attitude_regresyon(tp_ofset):
+    """ADDITION-1: TP eslesmelerinde reproj-bbox ofsetini pitch/roll'a regrese et.
+    Egimler ~0 -> telemetri->kamera zinciri UCUS REJIMINDE dogrulanmis (A'nin
+    sorusu kapanir). Belirgin egim -> TP/FP'ye serh + egim raporlanir."""
+    if len(tp_ofset) < 4:
+        return None
+    du = [o[0] for o in tp_ofset]; dv = [o[1] for o in tp_ofset]
+    pit = [o[2] for o in tp_ofset]; rol = [o[3] for o in tp_ofset]
+    egim = {"du~pitch": _egim(pit, du), "dv~pitch": _egim(pit, dv),
+            "du~roll": _egim(rol, du), "dv~roll": _egim(rol, dv)}
+    ofset_med = float(np.median([math.hypot(a, b) for a, b in zip(du, dv)]))
+    suphe = [k for k, v in egim.items() if abs(v) > 0.003]   # >der basina %0.3 W
+    return {"n": len(tp_ofset), "egim": egim, "ofset_medyan_norm": ofset_med,
+            "suphe": suphe, "zincir_dogru": (not suphe and ofset_med < 0.05)}
+
+
+# ---------------------------------------------------------------------------
+#  CSV anatomisi (truth GEREKMEZ) — HER durumda
+# ---------------------------------------------------------------------------
+def _blok_sureleri(vis, alan, deger):
+    """Ardisik (alan==deger) bloklarinin sureleri (t_perf farki)."""
+    sureler, blok_bas = [], None
+    for r in vis:
+        t = _num(r.get("t_perf"))
+        if t is None:
+            continue
+        eslesme = (r.get(alan) == deger) if not callable(deger) else deger(r.get(alan))
+        if eslesme and blok_bas is None:
+            blok_bas = t
+        elif not eslesme and blok_bas is not None:
+            sureler.append(t - blok_bas)
+            blok_bas = None
+    return sureler
+
+
+def _p(lst, q):
+    if not lst:
+        return None
+    s = sorted(lst)
+    return s[min(len(s) - 1, int(len(s) * q))]
+
+
+def anatomi(rows):
+    vis = [r for r in rows if r.get("vis_gordu") in ("1", "1.0")]
+    olculen = [r for r in vis if r.get("tespit_mi") in ("1", "1.0")]
+    confs = [_num(r.get("vis_conf")) for r in olculen if _num(r.get("vis_conf")) is not None]
+    from collections import Counter
+    engel = Counter(r.get("kilit_engel") or "(sayan)" for r in vis)
+    # conf dagilimi esiklere gore
+    conf_dag = {
+        "<0.45": sum(1 for c in confs if c < 0.45),
+        "0.45-0.72": sum(1 for c in confs if 0.45 <= c < KILIT_HEDEF_CONF),
+        ">=0.72": sum(1 for c in confs if c >= KILIT_HEDEF_CONF),
+    }
+    coast = _blok_sureleri(vis, "tespit_mi", lambda v: v in ("0", "0.0", "", None))
+    confirmed = _blok_sureleri(vis, "track_durumu", "CONFIRMED")
+    tespit_orani = len(olculen) / max(len(vis), 1)
+    return {
+        "vis": len(vis), "olculen": len(olculen), "tespit_orani": tespit_orani,
+        "conf_medyan": (sorted(confs)[len(confs) // 2] if confs else None),
+        "conf_dag": conf_dag, "engel": dict(engel),
+        "coast_medyan_ms": (_p(coast, 0.5) or 0) * 1000, "coast_p90_ms": (_p(coast, 0.9) or 0) * 1000,
+        "coast_maks_ms": (max(coast) if coast else 0) * 1000, "coast_blok": len(coast),
+        "confirmed_medyan_sn": _p(confirmed, 0.5), "confirmed_maks_sn": (max(confirmed) if confirmed else 0),
+    }
+
+
+def coast_gudum(rows):
+    """COAST'ta 'hicliğe gudum' teyidi: tespit_mi=0 bloklarinda komut hala uretiliyor
+    mu (stale bbox'a steer) ve dead-reckon/GPS-donus esikleri asilmis mi?
+    -> {blok, sure_p50/p90/maks, steer_p50/p90/maks, deadreckon_asan, lost_asan}."""
+    vis = [r for r in rows if r.get("vis_gordu") in ("1", "1.0")]
+    bloklar, blk = [], None
+    for r in vis:
+        t = _num(r.get("t_perf"))
+        if t is None:
+            continue
+        coast = r.get("tespit_mi") in ("0", "0.0", "", None)
+        # STEER = hedefe yonelik eksen (pitch=yaklas, yaw=ortala); throttle HARIC
+        # (irtifa-tutma, hover'da da sifir-disi -> steer sayilmaz).
+        cmd = max(abs(_num(r.get(c)) or 0.0) for c in ("pitch_cmd", "yaw_cmd"))
+        if coast:
+            if blk is None:
+                blk = {"t0": t, "tlast": t, "steer_last": None}
+            blk["tlast"] = t
+            if cmd > 0.02:                       # anlamli komut = steer (hover degil)
+                blk["steer_last"] = t
+        elif blk is not None:
+            bloklar.append(blk); blk = None
+    if blk is not None:
+        bloklar.append(blk)
+    sure = [b["tlast"] - b["t0"] for b in bloklar if b["tlast"] > b["t0"]]
+    steer = [(b["steer_last"] - b["t0"]) for b in bloklar if b.get("steer_last")]
+    dr = getattr(Cfg, "VIS_DEADRECKON_S", 0.5)
+    lg = getattr(Cfg, "VIS_LOST_TO_GPS_S", 1.0)
+    return {
+        "blok": len(bloklar),
+        "sure_p50": (_p(sure, 0.5) or 0), "sure_p90": (_p(sure, 0.9) or 0),
+        "sure_maks": (max(sure) if sure else 0),
+        "steer_p50": (_p(steer, 0.5) or 0), "steer_p90": (_p(steer, 0.9) or 0),
+        "steer_maks": (max(steer) if steer else 0),
+        "deadreckon_s": dr, "lost_gps_s": lg,
+        "steer_deadreckon_asan": sum(1 for s in steer if s > dr),
+        "sure_lost_asan": sum(1 for s in sure if s > lg),
+    }
+
+
+def main():
+    yol = sys.argv[1] if len(sys.argv) > 1 else None
+    if not yol:
+        lst = sorted(glob.glob(os.path.join(_PROJ, "veri", "ucus_log_*.csv")))
+        yol = lst[-1] if lst else None
+    if not yol or not os.path.isfile(yol):
+        print("CSV yok."); return 1
+    rows = _oku(yol)
+    print("=" * 70)
+    print(" TP/FP + KILIT ENGELI ANATOMISI — %s" % os.path.basename(yol))
+    print("=" * 70)
+    print(" conf esikleri (kod): handoff VIS_CONF_MIN = %.2f ; kilit KILIT_CONF_MIN = %.2f"
+          % (Cfg.VIS_CONF_MIN, KilitCfg.KILIT_CONF_MIN))
+    print(" -> AYRISTIRILDI: handoff gevsek (ucuz-geri-donuslu), kilit siki (-30 riskli).")
+    print("    FP-track %.2f-%.2f arasi GORSEL_TAKIP'i tetikler AMA kilit SAYMAZ."
+          % (Cfg.VIS_CONF_MIN, KilitCfg.KILIT_CONF_MIN))
+    print("    NOT: 0.72 gerekli ama YETERSIZ (model FP'ye 0.90 verebiliyor -> geometrik")
+    print("    kapi + dataset negatif/background kalici savunma).")
+
+    a = anatomi(rows)
+    from collections import Counter
+    faz = Counter(normalize(r.get("fsm_durum")) for r in rows
+                  if r.get("vis_gordu") in ("1", "1.0"))
+    print("\n --- CSV ANATOMISI (truth gerekmez) ---")
+    print(" tespit faz dagilimi (ad-normalize): %s" % dict(faz))
+    print(" GORSEL_TAKIP tespit karesi (vis): %d ; OLCULEN (coast degil): %d ; tespit orani: %.1f%%"
+          % (a["vis"], a["olculen"], 100 * a["tespit_orani"]))
+    print(" conf medyan (olculen): %s" % (round(a["conf_medyan"], 3) if a["conf_medyan"] else "-"))
+    print(" conf dagilimi: <0.45=%d  0.45-0.72=%d  >=0.72=%d"
+          % (a["conf_dag"]["<0.45"], a["conf_dag"]["0.45-0.72"], a["conf_dag"][">=0.72"]))
+    print(" engel dagilimi (kare):")
+    for k, v in sorted(a["engel"].items(), key=lambda kv: -kv[1]):
+        print("    %-16s %d" % (k, v))
+    print(" coast blok: %d ; sure medyan=%.0f ms p90=%.0f ms maks=%.0f ms (200 ms kopru esigi)"
+          % (a["coast_blok"], a["coast_medyan_ms"], a["coast_p90_ms"], a["coast_maks_ms"]))
+    print(" CONFIRMED kesintisiz: medyan=%s sn maks=%.1f sn"
+          % (round(a["confirmed_medyan_sn"], 2) if a["confirmed_medyan_sn"] else "-", a["confirmed_maks_sn"]))
+
+    cg = coast_gudum(rows)
+    print("\n --- COAST GUDUM TEYIDI ('hicliğe gudum' penceresi) ---")
+    print(" coast blok: %d ; sure p50=%.2f p90=%.2f maks=%.2f sn"
+          % (cg["blok"], cg["sure_p50"], cg["sure_p90"], cg["sure_maks"]))
+    print(" STEER (anlamli komut) suresi p50=%.2f p90=%.2f maks=%.2f sn"
+          % (cg["steer_p50"], cg["steer_p90"], cg["steer_maks"]))
+    print(" dead-reckon esigi %.2fs asan steer blok: %d ; VIS_LOST_TO_GPS %.2fs asan"
+          % (cg["deadreckon_s"], cg["steer_deadreckon_asan"], cg["lost_gps_s"]))
+    print("   coast blok: %d  -> bu bloklarda gorsel-kayip->YAKLASMA dususu ateslenmis"
+          % cg["sure_lost_asan"])
+    print("   olmali; steer>dead-reckon olan bloklar 'stale bbox'a gudum' suphesidir.")
+
+    print("\n --- TP/FP (truth-reprojeksiyon) ---")
+    s = tp_fp(rows)
+    if s["tp"] + s["fp"] == 0:
+        print(" [ATLANDI] Olculen tespit anlarinda truth BULUNAMADI (en yakin truth")
+        print("           zaman farki > %.0f ms). Sebep: _log_gorsel est_* yazmiyor;" % (TRUTH_TOL_SN * 1000))
+        print("           truth yalniz ARAMA/TAKIP'te loglaniyor (tespit_yok: %d)." % s["truth_yok"])
+        print("           -> RIGOROUS TP/FP bu referans CSV'den CIKARILAMAZ.")
+        print("           Cozum: _log_gorsel'e est_* ekle (gelecek kosu analiz edilebilir).")
+    else:
+        tp, fp = s["tp"], s["fp"]
+        prec = tp / max(tp + fp, 1)
+        print(" olculen tespit: %d ; TP=%d FP=%d (truth_yok=%d, arka=%d)"
+              % (s["toplam_olculen"], tp, fp, s["truth_yok"], s["arka"]))
+        print(" PRECISION (cizilen kutunun hedefte olma orani): %.1f%%" % (100 * prec))
+        # ADDITION-5: FP conf dagilimi (p95) — esik neyi eleyip neyi eleyemedi
+        fc = s["fp_conf"]
+        if fc:
+            fc.sort()
+            p95 = fc[min(len(fc) - 1, int(len(fc) * 0.95))]
+            ustu = sum(1 for c in fc if c >= KilitCfg.KILIT_CONF_MIN)
+            print(" FP conf: medyan=%.2f p95=%.2f ; FP'lerin %%%.0f'i >=%.2f (kilit esigi)"
+                  " -> esik %s" % (fc[len(fc) // 2], p95, 100 * ustu / len(fc),
+                  KilitCfg.KILIT_CONF_MIN, "YETERSIZ (yuksek-conf FP var)" if p95 >= KilitCfg.KILIT_CONF_MIN else "FP'leri eliyor"))
+        # ADDITION-1: TP ofset-vs-attitude regresyon (A'nin ucus-rejimi karsiligi)
+        reg = ofset_attitude_regresyon(s["tp_ofset"])
+        if reg:
+            print("\n --- TP OFSET-vs-ATTITUDE REGRESYON (telemetri->kamera ucus rejiminde) ---")
+            print(" TP kare: %d ; ofset medyan=%.3f norm ; egimler (|.|>0.003 = suphe):"
+                  % (reg["n"], reg["ofset_medyan_norm"]))
+            for k, v in reg["egim"].items():
+                print("    %-9s %+.4f%s" % (k, v, "  <== SUPHE" if abs(v) > 0.003 else ""))
+            if reg["zincir_dogru"]:
+                print(" -> EGIMLER ~0 + ofset kucuk: telemetri->kamera zinciri UCUS REJIMINDE")
+                print("    DOGRULANDI (A'nin sorusu kapandi; ayri sweep 'iyi model runbook'una).")
+            else:
+                print(" -> BELIRGIN egim (%s): TP/FP sayilarina SERH; attitude konvansiyonu"
+                      % ", ".join(reg["suphe"]))
+                print("    ucus rejiminde tam oturmamis (A sweep'i / PnP-vs-truth ile kapat).")
+        else:
+            print(" (TP ofset-attitude regresyon: yeterli TP yok)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

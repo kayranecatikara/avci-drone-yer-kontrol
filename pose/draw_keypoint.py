@@ -12,9 +12,9 @@
 #  ORIJINALDEN FARKLAR (kayra):
 #   1. DATASET_DIR -> C:\talon_pose_data\dataset (Zeylo yolu kaldirildi)
 #   2. Goruntu boyutu 1920x1080 VARSAYILMAZ; her karede img.size kullanilir.
-#   3. FOV_OVERRIDE varsayilani 131.5445 (Zeylo'nun OYUN ICI CANLI olcumu:
-#      PlayerCameraManager:GetFOVAngle -> avci_fov.txt). JSON'lardaki 125 nominal.
-#      Noktalar sistematik genis/dar oturursa None yapip (JSON 125) tekrar dene.
+#   3. FOV_OVERRIDE varsayilani None (JSON'lardaki 125 kullanilir). Zeylo'nun
+#      131.5445 olcumu (PlayerCameraManager:GetFOVAngle) ESKI FPV kamerasiydi;
+#      DONDUR-CEK kamerasi 125 (bkz. asagida KAYRA OLCUMU).
 #
 #  ONEMLI MATEMATIK GERCEKLERI (Zeylo dogrulamasi — DEGISTIRME):
 #    * UE5: SOL-el, Z-yukari. +X ileri (burun), +Y sag, +Z yukari.
@@ -60,7 +60,7 @@ KEYPOINTS_LOCAL = {
     "right_tail_fin": ( -53.16,  22.57,  17.93),
 }
 
-TALON_SCALE = 1.0            # 1.0 = 200 cm kanat (oyun render'i; dogrulandi)
+TALON_SCALE = 1.0            # 1.0 = tablo olcegi (kanat 171.8 cm; talon_0058 yan-gorunus dogrulamasi)
 # --- MESH PIVOT DUZELTMESI (3 Tem, "noktalar aracin ARKASINDA kaliyor" bulgusu) --
 #  KOK NEDEN: Lua drone_location'i K2_GetActorLocation() = ACTOR ORIGIN veriyor,
 #  ama gorsel mesh (SM_Talon_Body) actor origin'den +11.76 cm ILERIDE (burna dogru).

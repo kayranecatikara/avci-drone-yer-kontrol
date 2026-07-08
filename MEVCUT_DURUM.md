@@ -1,0 +1,652 @@
+# Avcı Drone — Mevcut Durum Brifingi (Claude için tanıtım belgesi)
+
+> **Bu belge ne işe yarar?** Yeni bir Claude oturumuna projeyi sıfırdan tanıtmak için hazırlandı.
+> "Şu an neredeyiz, ne çalışıyor, ne bekliyor, hangi kurallar değişmez" sorularının hepsi burada.
+> Kod ile birebir tutarlıdır; okuyunca dosyaları tek tek gezmene gerek kalmadan sisteme hâkim olursun.
+> (Kalıcı kurallar için ayrıca `CLAUDE.md` var; bu belge onun üstüne **güncel durumu** koyar.)
+
+> **🔀 MAIN MERGE TAMAMLANDI (2026-07-06) — bayrak-koru stratejisi, HİÇBİR TARAF SİLİNMEDİ.**
+> origin/main (9 commit: serhadcan standoff güdümü + Berat pose paketi + video arayüzü +
+> sahte tespit) yarisma-pipeline'a merge edildi. Karar dokümanı: `docs/MAIN_MERGE_VE_POSE_ACIKLAMA.md`.
+> - **Güdümde İKİ PROFİL, Cfg bayrağı seçer** (`guidance/ana_kontrol.py`):
+>   `GPS_TERMINAL_STRIKE=False` (VARSAYILAN) → serhadcan STANDOFF: hedefin
+>   `APPROACH_STANDOFF` (5 m) gerisinde + `APPROACH_ALT_OFFSET` (5 m) altında pace,
+>   kısa lead (`APPROACH_LEAD_S=0.5s`), kamera hedefi kadrajda ortalar; vuruş görsel fazın.
+>   `GPS_TERMINAL_STRIKE=True` → bizim eski INTERCEPT+RAM birebir geri gelir.
+>   Bizim DÜZELTME-1 (`YAKLASMA_BURUN_HEDEFE`) ve hedef-Z EMA'sı iki profilde de aktif
+>   (dikey-FOV kapısı artık `ez_hedef` ile hedefin KENDİ elevasyonuna bakar, ofsete değil).
+> - **Görsel devir kapıları:** `AUTO_VISUAL_HANDOFF=True` (bizim FSM akışı; False=serhadcan
+>   "GPS'te kal" test modu) + YENİ `HANDOFF_YAKINLIK_SART=True` (main'in FP kalkanı: CONFIRMED
+>   track ancak d_h<HANDOFF_RANGE iken devreder; False=eski her-mesafede davranış).
+>   KP_YAW/YAW_MAX bizim tarama değerlerinde kaldı (1.0/0.30; main 1.3/0.45 denemişti — canlı-tune).
+>   Tüm yeni bayraklar TUNE_ALLOW'da (arayüzden canlı değişir).
+> - **Pose TEK HAT:** `models/talon_pose.pt` (42 MB, Berat) + `pose/` paketi geldi. 3B keypoint
+>   TEK KAYNAĞI `pose/talon_keypoints.json`; bizim `talon_pose_estimator` bunu `berat_json`
+>   şemasıyla OKUR (sıra=EGITIM_SIRASI [0,1,2,5,3,4], pivot=+11.76 cm → tvec=actor origin).
+>   `models/talon_pose.yaml` bu şemayı seçer; registry'den hot-swap ile bbox+kp aynı ağdan →
+>   ByteTrack+PnP+OIPN zinciri. Sentetik round-trip doğrulandı. Gömülü şemalar yedek durur.
+> - **Arayüz (bizim baz):** main'den taşınanlar — `_gorev_izle()` görev izleyici + olay günlüğü
+>   + mini-harita + GNSS kesinti rozeti + GÖREV kartı + VURUŞ/BAŞARI latch'i (J-temiz mesafe;
+>   DEV koşusunda çit içinde truth) + 🖱️ SAHTE TESPİT modu (`/api/sahte`; teslim öncesi kaldırılır).
+>   AYRICA düzeltme: basariEkran `gorev_sonu`'nu artık doğru anahtardan okuyor (önceden hiç yanmıyordu).
+> - **SERT AYRIM korundu:** main'in çitsiz truth kıyas/GPS-log blokları GERİ ALINMADI; vuruş
+>   latch'inin truth yolu `web/dev_truth.mesafe_m()` üzerinden DEV-ONLY çitte. `pose/` koşu-zamanı
+>   üçlüsü (poz_cozucu+geometri+json) pakete girdi (paket_kontrol güncellendi); **paket_kontrol
+>   [TEMİZ] veriyor (10/10 zorunlu kalem)**. Testler: 14 dosya, hepsi geçiyor (FSM testine 3 yeni
+>   kapı-testi eklendi).
+> - **Sim regresyonu BEKLİYOR:** iki profil + sahte tespit + talon_pose canlı doğrulama uçuşları
+>   yapılmadı (CLAUDE.md BEKLEYEN İŞ'te liste).
+
+> **🎬 MÜSABAKA VİDEO KAYDEDİCİ — FİNAL AŞAMASI ZORUNLULUĞU (2026-07-04, ŞİMDİ KODLANMAZ).**
+> Müsabaka (gerçek uçuş) teslimi için ayrı bir kayıt zorunluluğu var; **kod finalde yazılır,
+> spec burada dursun.** Gereksinimler (Teslim Esasları):
+> - **Kaynak:** orijinal FPV karesinin ÜZERİNE canlı çizim — **ekran/masaüstü kaydı KABUL EDİLMEZ**
+>   (yani program karesini alıp encode eden bir kaydedici; OBS/ekran-capture değil).
+> - **Overlay:** hedef üstünde canlı **#FF0000 (saf kırmızı) kilit dörtgeni** (çizgi ≤3 px —
+>   `KilitCfg.CIZGI_PX`) + **sağ üstte ms hassasiyetli SUNUCU saati** (yerel saat değil, hakem/
+>   sunucu zamanı; senkron).
+> - **Format:** H.264 / MP4; **postprocessing YOK** (canlı, ham); **OpenCV 4.5 + FFPLAY uyumlu**
+>   (VideoWriter fourcc `avc1`/`H264`, oynatma ffplay ile sınanır).
+> - **Dosya adı:** `[MusabakaNo]_[TakimAdi]_[gg_aa_yyyy].mp4`.
+> - **Doğrulama:** her kare dörtgeni `arac/kilit_dortgeni.py` kurallarını geçmeli (≥%90 içerme,
+>   merkez farkı, çizgi ≤3 px). Kaydedici bu doğrulamayı canlı çağırır.
+> - **MUAF:** **Simülasyon Uçuş Kanıt Videosu bu şartlardan MUAF** (kendi dokümanı: arayüz +
+>   kod ekranı + sesli anlatım isteniyor; YouTube liste dışı, ham/postprocessing kısıtı yok).
+>   Bu iki video KARIŞTIRILMAZ — müsabaka kaydedici yalnız gerçek uçuş teslimi içindir.
+> **Kod yeri (finalde):** `web/musabaka_kaydedici.py` (yeni); `arac/kilit_dortgeni.py` doğrulama
+> hazır; dörtgen bbox pipeline'dan (AlgiCiktisi.hedef) gelir.
+
+> **🔔 FAZ 1-4 KOD TAMAM (2026-07-04): pipeline uçtan uca kurulu, pose'suz TAM çalışır.**
+> takip (ByteTrack+gyro-CMC) → PnP → APN/OIPN → kilit_kurali (§6.1.4, kaçak toleransı
+> dahil) → FSM (ARAMA→YAKLASMA→GORSEL_TAKIP→KILIT_BILDIR→ANGAJMAN) → hakem stub → FAZ 4
+> arayüz (kilit sayacı+AV çerçevesi+HEDEF GNSS rozeti+OIPN slider+CSV). **~91 birim testi.**
+> Regresyon kuralı kanıtlı: OIPN kapalı + pose'suz = mevcut IBVS birebir.
+>
+> ## 🎮 TEK SİM OTURUMU PLANI (pose'suz; taze oyun başlatınca, tek oturum)
+> Menü: **PLAY (fare) → FLY (fare) → E (klavye)**. Oyun art arda arm sonrası zombileşir →
+> her uçuşlu turdan sonra kosu_yonetici otomatik restart eder (ya da elle yeniden başlat).
+>
+> **YAKALAMA YOLU (prova ön koşulu):** windows-capture bu makinede KAPALI; kare kaynağı
+> artık **PrintWindow** (occlusion-proof, saf Win32) — tarayıcı oyunun önünde olsa bile
+> doğru oyun karesini yakalar (tek monitör prova için şart; mss son çare). Konsolda
+> `[FPV] goruntu kaynagi -> PrintWindow ...` görülmeli; `mss (TUM EKRAN...)` görülürse
+> oyun penceresi bulunamamış demektir (oyun açık/PLAY modunda mı bak).
+>
+> **KAYNAK (bu koşu):** hedef kaynağı **GERÇEK (DEV)** ile uçulur (üretim filtresi henüz
+> devrede değil; midcourse bozulmamış konumla). Arayüzde kırmızı GERÇEK (DEV) bandı çıkar,
+> CSV `hedef_kaynak=gercek`. **Geçiş korumaları HAZIR** (dev_truth.uygula): (a) birim/eksen
+> tutarlılık kapısı — ham/filtre/truth cm logu, |truth|/|ham| 0.5–2.0 dışı veya |fark|>300 m
+> → geçiş RED; (b) hız kelepçesi V_KELEPCE=4000 cm/s + geçişte hız sıfırdan başlar (lead
+> patlaması yok); (c) DEV kaynakta lead'siz/anlık konum kullanılır → dikey aşım/tırmanış yok.
+> **Kalem 3 (bozuk GNSS) bu koşuda İŞARETLENMEZ** → teslim-videosu koşusunda (kaynak=FİLTRE)
+> doğrulanır (`docs/video_prova_kontrol.md` DEV notu).
+>
+> **OTOMATİK İŞARETLEME (kullanıcı kalem işaretlemez):** prova boyunca arka planda
+> `python arac/prova_kaydedici.py` koşar — olay tetikli (İLK_TESPİT/COAST/YENİDEN/
+> FSM_GEÇİŞ/GÖREV_SONU) + 10 sn'de bir TAM ARAYÜZ karesi (`veri/prova_kareleri/`,
+> tam + %50 vekil). Koşu sonrası `--rapor` uçuş CSV'sinden "üretildi" tablosunu çıkarır;
+> asistan kareleri okuyup "okunuyor mu"yu değerlendirir ve `docs/video_prova_kontrol.md`
+> sonuç tablosunu doldurur. **Kullanıcı rolü: yalnız "hazır" + (gerekirse) PLAY/FLY/E.**
+>
+> 1. **FSM PROVASI (uçtan uca, canlı panel):** `python main.py` → tarayıcı → **Görev Başlat**.
+>    İzle: FSM durumu ARAMA→YAKLASMA ilerliyor mu; FAZ 4 panelleri (kilit sayacı, AV çerçevesi,
+>    HEDEF GNSS rozeti, OIPN slider) canlı mı; regresyon (GPS yaklaşma davranışı eskiyle aynı).
+>    **10 kalem tek kadrajda okunuyor mu → `docs/video_prova_kontrol.md` kontrol listesini
+>    işaretle** (özellikle kalem 7 kayıp/yeniden-tespit banner'ı, kalem 8 güdüm komutu, kalem
+>    10 başarı ekranı). **Zayıf detection hedefi göremezse görsel kilit olmaz → kilit paneli
+>    `engel` alanı** hangi koşulda takıldığını gösterir (güncel koşullar: `dortgen_tasma` /
+>    `kaplama_dusuk` [EKSEN: max(w/W,h/H)<0.06] / `AV_disi_yatay|dikey` / `dusuk_conf` /
+>    `track_onaysiz` / `coast` / `hedef_yok`). Bu bir ÖLÇÜM: modelin FSM'i besleyemediğini
+>    kanıtlar. Kaçak toleransı 200 ms (kümülatifi etkilemez; yalnız kesintisiz sayaçta köprü).
+>    İyi model gelince kilit tamamlanır.
+> 2. **CMC ROLL ±8°:** `python arac/kosu_yonetici.py cmc-test` (yaw zaten GEÇTİ, oran 0.27;
+>    roll fazı ±8° küçük genlik, hedef merkezde). **Geçti eşiği:** roll_oran < 0.5.
+> 3. **MENÜ FARE-TIK KALİBRASYONU:** PLAY/FLY buton koordinatlarını bir kez ölç
+>    (pencere W/H yüzdesi), `kosu_yonetici._play_otomasyonu`'na fare-tık ekle.
+>
+> ## 🏋️ EĞİTİM ZİNCİRİ (PLAN modundan çıkışa hazır; `arac/egitim/`)
+> **Dataset nereye:** ultralytics pose formatı (images/ + labels/ + data.yaml). data.yaml'da
+> **kpt_shape [6,3], flip_idx [0,1,3,2,5,4]** (sol/sağ çift! — DİKKAT: bu değer YENİ eğitim
+şeması sırasına aittir [burun, kuyruk_ucu, sol/sag_vtail, sol/sag_kanat; `arac/egitim/dataset_dogrula.py
+BEKLENEN_SIRA`]; `pose/talon_keypoints.json`'daki berat_json sırasının flip_idx'i **[0,2,1,4,3,5]**'tir,
+iki sırayı KARIŞTIRMA), names: talon, train/val yolları.
+> **Komut (sırayla):**
+> ```
+> python arac/egitim/dataset_dogrula.py <data.yaml>        # kpt/flip/split kapısı; KRİTİK hata->eğitme
+> python arac/egitim/pose_egit.py --data <data.yaml> --agirlik models/yolo26m_pose_best.pt \
+>     --calistir --epochs 100 --imgsz 640 --isim yolo_pose_talon_v11
+> ```
+> **Çıktı:** en iyi .pt → `models/<isim>.pt` + yanına .yaml (imgsz/sema/açıklama) otomatik;
+> VAL mAP raporu (box + pose mAP50/50-95) basılır. **Kıyas:** yeni modeli arayüzden
+> **↻ Tara → Yükle**, canlı panelde FPS/latency/conf/**PnP-uygun oran**ı eskiyle karşılaştır.
+> mAP eğitim-içi; ASIL kabul PnP-uygun oran (sim `pnp-test`).
+>
+> ## 📗 "İYİ MODEL GELDİĞİNDE" RUNBOOK (kod yazmadan, liste takibiyle entegrasyon)
+> **(i)** `.pt`'yi `models/`'a koy + yanına `<ad>.yaml` (`imgsz: 640`, `sema: kuyruk_ucu`,
+> `aciklama: ...`). **(ii)** Arayüz → **↻ Tara → Yükle**; task/şema rozetini kontrol
+> (pose ise kpt_shape=[6,3] yeşil; değilse reddedilir). **(iii) DETECTION modeli:**
+> canlı panelden conf/tespit sayısı/FP davranışını oku; **FSM provasını tekrarla — bu kez
+> kilit TAMAMLANMALI** (kilit paneli kümülatif 5s'ye ulaşır, `engel` boşalır). Geçti eşiği:
+> kilit_tamam=✓, `pnp_uygun` gerekmez (detection). **(iv) POSE modeli — sıralı borç kapatma
+> (her adım komut + geçti eşiği):**
+> | Adım | Komut | Geçti eşiği |
+> |---|---|---|
+> | 1. Keypoint görsel teyit (özellikle **sol/sağ**!) | `pnp-test` → `veri/pnp_teyit_*.png` göz kontrolü | 6 nokta 3D tablo sırasıyla eşleşiyor; sol/sağ ters DEĞİL |
+> | 2. PnP-uygun oran + reproj | `kosu_yonetici pnp-test` | PnP-uygun >%20; reproj medyan <8 px |
+> | 3. Yakın geçişte k* | `pnp-test` (hedef ~5-20 m) | k* `guvenilir`=True; k*≈0.867'ye yakınsa FAZ 0 ile tutarlı |
+> | 4. OIPN açık/kapalı CSV kıyası + β | dönen hedefe 2 görev (OIPN AÇIK/KAPALI), `veri/ucus_log_*.csv` a_OIPN_terim | OIPN açıkken kilit-tutma iyileşir (LOS hatası düşer), salınım artmaz; β loglardan ayarla |
+> **Pose borçları "iyi model şart" etiketli — hepsinin komutu yukarıda hazır.**
+
+> ## 🔬 REFERANS KOŞU (2026-07-04 20:34, DEV kaynak) — TP/FP + kilit anatomisi
+> **Baseline:** `veri/ucus_log_20260704_203553.csv` (9242 satır) + `veri/prova_kareleri/`.
+> Profil: drone başlangıç (−184.5, −2394.7, 48.4 m); hedef hızlı kaçan; drone yaklaşıp
+> 13 m'ye indi, sonra hedef açtı (mesafe 336 m); ~4 dk; model `best.pt` (DETECT).
+> **İyi model AYNI profille koşulup bu CSV'ye karşı kıyaslanacak.** Analiz aracı:
+> `python arac/tp_fp_analiz.py [csv]` (dev; truth kullanır, pakete girmez).
+>
+> **1) TP/FP — bu koşudan ÇIKARILAMADI (iki blokör); qualitatif FP-eğilimli:**
+> - **Blokör A (DÜZELTİLDİ):** truth (`est_*`) tespit anında loglanmıyordu (yalnız
+>   ARAMA/TAKIP; GORSEL_GUDUM tespit→truth medyan 3.8 s uzakta). `_log_gorsel` artık
+>   `son_temiz`'i logluyor (DEV'de = truth) → **sonraki koşu analiz edilebilir**.
+> - **Blokör B (PREREQ, açık):** kamera reprojeksiyon attitude konvansiyonu
+>   DOĞRULANMAMIŞ (`detection/kamera_model.py` ">>> SIM'DE DOGRULA <<<"). Kanıt:
+>   drone hedefe yaklaşırken truth yalnız **%21 kadraj-içi** reprojekte oluyor, **%57
+>   "kamera arkası"** (yanlış). Truth loglansa bile reprojeksiyon güvenilmez →
+>   attitude işaret/sıra doğrulaması gerekli (k_sanity/pnp; iyi model/yakın hedef).
+>   - **ÇÖZÜM PLANI HAZIR (Madde 3, `arac/attitude_dogrula.py`):** hover'da hedef
+>     görüşteyken saf PITCH/ROLL adımları (±10-15°)+kombinasyon; her karede
+>     truth-reprojeksiyon vs gerçek hedef pikseli (siluet) ofseti EKSEN BAZINDA
+>     ölçülür; `eksen_analiz` ofseti pitch/roll/yaw'a regrese eder → |eğim|>0.003
+>     olan eksende işaret/sıra şüphesi; düzeltme kamera_model'de TEK noktadan,
+>     ">>> SIM'DE DOGRULA <<<" ölçüm kimliğiyle kapanır. Oturum sonunda **2-3 dk
+>     mini FSM segmenti** (Blokör A kapalı → TP/FP ilk kez gerçek sayı; eski CSV
+>     retroaktif vermez → segment ŞART). Offline çekirdek (reproj/analiz/öneri)
+>     test edildi; level reproj (0.5, 0.716)=ey_ref tutarlı (zincir level'da doğru,
+>     sorun yatışta — hipotez doğrulandı). **Kullanıcı "hazır" deyince koşulur.**
+> - **Qualitatif (kare gözlemi):** bbox'lar ufuk/arazi kenarı/güneş-parlaması üzerinde
+>   (203717 conf=0.78 sol-alt arazi; 203710 parlak nokta) → **FP-eğilimli**, ama
+>   küçük/uzak bbox kesinlik vermiyor.
+> - **CONF EŞİĞİ BULGUSU (önemli):** handoff (GORSEL_GUDUM geçişi) VE kilit **AYNI**
+>   eşiği kullanıyor: `VIS_CONF_MIN=0.45`, `VIS_N_LOCK=5`. **Kodda 0.72 YOK.** FP-track
+>   0.45–0.72 arası hem faz geçişini tetikliyor hem kilit sayıyor (dağa-güdüm riski).
+>   **ÖNERİ:** kilit için ayrı **sıkı eşik (≥0.72)** ekle; handoff 0.45 kalabilir.
+>
+> **2) KİLİT ENGELİ ANATOMİSİ (truth-bağımsız, GÜVENİLİR):**
+> - GORSEL_GUDUM tespit karesi 6847; **ÖLÇÜLEN (coast değil) yalnız 541 = %7.9** → %92 coast.
+> - **CONFIRMED kesintisiz: medyan 0.17 s, maks 0.4 s** → track hiç 5 s tutamıyor.
+> - **Coast blok: 51 ad., medyan 2536 ms, p90 6054 ms, maks 12160 ms** → 200 ms köprünün
+>   çok üstünde (köprüleme kurtaramıyor).
+> - conf (ölçülen) medyan 0.771; dağılım `<0.45=0 · 0.45–0.72=237 · ≥0.72=304`.
+> - engel: `coast 6306 · (sayan) 484 · AV_disi_yatay 57`.
+> - **Kök neden: model tespiti TUTAMIYOR** (oran %7.9, CONFIRMED ≤0.4 s) — TP/FP'den bağımsız.
+>
+> **3) YENİ MODEL HEDEF KARTI (bu koşunun verisinden; iyi model bunları geçmeli):**
+> - Tespit oranı (GORSEL_GUDUM ölçülen/toplam): **%7.9 → hedef ≥%70**.
+> - Coast p90: **6054 ms → hedef ≤200 ms** (köprü kapsar).
+> - CONFIRMED kesintisiz maks: **0.4 s → hedef ≥3 s** (angajman ön şartı).
+> - conf: ölçülenlerin **≥`KilitCfg.KILIT_CONF_MIN`(0.72) oranı %56 → hedef ≥%80**
+>   (bu kalem `KILIT_CONF_MIN` sabitine bağlı; eşik değişirse hedef de yeniden okunur).
+> - FP/dk: **ölçülemedi** (blokör A+B) → düzeltme sonrası koşuda hesaplanacak (hedef ≤ birkaç/dk).
+> - **FP conf dağılımı (p95):** düzeltilmiş koşuda raporlanacak — `KILIT_CONF_MIN=0.72`
+>   eşiği FP'lerin ne kadarını eliyor, p95 ne (0.72 üstü FP kaç)? Eşik yeter değilse
+>   (p95 ≥ 0.72) dataset negatif/background ağırlığı artırılır.
+>
+> **4) DATASET ALIŞVERİŞ LİSTESİ (kaçırma + yanılma):**
+> - **Kaçırma** (blokör B nedeniyle "hedef görünürken kaçırma" anları kesinleştirilemedi):
+>   qualitatif → küçük/uzak (<20 px) + hızlı + motion-blur + gökyüzü-glare hedefi kaçırıyor.
+>   → bu koşullardan bol **pozitif** örnek.
+> - **Yanılma (FP kaynağı):** ufuk çizgisi, arazi/kaya dokusu, güneş parlaması →
+>   bunlardan **etiketsiz negatif/background** kareleri ekle (model "bu Talon değil"i öğrensin).
+> - **Kompozisyon önerisi (rafine edilecek):** ~%40 küçük-uzak Talon (blur/glare dahil),
+>   ~%30 orta mesafe net Talon, ~%30 negatif/background (ufuk+arazi+glare).
+>
+> ### Madde 4 — yüksek-conf FP savunması + coast (eklemeler)
+> - **Eşik yeter değil:** `KILIT_CONF_MIN=0.72` gerekli AMA yetersiz (model FP'ye 0.90
+>   verebiliyor — çöl arazisinde conf=0.90 gözlendi). Kalıcı savunma = dataset
+>   negatif/background. **Hedef kartına eklendi:** düzeltilmiş koşuda **FP conf dağılımı
+>   (p95)** raporlanacak (eşiğin neyi eleyip neyi eleyemediği sayıyla).
+> - **GEOMETRİK DİKEY KAPISI (ucuz FP kalkanı — EKLENDİ, `KilitCfg.GEOMETRIK_DIKEY_BAND=0.45`):**
+>   ham-GPS irtifa + drone irtifa + kamera tilt'ten hedefin OLABİLECEĞİ dikey ekran
+>   bandı kestirilir (`kamera_model.dikey_ekran_tahmini`, pitch-BAĞIMSIZ → blokör B'den
+>   etkilenmez); bandın çok dışındaki tespit kilit sayacına SOKULMAZ (`engel=geometrik_imkansiz`;
+>   track sürer, handoff'a girmez). "228 m aşağıdaki hedef ekran merkezinde" → v_pred=1.16,
+>   |0.5−1.16|=0.66>0.45 → reddedilir (doğrulandı). Blokör B kapanınca reprojeksiyon-tabanlı
+>   SIKI kapıya çevrilir.
+> - **Coast overlay ayrıştı (EKLENDİ):** coast karesinde bbox **kesikli + turuncu +
+>   "TAHMİN (coast)"**, conf → "son conf". Video kalem-7 görselleştirmesi netleşti.
+> - **Coast'ta güdüm — "HİÇLİĞE GÜDÜM" bulgusu (`arac/tp_fp_analiz.py` COAST GUDUM):**
+>   coast blok 52; süre p50 **2.51 s** / p90 4.01 / maks 4.38. **STEER (pitch/yaw)
+>   süresi = coast süresi** → drone stale/coast bbox'a ~2.5 s boyunca AKTİF yöneliyor.
+>   49/52 blok dead-reckon (0.5 s) eşiğini, **43/52 blok VIS_LOST_TO_GPS (1.0 s) eşiğini**
+>   aşıyor. Kök neden: tracker coast bbox üretmeye devam edince güdümün bayatlık-sayacı
+>   sıfırlanıyor → dead-reckon-hover ve GPS-dönüş fallback'i ~2.5 s GEÇ ateşliyor
+>   (FSM yine de oscile ediyor ama geç). **Somut dağa-güdüm penceresi ~2.5 s.**
+>   → ÖNERİ (davranış değişikliği, ayrı onay): coast'ta güdümü daha erken hover'a al /
+>   VIS_LOST_TO_GPS'i ölçülen-tespit (tespit_mi) zamanına bağla (coast bbox sayacı sıfırlamasın).
+>
+> ### Saha bulguları — TEŞHİS + DÜZELTME-1 (yaw-servo) + birleşik oturum
+> **Saha (DEV-truth):** drone GPS'le hedefe ulaşıp ÇARPIYOR ama kamera hedefe bakmıyor
+> (Talon FOV'a girmiyor → GÖRSEL_TAKİP hiç tetiklenmiyor); uçuş "ters ters" (yan/geri
+> süzülme); sürekli roll osilasyonu.
+> - **TEŞHİS-2 (`arac/osilasyon_teshis.py`, sim'siz):** roll_cmd RMS 0.408, periyot 8 s;
+>   **corr(roll_cmd, yaw_err)=−0.40**, |yaw_err| ort **37°**, yaw_cmd aktif %78; örnek
+>   yenilenme 0.1 s (≠ roll periyodu). **HİPOTEZ-ii (eksen coupling / yaw-servo zayıf):**
+>   omnidirek strafe (roll ∝ e_right ∝ sin(yaw_err)) burnu döndürmeden yana süzüyor.
+> - **DÜZELTME-1 (EKLENDİ, `Cfg.YAKLASMA_BURUN_HEDEFE=True`):** turn-then-advance — ileri
+>   itki `max(0,cos(yaw_err))` ile kapılanır (büyük bearing → önce dön), yan strafe
+>   `YAKLASMA_ROLL_KIS=0.30` ile kısılır (osilasyon söner), hedef dikey FOV dışındaysa
+>   yatay yaklaşma `YAKLASMA_DIKEY_KIS=0.30` ile kısılır (önce irtifa → "228 m üstten hedefi
+>   hiç görememe" önlenir). **YALNIZ YAKLASMA/ARAMA; GÖRSEL ailesine dokunmaz.** Kabul:
+>   handoff anında |yaw_err|<~10° VE hedef reprojeksiyonu kadraj-içi.
+> - **TEŞHİS-1 (attitude oturumuna EK, `attitude_dogrula.py`):** saf pitch/roll/yaw
+>   step'lerinde komut→dünya-tepki (gövde fwd/right + heading) tablosu; reproj tablosuyla
+>   YAN YANA (aynı konvansiyon hatasını paylaşabilir). Offline çekirdek test edildi.
+> - **DÜZELTME-2 (teşhise göre, bu SIRAYLA):** (ii çıkarsa) konvansiyon düzeltmesi TEK
+>   noktadan (kamera_model/komut-çevrim) → osilasyon kendiliğinden söner; (i çıkarsa) hedef
+>   poz+hız çıkışına örnek-tutma sıçramasını kıran EMA + komuta slew-rate limiti; (iii EN
+>   SON) PD kazanç/deadband canlı-tune, Cfg'de gerekçeli. **Konvansiyon doğrulanmadan
+>   kazanç ayarı YAPILMAZ.**
+>
+> ### 🎮 BİRLEŞİK UÇUŞLU OTURUM PLANI (tek oturum; zombileşme: taze) — "hazır" deyince
+> **(A) reproj pitch/roll sweep + (B) komut-eksen testi:** `python arac/attitude_dogrula.py
+> --adimlar` (aynı sweep iki tabloyu üretir: telemetri→kamera + komut→hareket). Bulunan
+> işaret/sıra düzeltmesi kamera_model'de TEK noktadan; `>>> SIM'DE DOGRULA <<<` kapanır.
+> **(C) yaw-servo'lu kısa YAKLASMA segmenti:** DÜZELTME-1 açıkken kısa görev; `osilasyon_teshis`
+> ile önce/sonra CSV kıyası (roll RMS düşmeli) + handoff anında |yaw_err|<10° ve hedef FOV-içi.
+> **(D) 2-3 dk mini FSM segmenti:** Blokör A kapalı → `tp_fp_analiz` **ilk kez gerçek TP/FP**
+> + FP conf p95 (eski referans CSV retroaktif vermez → segment ŞART).
+
+> ### 🔬 C+D SONUÇLARI (2026-07-05, DEV kaynak; oyun otomatik kapatıldı)
+> Koşu: C-önce `_C_once.csv` (flag OFF), C-sonra/D `_C_sonra.csv` (flag ON) — tek oyun
+> log'u (163540) 179 s boşlukla ikiye bölündü (NOT: uçuş log'u görev arası dosya
+> AÇMIYOR, aynı dosyaya ekliyor — küçük bug, [[log-reset]]). Zombileşme ~76-90 s.
+>
+> **C — DÜZELTME-1 önce/sonra (yaw-servo/turn-then-advance):**
+> | metrik | ÖNCE (flag 0) | SONRA (flag 1) |
+> |---|---|---|
+> | roll_cmd RMS | 0.369 | **0.319** (↓%14) |
+> | \|yaw_err\| ort | 42.0° | **33.5°** (↓8°) |
+> | tepe yaw-rate p95 | — | **131°/s** |
+> | **yaw-gain taraması** (2026-07-05) | baz KP_YAW 1.0/YAW_MAX 0.30 → **23.8°** en iyi | gain↑ **KÖTÜLEŞTİRDİ** (1.5→79.9°, 3.0→127.6°) |
+>
+> → DÜZELTME-1 **iyileştirdi ama modest**; yaw_err hâlâ 33.5°. **yaw ZAYIF DEĞİL**
+> (131°/s). **YAW-GAIN TARAMASI (5 aday, sağlık-bayraklı, gecerli=3): gain ARTIRMAK
+> yaw_err'i DÜŞÜRMEDİ, kötüleştirdi → baz en iyi (23.8°, ama <10° tutmadı); FOV %40.**
+> UYARI: tek-uçuş taraması geometri-confounded (her aday farklı pencere/geometri; hedef
+> hareketli). SONUÇ: **yaw-gain LEVER DEĞİL** — residual yaw_err dinamiği (hareketli hedef
+> + faz döngüsü + ileri-kapı) ve MODEL, gain değil. Gain baz'da bırakıldı (değişiklik yok).
+>
+> **D — TP/FP (Blokör A KAPALI: truth artık tespit karesinde, `truth_yok=0`):**
+> - GORSEL_TAKIP 1315 kare, ölçülen 98 (%7.5); **TP=0, FP=66, kamera-arkası 32 → PRECISION %0**.
+> - **FP conf: medyan 0.74, p95 0.95; %59'u ≥0.72 → eşik YETERSİZ** (model FP'ye 0.95 veriyor).
+> - Ölçülen tespitlerde hedef reproj **kadraj-içi yalnız %19** (arka 32, off 47) → box'ların
+>   %81'i hedef görüş alanında DEĞİLKEN çizilmiş = **kesin FP** (terrain/gök/güneş).
+> - **Geometrik dikey kapı 26 kareyi reddetti** (çalışıyor); coast p90 çok yüksek (stale-güdüm sürüyor).
+> - **Ofset-vs-attitude regresyon: 0 TP → çıkarılamadı** → telemetri→kamera konvansiyon
+>   kapanışı **iyi modele devredildi** (PnP-vs-truth süper seti; A'nın ayrı sweep'i orada).
+> - Hedef-z profili bu koşuda 85-95 m (salınım 11 m; ±200 m başka manevralarda).
+>
+> **SONUÇ:** Kullanıcının ilk gözlemi **rigorous doğrulandı** — tespitler Talon'da DEĞİL
+> (PRECISION %0, yüksek-conf FP). Kök: (a) model kalitesiz (dataset işi), (b) drone hedefi
+> yeterince FRAME'lemiyor (%19 kadraj-içi; yaw-servo kazancı + turn-then-advance güçlendirme).
+
+> ### 🗂️ DATASET ÜRETİMİ — PLANLANDI (ayrı branch: `dataset-uretim`; bu branch'te KOD YOK)
+> - **Projeksiyon zinciri (tek cümle):** truth hedef konumu + drone attitude +
+>   `kamera_model` (K + 25° tilt) + Talon 3D nokta tablosu → keypoint pikselleri →
+>   bbox = keypointlerin min/max'ı + pay; hedef kadraj-dışı olan kareler
+>   **negatif/background** (etiketsiz) olarak toplanır.
+> - **Aşama-0 doğrulama kapısı (tek cümle):** projeksiyon-bbox ile hareket-farkı hakemi
+>   (silüet/motion-diff) IoU tutarlılığı + TP ofset-vs-attitude regresyonu (eğim~0)
+>   GEÇMEDEN dataset üretimi açılmaz (yanlış-etiketli set üretmemek için).
+> - **Depolama:** dataset dosyaları (images/labels) **git DIŞINDA** (Drive/yerel;
+>   `.gitignore` + ayrı branch). Bu branch'te yalnız SPEC durur, uygulama yok.
+
+> **🔔 FAZ 2 — sim doğrulaması: ZİNCİR DOĞRULANDI, model kalitesi 0 (2026-07-04, uçuşlu):**
+> `pnp-test` turu (model_yonetici pose → algi_hatti → PnP → AlgiCiktisi → panel) gerçek
+> veride HATASIZ koştu. **PnP-uygun %0.0, PnP-geçerli %0.0** (407 kare, 0 tespit): pose
+> modeli (`yolo26m_pose_best`, task=pose kpt_shape=[6,3] sema=kuyruk_ucu) hedefi hiç
+> göremedi (hedef uzaktı + model "detection gibi kalitesiz"). **Bu başarısızlık DEĞİL
+> ÖLÇÜMDÜR** — yeni modelin hedefini sayıyla koyar (>%0). **STATÜ: KOD TAMAM + ZİNCİR
+> DOĞRULANDI**; hassas k* + keypoint-sırası görsel teyidi iyi modele/yakın hedefe devredildi.
+>
+> **🔧 MENÜ AKIŞI (saha bilgisi 2026-07-04):** PLAY (FARE tık) → FLY (FARE tık) → E (KLAVYE).
+> Salt-klavye otomasyonu bu yüzden tutmaz; koşu yöneticisi menü otomasyonu best-effort +
+> insan fallback (çalışıyor). Fare-tık otomasyonu koordinat kalibrasyonu gerektirir (borç).
+>
+> **📋 BORÇ LİSTESİ (iyi model / uygun sahne gelince; koşu komutları hazır):**
+> 1. Keypoint-sırası GÖRSEL TEYİT (şema kuyruk_ucu mu doğru?) → pose modeli hedefi görünce
+>    (yeni model VEYA yakın geçiş). `python arac/kosu_yonetici.py pnp-test --oyun-hazir
+>    --oyunu-acik-birak` (hedef YAKIN olmalı; veri/pnp_teyit_*.png keypoints çizili).
+> 2. HASSAS k* (HFOV=125 kesin teyit; FAZ 0'dan devir) → PnP-uygun frame + perspektif yeterli
+>    (terminal faz, hedef ~5-20 m). Aynı pnp-test komutu; talon_pose_estimator.k_taramasi
+>    'guvenilir' bayrağı k*'ı gate'ler. k*≈0.867'ye yakınsa FAZ 0 offset-regresyonuyla tutarlı.
+> 3. CMC ROLL fazı (FAZ 1'den) → `python arac/kosu_yonetici.py cmc-test` (roll ±8°, hedef
+>    merkezde; yaw fazı zaten GEÇTİ oran 0.27).
+> 4. Menü fare-tık otomasyonu (koordinat kalibrasyonu). **(2026-07-04 TEYİT: prova
+>    koşusunda menü otomasyonu yine ÇALIŞMADI; PLAY/FLY/E kullanıcı elle yaptı.**
+>    Fare-tık PLAY/FLY buton koordinatları hâlâ kalibre değil → `kosu_yonetici.
+>    _play_otomasyonu` best-effort başarısız, insan fallback devrede. İyi model/sonraki
+>    oturumda: pencere W/H yüzdesiyle PLAY+FLY koordinatlarını bir kez ölç, ekle.)
+
+> **🔔 FAZ 2 — pose modeli şema keşfi (2026-07-04, metadata):**
+> `models/yolo26m_pose_best.pt`: task=pose, **kpt_shape=[6,3]** (6 keypoint, PnP için
+> ideal), tek sınıf 'talon', dataset `talon_v10` (Colab `/content/datasets/`; repoda
+> YOK). **flip_idx TANIMLI DEĞİL** (model.yaml'da None) → yatay-flip augmentation
+> sol/sağ keypoint çiftlerini yer değiştirmez; eğitim iskeletinde ve arayüzde kalıcı
+> uyarı. **Keypoint SIRASI metadata'da yok** (sadece sınıf adı) → görsel teyit ŞART
+> (FAZ 2 sim doğrulamasında: model tahminlerini gerçek karede çizip 3D tablo sırasıyla
+> eşle). PnP object-points seti şema-parametreli (`sema: kuyruk_ucu | motor`); kullanılan
+> origin (AM = tablo referans merkezi) tvec referansını belirler, çıktıya yazılır.
+> Detection modelleri (3 adet: best.pt aktif, bbox_det_30haziran, best_aircraft_yolo11m)
+> + bu pose modeli registry'den kıyaslanacak (hepsi "kalitesiz", yeniler eğitilecek).
+
+> **🔔 FAZ 1 — CMC işaret testi GEÇTİ (2026-07-04, uçuşlu tur):**
+> gyro-CMC'nin sim attitude konvansiyonuyla tutarlılığı canlı doğrulandı.
+> Yöntem (YOLO'suz, truth reproj hedef pikseli; avcıya yaw osilasyonu): ardışık
+> kareler arası CMC-warp'lı hata vs warp'sız hata. **YAW fazı: n=169, hata_HAM
+> medyan 13.4 px → hata_CMC medyan 3.7 px (oran 0.27 < 0.5 eşiği) → GEÇTİ** —
+> CMC doğru işarette kaymayı ~%73 azaltıyor; ters işaret olsa hatayı artırırdı.
+> (Roll fazı yeterli eşleşme vermedi — roll drone'u yatırınca hedef FOV'dan
+> çıkıyor; yaw doğrulaması FAZ 1 için yeterli, roll bileşeni f_x'ten bağımsız.)
+> **Aynı koşu `kosu_yonetici`'nin uçuşlu-tur + zombileşme protokolünü de canlı
+> doğruladı:** oyun otomatik açıldı → arm + irtifa tutma → osilasyon → tur sonrası
+> oyun otomatik KAPAT+RESTART → [KOŞU BİTTİ] + bip. FAZ 1 (takip+CMC) KAPANDI:
+> kod 18 birim testi + CMC sim doğrulaması. FSM entegrasyonu FAZ 3'te.
+
+> **🔔 FAZ 0 — K sanity bulgusu (2026-07-04, truth-tabanlı ölçüm):**
+> **Zincir (K + 25° tilt + attitude) AÇISAL olarak doğrulandı; mutlak kanat-genişliği
+> ölçümü küçük-hedef limitinde başarısız — kök neden K DEĞİL, ölçüm prosedürü.**
+> Ölçüm: 240 sn pasif/yerden, 3013 kare, siluet yöntemi. Sonuç: w_ölçülen medyan
+> ~7-9 px, w_beklenen (kanat uçları tam-zincir izdüşümü, yatış dahil) ~16-18 px,
+> oran ~0.40 (sapma −%54, eşik %5). **Ama bu bir K/HFOV hatası değil:** (1) hareket-farkı
+> hakemi 3 koşuda tutarlı açısal offset verdi (yatay ~0°, dikey ~−1°, MAD ~4-6°) —
+> reprojeksiyon hedefin açısal konumunu doğru koyuyor; fx %54 yanlış olsaydı merkez-dışı
+> hedefte offset onlarca derece olurdu. (2) w_ölçülen mesafeden **bağımsız** ~7 px sabit
+> (fiziksel değil; yakında büyümesi gerekirdi) — siluet Talon'un tam kanadını değil, hep
+> aynı yüksek-kontrast gövde çekirdeğini yakalıyor. Sebep: Talon render'da soluk/küçük
+> (40-115 m'de 7-24 px), kanat uçları düşük kontrast (eşik kesiyor) + FPV kromatik
+> aberasyon + hedef ara ara güneşe yakın geçiyor + truth GPS gecikmeli (reproj ~100-130 px
+> kayıyor). **Pozitif K-doğrulama (offset-vs-merkez-dışılık regresyonu):** f_x ölçek
+> kestirimi **k=0.867** (ex −0.55..0.95). **Kaba sanity GEÇTİ:** %54 hata k≈0.46, 2× hata
+> k≈2.0 verirdi; k=0.867 → HFOV=125 doğru **mertebede** (2-3× hata YOK). Ama tek koşu
+> gürültülü (MAD 9°, yatay medyan koşular arası 0°↔−8°; du~ex eğimi GPS gecikmesiyle
+> kirleniyor). **Sonuç: mevcut araçlarla (siluet + hareket hakemi) K %5 hassasiyetle NE
+> doğrulanabiliyor NE çürütülüyor** — gürültü tabanı çok yüksek. **KARAR:** kaba sanity
+> geçti (mertebe-doğru); HASSAS K teyidi **FAZ 2 PnP reprojection-error'a devredildi**
+> (master prompt zaten "ölçek teyidi reproj error ile" diyor — 6 keypoint'in kalibre 3D
+> modele uydurulması tek-genişlik ölçümünden çok daha sağlam). FAZ 1 (takip) K'ya
+> düşük duyarlı: ByteTrack görüntü düzleminde çalışır; gyro-CMC'de yaw/pitch kaynaklı
+> kayma f_x ile ORANTILIDIR (≈f_x·Δθ; yalnız roll bileşeni f'den bağımsızdır — "H=K·R·K⁻¹
+> sadeleşir" YANLIŞ gerekçedir). Doğru gerekçe: olası %13 f_x hatası CMC düzeltmesinde ~%13
+> artık bırakır, bu IoU eşleşmesini bozmayacak kadar küçüktür. `models/best.pt` küçük
+> hedefi göremiyor → ayrı model işi (FAZ 1+).
+
+> **🔔 Güncelleme — Sim v0.0.5 saha davranışları (2026-07-04, FAZ 0 ölçüm oturumları):**
+> İki kritik sim davranışı tekrarlanabilir şekilde doğrulandı:
+> **(1) TCP dinleyici tıkanması:** art arda bağlan/kop döngülerinden sonra oyun yeni
+> bağlantı kabul etmeyebiliyor. Önleme: araçlar TEK TCP oturumunu paylaşır
+> (`k_sanity_olcum.olc(drone_baglanti=...)`), koşu sonunda tek düzgün kapanış.
+> Çözüm: oyunu KOMPLE yeniden başlat (test edildi); "Play'den çık/gir" alternatifi bir
+> sonraki takılmada denenecek. **(2) ARM/UÇUŞ SONRASI ZOMBİLEŞME (3 kez doğrulandı):**
+> SDK'dan arm edilip uçulan oturumlarda telemetri bir süre sonra bozuluyor — x,y mutlak
+> sabit, attitude tam 0/0/sabit-yaw'da donuk (sıfır titreşim), z komutlardan bağımsız
+> ~1-3.5 m/s "sayarak" artıyor (thr=−0.4'e rağmen 110→423 m gözlendi). Yerden/pasif
+> koşular gün boyu sağlıklı. Ayrıca thr=0 "hover" irtifayı TUTMUYOR (~+1 m/s süzülme) —
+> irtifa ancak kapalı-döngü tutulabiliyor (`k_sanity_olcum` P-tutucusu). **Etkisi:**
+> FAZ 1+ uçuş gerektiren testler (CMC işaret testi, PnP-vs-GPS, OIPN kıyası) kısa
+> koşular halinde planlanmalı ve **her uçuşlu turdan sonra oyun otomatik yeniden
+> başlatılmalı** — `arac/kosu_yonetici.py` (kurulacak otomasyon) bu adımı içerecek.
+> FAZ 0 K sanity bu yüzden tamamen pasif/yerden, siluet yöntemiyle ölçülüyor.
+
+> **🔔 Güncelleme — SERT AYRIM / truth politikası (2026-07-03, yarisma-pipeline branch):**
+> Truth kanalı (`get_debug_truth`) yalnızca **geliştirme/doğrulama** içindir ve iki yerde
+> yaşar: `arac/` scriptleri + çalışma anındaki tek dev kod noktası **`web/dev_truth.py`**
+> (CLAUDE.md "SERT AYRIM" + "TESLİM PAKETİ" bölümleri). Uçuş pipeline'ından **tüm truth
+> izleri söküldü**: eski "Gerçek GPS (test)" kaynağı, kıyas/SAPMA paneli, Z-teşhis truth
+> satırları, uçuş logundaki true_*/gercek_mesafe/nose_off_true kolonları ve
+> `_kamera_kontrol` stub'ı KALDIRILDI (bu belgedeki eski anlatımları TARİHSELDİR).
+> Yerine: arayüzde **KAYNAK: FİLTRE ↔ GERÇEK (DEV)** butonu (dev_truth yüklüyse görünür;
+> aktifken kırmızı bant + uçuş CSV'sinde `hedef_kaynak` etiketi; yalnız midcourse
+> beslemesini değiştirir, OTO/GPS/GÖRSEL anahtarına dokunmaz). server.py/index.html'deki
+> bağlantı satırları `>>> DEV-ONLY >>>` çitleriyle işaretlidir; `arac/paket_kontrol.py`
+> paketlerken dev_truth'u dışlar, çitleri söker, kalan pakette truth/gercek/dev izi tarar.
+> Filtre doğrulama: `arac/filtre_dogrulama.py` (RMSE/max/gecikme).
+
+> **🔔 Güncelleme — Simülasyon v0.0.5 (2026-07-02, koordinatörlük maili):**
+> (1) **Hedef GPS artık 5 Hz** (yarışma koşulu; önceki sürümlerde 1 Hz idi). (2) Simülasyonda **performans iyileştirmeleri** yapıldı.
+> **✅ Uyum UYGULANDI (2026-07-03):** İnovasyonlu J'nin PREDICT zaman adımı **`dt` 1.0 → 0.2** yapıldı ve ilk hız tahmini `(Δkonum)/dt` ile cm/s'ye ölçeklendi (`fusion/inovasyonlu_j_v2.py`; tüm kullanım yerleri varsayılanla kurulduğundan tek noktadan düzeldi). Sentetik testte (50 Hz tik + 5 Hz GPS) eski `dt=1.0` **hız kestirimini bozuyordu** (hata ~16 m/s); `dt=0.2` ile ~1.2 m/s'ye indi. **Kalan:** R/Qp/Qw/gate'i v0.0.5 sim'inde yeniden doğrula. Detaylar §5 (fusion) ve §6.
+
+---
+
+## 1) Proje tek cümlede
+**Otonom avcı (kamikaze/interceptor) drone** yazılımı: bozuk GPS ile hedefe yaklaşan, sonra **kameradan (YOLO)**
+hedefi tespit edip görsel güdümle kilitlenen bir sistem. Yarışma: **Drones of War / Drone Of War (Teknofest)**.
+Simülasyon Unreal Engine tabanlı bir oyun; biz Python tarafında beyni yazıyoruz.
+
+- **Hedef platform:** Talon İHA (sabit kanat; kanat açıklığı 1718 mm, gövde 1100 mm).
+- **ASIL AMAÇ:** **Simülasyon Uçuş Kanıt Videosu** aşamasını geçmek. Tüm kararlar video isterlerini
+  eksiksiz karşılamaya göre alınır (bkz. §11).
+
+---
+
+## 2) Değişmez çalışma ilkeleri (Claude bunlara UYAR)
+Bunlar yarışma kurallarından ve `CLAUDE.md`'den gelir; ihlal edilmez:
+
+1. **Sadece açıklayabildiğimiz şeyi kullanırız.** GPS filtresi olarak yalnızca **İnovasyonlu J**
+   (`fusion/inovasyonlu_j_v2.py`) var. IMM-EKF veya bakmadığımız yabancı modüller **entegre edilmez** (Kural 8).
+2. **Hazır güdüm yazılımı doğrudan kullanılmaz** (Kural 6). Her yöntem (filtre, öngörülü/lead yönelim, IBVS)
+   bizim temiz implementasyonumuz ve takımca açıklanabilir.
+3. **Senaryoya aşırı-uydurulmuş (overfit) sabit yok.** ("lock 5.2 sn", "death_plunge" gibi şeyler yasak.)
+   Sadece açıklanabilir, genel parçalar entegre edilir.
+4. **Çalışan sistemi bozma.** `web/server.py` + `web/index.html` (arayüz), manuel mod, kıyas paneli,
+   kaynak geçişi korunur. Güdüm değişiklikleri **`AvciKontrol` içine** gömülür.
+
+**GPS güdümünün rolü (net sınır):** GPS güdümü **öldürücü faz DEĞİLDİR.** Görevi:
+(1) bozuk GNSS'i temizlemek + hedef hızını kestirmek, (2) araca öngörülü yönelmek (lead),
+(3) hedefle **kesintisiz görsel temas** kurmak, (4) görsel faza (YOLO/CV) **temiz devretmek** (YAKLASMA→GORSEL_TAKIP devri).
+Terminal vuruş asıl olarak **görsel fazın** işidir.
+
+---
+
+## 3) Mimari harita (paket → dosya → rol → durum)
+
+| Paket | Dosya | Rolü (şartname eşlemesi) | Durum |
+|---|---|---|---|
+| `sdk/` | `drone_sdk.py` | Simülasyon I/O: oyunla TCP telemetri/kontrol. **Resmî yarışma SDK'sı (v2.2)** — bizim yazmadığımız, verilen dosya. | ✅ Hazır (verili) |
+| `fusion/` | `inovasyonlu_j_v2.py` | Sensör füzyonu: **GNSSDuzeltici** (CT-EKF) — bozuk GPS'i temizler + hedef hızını kestirir (+2 sn lead). **Tek üretim filtremiz.** | ✅ Çalışıyor |
+| `guidance/` | `ana_kontrol.py` | **Beyin.** `AvciKontrol`: ARAMA→YAKLASMA→GORSEL_TAKIP FSM (eski adlar KILIT/GORSEL_GUDUM; bkz. `arac/fsm_adlari.py`), PD yaklaşma, terminal vuruş, handoff, uçuş logu. | ✅ Çalışıyor, ⚙️ sim-tune bekliyor |
+| `guidance/` | `ibvs_guidance.py` | **Görsel güdüm (düz IBVS):** bbox merkez hatası → angle-mode komut (yaw/throttle/pitch). | ✅ Yazıldı, ⚙️ canlı kalibrasyon bekliyor |
+| `detection/` | `gorsel_tespit.py` | **YOLO tespit:** `best.pt` inference sarmalayıcı; bir kareden en yüksek-conf bbox'ı döner. | ✅ Bağlı |
+| `detection/` | `pencere_yakala.py` | **Occlusion-proof FPV:** oyun penceresinin İÇERİĞİNİ yakalar (pencere arkada olsa bile doğru kare). | ✅ Çalışıyor |
+| `web/` | `server.py` | Backend: beyni barındırır, telemetri/FPV sunar, canlı-tune, manuel mod, kıyas ölçümü, thread orkestrasyonu. | ✅ Çalışıyor |
+| `web/` | `index.html` | Yer Kontrol İstasyonu arayüzü (3 panel: telemetri, FPV+overlay, kıyas/tune). | ✅ Çalışıyor |
+| `models/` | `best.pt` | Eğitilmiş YOLO ağırlığı (~44 MB, gerçek model). | ✅ Var |
+| `veri/` | `kiyas_log.csv`, `ucus_log_*.csv` | Çalışma çıktıları: uçuş logları, kıyas CSV (üretilir). `.gitignore`'lu. | — |
+| `arac/` | `gps_bozuk_gercek_gorsel.py`, `gps_filtreli_cikar.py`, `gps_gorsellestir.py` | **[ODAK DIŞI]** Uçuş sonrası GPS verilerini (ham vs filtreli vs gerçek) görselleştiren bağımsız analiz araçları. | Yardımcı |
+| `arac/` | `analiz_ucus.py` | **[ODAK DIŞI]** `ucus_log_*.csv`'yi okuyup üç belirtiyi teşhis eder (geri-çekilme / salınım / görsel temas kaybı) + Cfg ayar önerisi; `ucus_metrikler.csv`'ye tur-kıyası satırı ekler. | Yardımcı |
+| `arac/` | `tani_irtifa.py` | **[ODAK DIŞI]** Geçici teşhis scripti: `/api/telemetry`'den irtifa (Z) verisini canlı basar + `tani_log.csv`'ye yazar (oyuna 2. TCP açmaz). Sorun çözülünce silinebilir. | Yardımcı |
+| `arsiv/` | `inovasyonlu_j_v1.py`, `inovasyonlu_j_v2_4.py`, `avci_fsm/guidance/main ÜSTEN DALIŞ.py` | **[ODAK DIŞI]** Eskiden yazılmış, yedek olarak tutulan silinmemiş kodlar (eski J sürümleri + eski "üstten dalış" FSM/güdüm/main). Üretimde kullanılmaz. | Yedek |
+| kök | `main.py` | Tek giriş noktası: `from web.server import main`. `python main.py` → `http://127.0.0.1:8000`. | ✅ Çalışıyor |
+| kök | `README.md` | Proje genel tanıtımı + kurulum/çalıştırma özeti (teslim `.zip` içinde de gider). | ✅ Var |
+| `sdk/` | `SDK_README.md` | Resmî yarışma SDK'sının (v2.2) API/kullanım dokümanı — SDK ile birlikte verilen referans (2026-07-06: kökten `sdk/` altına taşındı). | ✅ Var (verili) |
+| kök | `CLAUDE.md` | Değişmez çalışma kuralları (Kural 1–8); bu belge onun üstüne güncel durumu koyar. | ✅ Var |
+| kök | `requirements.txt` | Python bağımlılıkları (numpy, mss, Pillow, pygetwindow, ultralytics, opencv-python; windows-capture bilinçli KAPALI/yorum satırında). | ✅ Var |
+| kök | `1_Oyunu_Baslat.bat`, `2_Arayuzu_Baslat.bat` | Çalıştırma kısayolları: oyunu aç / arayüzü (`python main.py`) başlat (bkz. §7). | ✅ Var |
+| kök | `MEVCUT_DURUM.md` | **Bu belge** — güncel durum brifingi. | ✅ Var |
+| kök | `.gitignore`, `.gitattributes`, `.claude/settings.local.json` | Repo/araç konfigürasyonu: yok sayılanlar (oyun dosyaları, büyük modeller, `veri/`), git öznitelikleri, Claude Code yerel izinleri. | Config |
+| her paket | `__init__.py` | `sdk/`, `fusion/`, `guidance/`, `detection/`, `web/` paket işaretçileri (genelde boş). | ✅ Var |
+| `Drones of War Teknofest/` | `DronesOfWar.exe` + motor içeriği (Paks/Binaries/Engine) | **[HARİCİ]** Unreal tabanlı simülasyon oyunu; bizim yazmadığımız, `.gitignore`'lu (Drive'dan gelir, repoya konmaz). | Verili/harici |
+
+> `main.py` tek giriş noktası: `from web.server import main`. `python main.py` → tarayıcıda `http://127.0.0.1:8000`.
+> **Kapsam notu:** Yukarıdaki tablo klasördeki **tüm dosyaları** kapsar; `[ODAK DIŞI]`/`[HARİCİ]` işaretliler geliştirme yardımcıları veya verili bileşenlerdir, üretim güdüm hattının parçası değildir.
+
+---
+
+## 4) Güdüm akışı ve faz sınırları (en önemli kısım)
+
+Kontrol döngüsü **50 Hz** (`server.py:kontrol_dongusu` → `beyin.adim()`). Bir tik şöyle akar:
+
+```
+Bozuk hedef GPS ──▶ İnovasyonlu J (temizle + hız kestir, +2sn lead)
+                         │
+   Kendi TEMİZ konumum ──┤
+                         ▼
+             FSM durumu:  ARAMA ──(mesafe<HANDOFF)──▶ YAKLASMA ──(N_LOCK conf'lu YOLO tespiti)──▶ GORSEL_TAKIP
+                         │                                                                        │
+             GPS güdümü (PD + öngörü)                                          IBVS (yalnızca kamera; GPS yönelimi KESİLİR)
+```
+
+- **ARAMA (GPS yaklaşma):** J'nin **2 sn lead'li** kestirimi ile yatay intercept; **lead'siz anlık z** ile
+  dikey (lead dikeyde irtifa aşımı yapıyor). Hata gövde çerçevesine çevrilir, **PD** ile komut üretilir.
+  Koruma katmanları: mesafeye göre **hız tavanı** (overshoot guard), **rate-limit** (salınım önler),
+  **dikey PID + integral** (ileri-uçuş taşıması yüzünden ~14 m yukarıda dengelenmeyi kapatır),
+  **alçalma önceliği** (hedefin üstündeyken kovalamayı kısıp alçalmayı serbest bırakır).
+- **YAKLASMA (eski adı KILIT):** Handoff menziline (histerezisli: `HANDOFF_RANGE`/`HANDOFF_EXIT`) girince. Görüş devralabilir sinyali.
+- **GORSEL_TAKIP (eski adı GORSEL_GUDUM):** `conf ≥ VIS_CONF_MIN` kareler ard arda `VIS_N_LOCK` (5) olunca kilitlenir. Bu andan sonra
+  **GPS yönelimi mimari olarak kesilir** (yarışma kuralı: bir daha GPS'e dönme — OTO modda yalnızca uzun
+  görsel kayıpta re-acquire için dönülür). Komut yalnızca bbox merkez hatasından üretilir.
+- **Terminal vuruş (COMMIT/RAM):** Çarpışma-rotası `v_des = v_hedef + v_close·LOS`. `v_close` mesafeyle
+  orantılı + **tabanlı** (`V_CLOSE_MIN`) → temasta 0'a inmez, hedefin içine iter (geri atılma yok, delip geçer).
+  Çok yakında yanal ivme kısılır (LOS singülarite salınımını önler → düz dalış).
+
+> **Not (bilinçli tasarım sınırı):** Kodda terminal vuruş bloğu **GPS yolunda** da var; bu esas olarak
+> "gercek" (truth) test modunda ve bir yetenek/emniyet olarak duruyor. Tasarım tezine göre asıl terminal
+> vuruş **görsel fazın** işidir (bkz. §2). Video akışında hedef: GPS ile yaklaş → görselle tespit/kilit →
+> **GNSS bağımlılığının azaldığını göster** → görsel güdümle angajman.
+
+**Faz geçişi anahtarı (test için):** `vis_mode` = `OTO` (otomatik kilit/geri-dönüş) | `GPS` (görseli kapat) |
+`GORSEL` (kilidi atla, zorla görsel). Arayüzden değiştirilebilir.
+
+---
+
+## 5) Modül modül özet
+
+### `sdk/drone_sdk.py` — Resmî Yarışma SDK'sı v2.2 (verili, bizim değil)
+- Oyunla TCP: `127.0.0.1:12345`. **Angle mode** uçuş.
+- Kontrol: `set_throttle` (**dikey komut**: +1 tırman/0 hover/−1 serbest düşüş), `set_pitch/roll/yaw`,
+  `set_control_surfaces(...)` (atomik, önerilen).
+- Telemetri: `get_drone_location/rotation/speed/altitude`, `get_target_location/rotation/speed`.
+- **Platform sabitleri (gömülü, değişmez):** Kamera **25° yukarı tilt**, **125° FOV**; max hız 120 km/h.
+- **Gerçekçi bozuk telemetri (sunucu tarafında, kapatılamaz):** hedef GPS **5 Hz** (sim v0.0.5, yarışma
+  koşulu; ≤v0.0.4'te 1 Hz idi); gürültü, sabit offset, ani sıçrama (spike), dropout, rate-limit, gecikme.
+  Kendi telemetrimiz temiz ve tam hızlı. *(Kontrol döngüsü hâlâ 50 Hz → GPS artık her ~10 tikte bir taze
+  paket veriyor; önceden ~50 tikte bir idi.)*
+- **Debug truth kanalı:** `get_debug_truth()` / `get_active_corruption()` — sadece oyunda debug açıkken
+  gelir; **gerçek (bozulmamış) değerler + aktif bozma maskesi**. Yalnızca ölçüm/kıyas/test için; yarışmada yok.
+
+### `fusion/inovasyonlu_j_v2.py` — İnovasyonlu J (GNSSDuzeltici) [ODAK DIŞI ama kritik]
+- **CT-EKF** (sabit dönüş hızlı — coordinated turn) + fiziksel kısıtlar. Bozuk GPS'i temizler, hedef
+  hız vektörünü ve dönüş hızını kestirir.
+- v2.1 farkı: rate-limit'li tekrarlanan paketleri **dropout sanmıyor** (tekrar eden paket → `None`,
+  zaman ilerletilmez); böylece CT modeli ileri fırlatıp kestirimi bozmuyor. Bu tekilleştirme (allclose)
+  mantığı 5 Hz'de de geçerli — GPS (5 Hz) hâlâ kontrol döngüsünden (50 Hz) yavaş, sadece taze paket aralığı
+  ~1 s → ~0.2 s'ye indi.
+- **✅ v0.0.5 uyumu UYGULANDI (2026-07-03):** `dt` varsayılanı **1.0 → 0.2** (`__init__`; `V2Filtre()`/`JFiltre()`/araçlar
+  varsayılanla kurulduğundan tek noktadan geçerli) ve ilk hız tahmini `(Δkonum)/self.dt` ile cm/s'ye ölçeklendi
+  (dt=1.0 iken bölme no-op'tu → eski davranış birebir korunur). Sentetik doğrulama (50 Hz tik, 5 Hz GPS,
+  100 cm gürültü + %2 spike, 20 m/s dönen hedef): eski `dt=1.0` 5 Hz'de konumu idare eder gösterip **hız
+  kestirimini bozuyordu** (hata ~16 m/s; `w` ~%80 sapık) — lead/öngörü tam bu kestirimlere dayanır. `dt=0.2` ile
+  hız hatası ~1.2 m/s, `w` hatası ~0.005 rad/s (1 Hz'li eski dünyadan bile iyi). **Kalan:** yatay/dikey KF
+  ayarları (R, Qp, Qw, gate) v0.0.5 sim'inde yeniden doğrulanmalı; kıyas panelinde (J vs ham) hata düşüşü ölçülmeli.
+  `telafi_sn=2.0` (lead) fiziksel öngörü olduğu için sabit kaldı.
+- `guncelle(x,y,z)` → `telafi_sn` (2 sn) ileri taşınmış konum. `durum_guduum()` → telafisiz **anlık** konum + hız
+  (çift-lead olmasın diye). Birimler cm / cm-s.
+
+### `guidance/ana_kontrol.py` — Beyin (`AvciKontrol`)
+- `adim()` tek kontrol tiki. `Cfg` sınıfı tüm gain/tavan/işaret parametreleri (bir kısmı **canlı-tune**'lu).
+- FSM + PD yaklaşma + terminal vuruş + handoff (§4). Kalkış (non-blocking arama irtifasına tırman).
+- **Kaynak geçişi:** `set_kaynak("v2"|"gercek")`. "v2" = İnovasyonlu J; "gercek" = filtre yok, truth'a gider (test).
+- **Görsel köprü:** `set_gorsel_tespit(det)` (server yazar) / `_gorsel_tespit_oku` (bayatlık kontrolü) —
+  thread-güvenli; ağır YOLO inference'i 50 Hz kontrol tikinden **decouple** eder.
+- **Zengin uçuş logu:** her tik `veri/ucus_log_*.csv` (teşhis için; yarışmada `Cfg.LOG_ENABLE=False`).
+- `_kamera_kontrol` bir **stub** (test'te truth kullanır); gerçek görsel kilit `son_tespit` köprüsünden
+  gelen YOLO tespitiyle olur, bu stub'la değil.
+
+### `guidance/ibvs_guidance.py` — Görsel güdüm (düz IBVS)
+- Tek hata sinyali: **bbox merkezinin görüntü merkezinden sapması** (PnP/derinlik/poz YOK; roll=0).
+- Eksen eşleme (SDK fiziğiyle tutarlı): `yaw ← ex` (yatay ortala), `throttle ← (ey − VIS_EY_REF)`
+  (dikey), `pitch ← ileri` (hizalıysa yaklaş).
+- **25° kamera tilt telafisi:** kamera burnu 25° yukarı baktığından "tam merkez" = hedef burnun üstünde
+  demek; drone hedefin altına oturmasın diye dikey referans `VIS_EY_REF (~0.43)` çizgisine tutulur.
+  **SDK v2.2 uyumu için son eklenen kritik parça; sim'de kalibre edilecek.**
+
+### `detection/gorsel_tespit.py` + `pencere_yakala.py`
+- `HedefDedektor`: ultralytics YOLO `best.pt` → en yüksek conf bbox `{cx,cy,w,h,conf,W,H,t}`.
+  **Zarif bozulma:** ultralytics/torch yoksa `hazir=False`, hep `None` → sistem **GPS ile çalışmaya devam** eder, çökmez.
+- `PencereYakala`: `windows-capture` ile pencere içeriğini yakalar (tek monitörde oyun tarayıcının arkasında
+  kalsa bile doğru kare). Yoksa mss ekran-bölgesine düşer.
+
+### `web/server.py` + `web/index.html`
+- 4 thread: `connection_manager` (oto yeniden bağlan + pencere-yakalamayı ayakta tut),
+  `kontrol_dongusu` (50 Hz beyin), `dedektor_dongusu` (ayrı thread YOLO),
+  `kare_uretici_dongusu` (TEK yakalayıcı, ~25 fps: FPV ve dedektör AYNI kareyi tüketir;
+  çift PrintWindow yarışı yok → arayüz FPV'si akıcı).
+- 3 mod, karşılıklı dışlar: **görev** (otonom, `gorev_aktif`), **manuel** (klavye WASD/QE/RF, failsafe hover),
+  **pasif** (sadece J ölçümü akar, drone uçmaz).
+- **Kıyas ölçümü:** İnovasyonlu J'nin gerçeğe hatası vs ham GPS taban çizgisi (ort/std/max) → `veri/kiyas_log.csv`.
+- **Canlı-tune:** arayüz slider'ları `Cfg`'yi çalışırken değiştirir (allowlist'li; server restart gerekmez).
+- **API:** `/api/telemetry`, `/api/frame` (ham FPV; long-poll `?seq=N` → hazır JPEG anında
+  döner, yakalama istek yolunda değil; overlay istemci canvas'ında), `/api/command`
+  (start/stop/manuel/vismode), `/api/manuel`, `/api/tune`.
+
+---
+
+## 6) Çalışan / bekleyen durum
+
+**✅ Çalışıyor / bitti:**
+- SDK haberleşme, web arayüzü (GCS), occlusion-proof FPV.
+- İnovasyonlu J filtresi + ham'a karşı kıyas paneli.
+- GPS yaklaşma güdümü (PD + overshoot guard + dikey PID + alçalma önceliği), terminal vuruş, FSM, handoff.
+- Manuel mod + failsafe, kaynak geçişi (v2/gercek), canlı-tune, zengin uçuş logu.
+- YOLO tespit bağlı (gerçek `best.pt`), IBVS görsel güdüm yazılı, görsel faz entegre (OTO oto-kilit),
+  25° kamera tilt telafisi (`VIS_EY_REF`) eklendi.
+- **Sim v0.0.5 filtre uyumu (2026-07-03):** `dt` 1.0 → 0.2 (5 Hz) + ilk-hız `(Δ)/dt` ölçekleme;
+  sentetik testle doğrulandı (detay §5 fusion).
+
+**⚙️ Bekleyen / tune gerektiren:**
+- **🔔 Sim v0.0.5 uyarlaması (YENİ, öncelikli):**
+  - ~~Filtre `dt` 1.0 → 0.2~~ → **YAPILDI (2026-07-03, bkz. §5)**. Kalan: `dt` değiştiği için
+    R/Qp/Qw/gate ayarlarını v0.0.5 sim'inde yeniden doğrula.
+  - **5 Hz'in avantajını değerlendir:** daha sık GPS → filtre daha az "kör" ekstrapolasyon yapar, kestirim
+    ve hız/dönüş çıkarımı iyileşmeli; kıyas panelinde (J vs ham) hata düşüşünü **ölç**.
+  - **Performans iyileştirmesi etkisi:** sim FPS/zamanlama değişmiş olabilir → 50 Hz döngü zamanlamasını,
+    FPV yakalama gecikmesini ve YOLO tik hızını v0.0.5'te yeniden ölç.
+- **Sim'de canlı kalibrasyon:** işaret/frame doğrulama (`PITCH/ROLL/YAW/Z_SIGN`, `VIS_SIGN_*`),
+  gain'ler, `VIS_EY_REF` (25° tilt referansı), yaklaşma/vuruş tavanları.
+- **Uçtan uca kanıt akışının sim'de doğrulanması:** otonom başla → bozuk GPS ile yönelme → görselle tespit →
+  tracking → görsel takip → **GNSS bağımlılığının azaldığını gösterme** → angajman → başarı.
+- **Video anlatım metinleri** (ilk 3 dk + son 3 dk) — kullanıcı **en sonda** isteyecek (bkz. §11).
+
+---
+
+## 7) Nasıl çalıştırılır
+1. `1_Oyunu_Baslat.bat` → oyunu açar (repo kökündeki veya üst klasördeki `Drones of War Teknofest\DronesOfWar.exe`).
+   Oyunda **PLAY** moduna geç, mümkünse pencereli/kenarlıksız.
+2. `2_Arayuzu_Baslat.bat` → `python main.py` çalıştırır, tarayıcıyı `http://127.0.0.1:8000`'e açar.
+3. Bağımlılıklar: `pip install -r requirements.txt` (numpy, mss, Pillow, pygetwindow, ultralytics,
+   opencv-python, windows-capture). **torch'u önce doğru wheel'den kur** (CUDA: `cu121`), sonra requirements.
+   ultralytics/torch yoksa görsel faz pasif kalır, saf GPS çalışır.
+
+> Oyun **tek bağlantı** kabul eder: aynı anda tek arayüz çalışsın; yeniden başlatmadan önce eskisini kapat.
+> Oyun dosyaları ve büyük modeller `.gitignore`'da (repoya konmaz; Drive'dan gelir).
+> **⚠️ Sim sürümü:** v0.0.5 kullan (koordinatörlük bağlantısından). Bu sürümde hedef GPS **5 Hz** ve performans
+> iyileştirmeleri var → filtre `dt` uyarlaması gerekli (bkz. §5 fusion, §6). Eski v0.0.4 build'i ile test etme.
+
+---
+
+## 8) Video isterleri (kısa hatırlatma — asıl teslim bu)
+- **İlk 3 dk (hızlandırma yok, sesli teknik anlatım):** sistem mimarisi; bozuk GNSS'in girdi olarak alınışı
+  ve değerlendirilişi; görüntü işleme/hedef tespit; tracking; sensör füzyonu/filtreleme (GPS hata/sıçrama/
+  kayıp/gecikmede tepki); güdüm/karar; kaynak dosya tanıtımı + kullanılan açık kaynak kütüphaneler.
+- **Son 3 dk (gerçek zamanlı görev kanıtı):** otonom başlama → bozuk GNSS ile bölgeye yönelme → görüntüyle
+  tespit → tracking aktif → görsel takip → **GNSS bağımlılığının azaldığının gösterilmesi** → yaklaşma →
+  otonom angajman → vuruş/başarı → **insan müdahalesi olmadığı**. Manuel hedef seçimi/işaretleme YOK.
+- **Teslim .zip:** input, hedef tespit, tracking, füzyon/filtre, güdüm, ana çalıştırma, config,
+  requirements, README, eğitilmiş model (.pt). **Video ↔ kod tutarlı olmalı.**
+
+---
+
+### Claude'a ipucu
+Değişiklik yaparken §2'deki değişmez kurallara sadık kal, güdüm dokunuşlarını `AvciKontrol` içine göm,
+çalışan arayüz/manuel/kıyas akışını bozma. Yeni "akıllı" sabitler eklemeden önce sor: *bunu takımca
+açıklayabilir miyiz, overfit mi?* — cevabı overfit ise ekleme.
