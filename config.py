@@ -9,8 +9,9 @@ yonettigi kodun yaninda durur -> tek yerde koparilmis dev sabit listesi yok,
 her sabit baglaminda aciklanabilir (yarisma kurali 8). Parametre haritasi:
 
   guidance/ana_kontrol.py :: Cfg        -> guduum / yaklasma / gorsel esikleri
-  guidance/kilit_kurali.py :: KilitCfg  -> kilit kurali (§6.1.4) esik + sayaclar
-  guidance/gudum_yasasi.py              -> APN/OIPN kazanclari (N, beta)
+                                           (kilit isteri sayaci dahil, §6.1.4)
+  guidance/ibvs_gorsel.py :: AvciIBVS   -> gorsel guduum yasasi (basit IBVS +
+                                           pose roll acı-beslemesi; Cfg IBVS_*)
   fusion/inovasyonlu_j_v2.py            -> GNSS filtre / hiz kestirim kazanclari
   detection/kamera_model.py             -> kamera ic parametreleri (K)
   detection/model_yonetici.py           -> model registry (hot-swap)
@@ -29,7 +30,7 @@ WEB_PORT = 8000            # arayuz portu; baska bir ornek calisiyorsa degistir
 
 # --- Baslangic model secimi (registry ilk tercih; models/ altindaki .pt adi) ---
 # Ayrinti: detection/model_yonetici.py canli hot-swap yapar; bu yalniz baslangic.
-# 2026-07-07: "best" HUD-OVERFIT cikti (HUD yazilarini talon saniyor; kanit:
-# veri/ab/tani2/kareler/*_KUTULU.jpg + canli kosuda FP kovalayip 500 m acildi).
-# Aktif model Kayra'nin best_son'u @1280 (yaml'i imgsz/conf tasir).
-VIS_MODEL_ADI = "best_kayra_son"   # models/<ad>.pt (yoksa ilk bulunan .pt'ye duser)
+# 2026-07-08: aktif model models/best.pt = best_son @1280 (19 MB, detect/talon).
+# yarisma-pipeline'daki "best_kayra_son.pt" bu dosyayla bayt-bayt AYNIYDI
+# (blob f3f776e) -> tek kopya best.pt olarak yasar.
+VIS_MODEL_ADI = "best"             # models/<ad>.pt (yoksa ilk bulunan .pt'ye duser)
