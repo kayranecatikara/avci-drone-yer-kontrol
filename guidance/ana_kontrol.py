@@ -87,6 +87,9 @@ _LOG_COLS = [
     # GORUNTU-DUZLEMI KOPRU (2026-07-08): bu tik olu-hesap sanal bbox'la mi calisti?
     # (vis_gordu o tik 0 yazilir -> tespit% durust; kopru katkisi bu kolondan izlenir)
     "vis_kopru",
+    # ALTTAN-VURUS teshisi (2026-07-08): dikey nisan (negatif=hedef merkez ustunde tutulur)
+    # + alcalma freni carpani (1=serbest, taban=tam fren; eyy>0'da devreye girer).
+    "ibvs_eyref", "ibvs_alcal",
 ]
 
 
@@ -302,11 +305,22 @@ class Cfg:
     # carpisma rotasi. ey_ref = NISAN * tan(TILT) / tan(VFOV_yari) (tilt'ten TURETILIR).
     IBVS_TILT_DEG      = 25.0   # kamera YUKARI tilt (DOGRULANDI; kullanici teyidi)
     IBVS_VFOV_HALF_DEG = 47.2   # dikey FOV yari acisi (16:9 + HFOV 125'ten)
-    IBVS_DIKEY_NISAN   = 0.1    # 0 = hedefi MERKEZDE tut (altta kal / gokyuzu arka plan),
-                                # 1 = HIZ VEKTORUNU hedefe nisanla (ey_ref~0.43; terminal carpisma) ⚙
-                                # 1.0->0.1 (8 Tem ucus_2 kullanici tune'u: izleme fazinda merkezde
-                                # tutma en iyi sonucu verdi — r=0.07-0.14'luk episodlar bu degerde.
-                                # Terminal yaklasma denemesinde slider'dan 0.3-0.5'e cikar.)
+    IBVS_DIKEY_NISAN   = -0.25  # NEGATIF = hedefi merkez USTUNDE tut -> LOS > TILT -> arac
+                                # orantili olarak hedefin ALTINDA + gokyuzu arka plan (ALTTAN
+                                # VURUS). 0 = merkez; 1 = hiz vektorunu hedefe nisanla ⚙
+                                # 0.1->-0.25 (8 Tem: arac hedefin USTUNE cikip zemin clutter'da
+                                # tespit kaybediyordu; -0.25 -> ey_ref~-0.108 -> hedef cyn~0.45'te,
+                                # AV %10-90 bandinin rahat icinde. Daha da alttan: -0.4.)
+    # --- ALCALMA FRENI (gorsel anti-lift-carry, 2026-07-08) ---
+    # GPS yolundaki alc_oncelik'in gorsel-faz aynasi: hedef nisan noktasinin ALTINDAysa
+    # (eyy>0 = arac cok yuksekte) ileri itki carpimsal kisilir ->
+    #   pitch *= clamp(1 - ALCAL_FREN*max(0,eyy), ALCAL_TABAN, 1)
+    # Ileri-ucus tasimasi (lift carry) dusunce negatif thr gercekten alcaltir (THR_DN
+    # yorumundaki ders: tam ileri ucusta -0.40 bile tirmanmayi durduramiyordu).
+    # Tirmanis tarafi (eyy<0) etkilenmez. Girdi yalniz goruntu buyuklugu -> kural uygun.
+    IBVS_ALCAL_FREN  = 2.0      # 0=kapali; 2.0 -> eyy~0.4'te tabana iner ⚙
+    IBVS_ALCAL_TABAN = 0.2      # fren tabani (asla tam durma; biraz kapanis kalsin).
+                                # GPS alc_oncelik 0.15 tabaninin gorsel karsiligi; slider DISI.
     # --- ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank) ---
     # Hedefi ARKADAN takip ederken iki kanat ucu pikselinden (kp[1]=sol, kp[2]=sag)
     # goruntu-uzayi bank acisi: roll_img=atan2(dy,dx). Bankli ucak alcak kanadi yonune
@@ -845,6 +859,8 @@ class AvciKontrol:
             d["ibvs_roll"] = it.get("roll_deg"); d["ibvs_lead"] = it.get("lead")
             d["ibvs_roll_ok"] = 1 if it.get("roll_ok") else 0
             d["ibvs_roll_raw"] = it.get("roll_raw_deg")   # ham goruntu-roll (ego-comp A/B)
+            # alttan-vurus teshisi: dikey nisan + alcalma freni carpani (tune analizi)
+            d["ibvs_eyref"] = it.get("ey_ref"); d["ibvs_alcal"] = it.get("alcal")
         self._log("VISUAL", d)
 
     # ----------------------------------------------------------------

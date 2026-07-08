@@ -14,8 +14,9 @@
 | **Yatay salınım** (sağa-sola sarkaç) | `IBVS_K_YAW` | **DÜŞÜR** (önce), sonra `VIS_EMA` DÜŞÜR | ★★ |
 | Hedef **üst/alt kenardan** kaçıyor | `IBVS_K_DIKEY` | **ARTIR** | ★★★ |
 | **Dikey salınım/zıplama** | `IBVS_K_DIKEY` | **DÜŞÜR** | ★★ |
-| Araç hedefin **altında takılıyor**, dikeyde kapatamıyor (25° tilt undershoot) | `IBVS_DIKEY_NISAN` | **ARTIR** (1=hız vektörünü hedefe nişanla) | ★★ |
-| Araç fazla tırmanıp **hedefin üstüne çıkıyor** (zemin arka plan) / erken yükseliyor | `IBVS_DIKEY_NISAN` | **DÜŞÜR** (0=merkezde tut, altta kal) | ★★ |
+| Araç hedefin **altında takılıyor**, dikeyde kapatamıyor (25° tilt undershoot) | `IBVS_DIKEY_NISAN` | **ARTIR** (0/pozitife; 1=hız vektörünü hedefe nişanla) | ★★ |
+| Araç fazla tırmanıp **hedefin ÜSTÜNE çıkıyor** (zemin arka planda tespit kopuyor) | `IBVS_DIKEY_NISAN` | **NEGATİFE çek** (−0.25..−0.4 = ALTTAN VUR: hedef merkez ÜSTÜNDE tutulur, araç altta+gökyüzü) | ★★★ |
+| Üste çıkma sürüyor / **alçal komutu tırmanışı durduramıyor** (lift carry) | `IBVS_ALCAL_FREN` | **ARTIR** (fazla yükselince ileriyi kısıp alçalmayı mümkün kılar; 0=kapalı) | ★★ |
 | Hedef **manevra/dönüş** yapınca burun geriden yakalıyor (pose ile) | `IBVS_K_ROLL_LEAD` | **ARTIR** (0=kapalı; öngörü gücü) | ★★ |
 | Öngörü **erken/aşırı** dönüyor, salınım | `IBVS_K_ROLL_LEAD` **DÜŞÜR** / yanlış bank sıçraması → `IBVS_ROLL_CONF_MIN` **ARTIR** | | ★★ |
 | Öngörü **hiç çalışmıyor** (roll_ok hep pasif) | pose model/aspect kontrol: `IBVS_ROLL_CONF_MIN` **DÜŞÜR** ya da `IBVS_ASPECT_MIN` (Cfg) düşür | | ★ |
@@ -296,7 +297,12 @@ commit. `veri/ucus_metrikler.csv`'nin son halini sakla (rapor/video kanıtı).
 açısı, derece — görsel temasın ham verisi) · `d_s`,`v_close` (terminal LOS + kapanış hızı)
 · `ez`,`ez_int` (dikey hata + integral) · `*_raw` vs `*_cmd` (istenen vs rate-limit
 sonrası; sürekli ayrışıyorsa MAX_DELTA kısıtlıyor) · `vcap`,`drone_speed` (hız profili)
-· `phase/durum` (hangi anda hangi mod).
+· `phase/durum` (hangi anda hangi mod) · `ibvs_eyref`,`ibvs_alcal` (dikey nişan +
+alçalma freni çarpanı; alttan-vuruş teşhisi) · `vis_kopru` (o tik ölü-hesap köprüsü mü).
+
+> **NEGATİF NİŞAN NOTU:** `IBVS_DIKEY_NISAN<0` ile `mean|vis_ey|` artık ~|ey_ref| kadar
+> TASARIMSAL ofset taşır (hedef bilerek merkez üstünde tutulur) — merkezleme kalitesini
+> `ibvs_r` / `merkez_%` ile oku (ikisi de nişan-göreli; rapor KPI'ları doğru kalır).
 
 ## 7) Sık tuzaklar
 1. İki parametreyi birden değiştirmek. 2. Tek J koşusuna karar vermek (bozulma her

@@ -141,7 +141,11 @@ class AvciIBVS:
         # vektorunun goruntudeki yerine (FOE) tutmak icin dikey setpoint:
         #   ey_ref = NISAN * tan(TILT) / tan(VFOV_yari)   (NISAN=0 merkez/altta-kal, 1 hiz-vektoru).
         # Boylece "hedefte" = "burun hedefe kilitli" (dogrudan carpisma; 25-alti nisanlama biter).
-        nisan = clamp(float(getattr(p, "IBVS_DIKEY_NISAN", 1.0)), 0.0, 1.5)
+        # NEGATIF NISAN (2026-07-08, alttan-vurus): hedefi merkez USTUNDE tut -> LOS > TILT ->
+        # arac orantili olarak hedefin ALTINDA kalir + hedef gokyuzu arka planinda (zemin
+        # clutter'da tespit olumu biter). Eski 0.0 tabani yasanin "hedefin ustune cikma"
+        # egilimini yapisal kilitliyordu; -1.0'a acildi.
+        nisan = clamp(float(getattr(p, "IBVS_DIKEY_NISAN", 1.0)), -1.0, 1.5)
         tilt = math.radians(float(getattr(p, "IBVS_TILT_DEG", 25.0)))
         vfov_h = math.radians(float(getattr(p, "IBVS_VFOV_HALF_DEG", 47.2)))
         tan_v = math.tan(vfov_h)
@@ -163,7 +167,15 @@ class AvciIBVS:
                     float(p.THR_DN), float(p.THR_UP))
         # ileri itki: cizgi (nisandan sapma) buyudukce kisilir (once nisanla, sonra bas gitsin)
         kisma = clamp(1.0 - float(p.IBVS_MERKEZ_FREN) * r, 0.0, 1.0)
-        pitch = float(p.PITCH_SIGN) * clamp(float(p.IBVS_ILERI), 0.0, 1.0) * kisma
+        # ALCALMA FRENI (anti-lift-carry; GPS alc_oncelik'in gorsel-faz aynasi, 2026-07-08):
+        # hedef nisan noktasinin ALTINDAysa (eyy>0 = biz cok YUKSEKTEYIZ) ileri itkiyi
+        # carpimsal kis -> ileri-ucus tasimasi (lift carry) dussun -> negatif thr GERCEKTEN
+        # alcaltsin (GPS dersi ana_kontrol.THR_DN yorumunda: tam ileri ucusta -0.40 bile
+        # tirmanmayi durduramiyordu). TIRMAN tarafi (eyy<0) DOKUNULMAZ. TABAN: asla tam
+        # durma, biraz kapanis kalsin. Girdi yalniz goruntu buyuklugu (eyy) -> kural uygun.
+        alcal = clamp(1.0 - float(getattr(p, "IBVS_ALCAL_FREN", 2.0)) * max(0.0, eyy),
+                      float(getattr(p, "IBVS_ALCAL_TABAN", 0.2)), 1.0)
+        pitch = float(p.PITCH_SIGN) * clamp(float(p.IBVS_ILERI), 0.0, 1.0) * kisma * alcal
         roll = 0.0
 
         self._tlm = {
@@ -173,6 +185,7 @@ class AvciIBVS:
             "buyukluk": round(r, 3),          # nisandan sapma (0=hedef nisan noktasinda)
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)
             "kisma": round(kisma, 3),         # ileri itki carpani (1=tam gaz)
+            "alcal": round(alcal, 3),         # alcalma freni carpani (1=serbest; eyy>0'da kisar)
             "dikey": round(thr, 3), "ileri": round(pitch, 3), "yaw": round(yaw, 3),
             # ONGORU (pose kanat uclarindan hedef bank -> yaw lead)
             "roll_deg": round(math.degrees(self.roll_f), 1),  # hedef bank (EGO-TELAFILI, EMA'li)

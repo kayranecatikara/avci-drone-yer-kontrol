@@ -194,15 +194,37 @@ Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız
   (25°/47.2° → ~0.43). Dikey sapma `eyy = ey_f − ey_ref`; `thr = SIGN_DIKEY·K_DIKEY·(−eyy)`,
   `r = hypot(ex, eyy)`, `açı = atan2(−eyy, ex)`. Yani "çizgi" artık MERKEZDEN değil **NİŞAN
   noktasından** bbox'a; hedefi oraya sürmek = "burun hedefe kilitli" (doğrudan çarpışma rotası).
-- **`IBVS_DIKEY_NISAN` (0..1, ⚙ slider):** 0 = hedefi merkezde tut (altta kal / gökyüzü arka plan,
-  eski davranış); 1 = hız vektörünü hedefe nişanla (terminal çarpışma). Default **1.0**. Her ikisi
-  de çarpışmaya yakınsar (açısal bias, menzille küçülür) ama nişan=1 daha DOĞRUDAN/az-laggy rota.
+- **`IBVS_DIKEY_NISAN` (−0.8..1.2, ⚙ slider):** **NEGATİF = ALTTAN VUR: hedefi merkez ÜSTÜNDE
+  tut → LOS > TILT → araç orantılı olarak hedefin ALTINDA + gökyüzü arka plan** (2026-07-08
+  eklendi, aşağıdaki ALTTAN VURUŞ bölümü); 0 = merkezde tut; 1 = hız vektörünü hedefe nişanla
+  (terminal çarpışma). Default **−0.25** (0.1 ve 1.0'dan evrildi).
 - **Geriye uyum:** ey_ref=0 (nisan=0) → eski merkez-tabanlı yasa bit-bit aynı. Cfg: `IBVS_TILT_DEG=25`,
-  `IBVS_VFOV_HALF_DEG=47.2`, `IBVS_DIKEY_NISAN=1.0⚙`. Telemetri `gudum.ibvs.ey_ref`; FPV'de mavi
-  kesikli "⊕ HIZ VEKTÖRÜ (nişan)" çizgisi + IBVS hata çizgisi artık nişandan çizilir.
-- Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 14/14).
-  Sky-bg riski: araç hedefin üstüne çıkarsa zemin arka plan; regülasyon nişanda tutar, aşırı
-  tırmanma yok. Yaklaşmada daha çok "altta kal" istenirse slider'ı düşür.
+  `IBVS_VFOV_HALF_DEG=47.2`. Telemetri `gudum.ibvs.ey_ref`; FPV'de mavi kesikli nişan çizgisi
+  (pozitif: "⊕ HIZ VEKTÖRÜ", negatif: "⊕ ALTTAN VUR") + IBVS hata çizgisi nişandan çizilir.
+- Test: `tests/test_ibvs_gorsel.py` (`test_dikey_nisan_tilt_farkinda`, `test_nisanda_tam_ileri`; 19/19).
+
+## ⭐ ALTTAN VURUŞ — NEGATİF NİŞAN + ALÇALMA FRENİ (2026-07-08, kullanıcı isteği)
+Kullanıcı: görsel güdümde irtifa sürekli artıyor, araç hedefin ÜSTÜNE çıkıyor (istenen: alttan
+git, alttan vur; üstten bakınca hedef zemin clutter'ında ve dedektör kör). Kök neden İKİ yapısal
+kilit: (1) `nisan` clamp tabanı 0.0 → yasa hedefi asla merkez üstünde tutamıyordu → denge LOS ≤
+25° → menzil kapandıkça dikey ayrım co-altitude'a büzülür; (2) sabit ileri itki **lift carry**
+üretir, alçal komutu `thr=−K_DIKEY·eyy` (~−0.2) bunu yenemez (GPS dersi `THR_DN` yorumunda:
+−0.40 bile yetmiyordu) ve GPS yolundaki `alc_oncelik` pitch-kısma mekanizmasının görsel yasada
+karşılığı YOKTU → irtifa mandallanıyordu. Çözüm (ikisi de SALT görüntü verisi → GPS yasağına uygun):
+- **Negatif nişan:** `ibvs_gorsel.hesapla` clamp `(0,1.5)→(−1,1.5)`; default `−0.25`
+  (ey_ref≈−0.108 → hedef cyn≈0.45'te, kilit AV bandı içinde). Slider min −0.8.
+- **Alçalma freni (anti-lift-carry):** `alcal = clamp(1 − IBVS_ALCAL_FREN·max(0,eyy),
+  IBVS_ALCAL_TABAN, 1)`; `pitch *= kisma·alcal`. Hedef nişanın ALTINDAysa (eyy>0 = fazla
+  yüksekteyiz) ileri kısılır → negatif thr GERÇEKTEN alçaltır. Tırmanış (eyy<0) etkilenmez.
+  Cfg: `IBVS_ALCAL_FREN=2.0⚙` (slider 0..4), `IBVS_ALCAL_TABAN=0.2` (slider dışı; GPS
+  alc_oncelik 0.15 tabanının aynası — asla tam durma).
+- Telemetri `gudum.ibvs.alcal` (IBVS kartında nişan satırında turuncu "alçalma freni" eki);
+  log kolonları `ibvs_eyref`/`ibvs_alcal` (_LOG_COLS sonuna, şema-güvenli). NOT: `mean|vis_ey|`
+  artık tasarımsal ~|ey_ref| ofseti taşır — merkezleme kalitesi için `ibvs_r`/`merkez_%` kullan
+  (ibvs_r nişan-göreli olduğundan rapor KPI'ları doğru kalır).
+- Testler: `test_negatif_nisan_altta_kal` (merkezdeki hedef → thr<0), `test_alcalma_freni_*`,
+  `test_alcalma_taban`, `test_nisan_clamp_negatif` (19/19). Canlı: üste çıkma sürerse
+  NISAN −0.4 + ALCAL_FREN 3+.
 
 ## ⭐ GÖRÜNTÜ-DÜZLEMİ KÖPRÜ / ÖLÜ-HESAP (2026-07-08, kullanıcı onayı)
 İki tune uçuşunun verisi netti: güdüm parametreleri işini yapıyor (en iyi episodlarda
