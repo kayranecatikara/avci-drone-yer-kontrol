@@ -881,6 +881,18 @@
       const gorselFaz = (gs.durum==="GORSEL_GUDUM");
       const idTxt = (det.id!=null ? "ID:"+det.id+" " : "") + (det.sinif||"hedef")
                     + " " + Number(det.conf).toFixed(2);
+      // TALON ÇİZİM KAPISI (2026-07-08, SALT GÖRSEL): görsel-güdüm talon overlay'i (kilit
+      // dörtgeni AH + "sınıf X.XX" etiketi + oran yazıları) YALNIZ talon_gate geçen (conf +
+      // en/boy) VE full-box AV içindeki tespitte çizilir; aksi halde EKRAN TEMİZ (kutu/etiket/
+      // oran YOK). Güdüm, kilit değerlendirme ve CSV backend'de tespiti kendi mantığıyla
+      // işlemeye DEVAM eder — bu SADECE çizim katmanı.
+      const inAV = (det.cx-det.w/2>=0.25 && det.cx+det.w/2<=0.75
+                    && det.cy-det.h/2>=0.10 && det.cy+det.h/2<=0.90);
+      const enboy = (det.h>0 ? (det.w/det.h)*(rc.w/rc.h) : 0);
+      // BBOX-KOSULLU ASPECT (backend talon_gate ile AYNI): yakin (buyuk bbox) talon belly-on ->
+      // aspect ~1.0; bbox herhangi ekseni >=%5 -> alt sinir 0.8, kucukse 1.5 (sahte ayrimi).
+      const bbuyuk = Math.max(det.w||0, det.h||0) >= 0.05;
+      const gercek = (Number(det.conf) >= 0.50 && enboy >= (bbuyuk?0.8:1.5) && enboy <= 6.0);
       if(!gorselFaz){
         // --- GPS GÜDÜM FAZI: sade nötr bbox (kırmızı/yeşil YOK) ---
         ctx.setLineDash([]); ctx.strokeStyle="rgba(150,200,235,.92)"; ctx.lineWidth=2;
@@ -889,17 +901,12 @@
         ctx.font="bold 12px monospace"; const itw=ctx.measureText(idTxt).width;
         ctx.fillStyle="rgba(18,20,26,.8)"; ctx.fillRect(bx-bw/2, by-bh/2-18, itw+10, 15);
         ctx.fillStyle="#fff"; ctx.textBaseline="alphabetic"; ctx.fillText(idTxt, bx-bw/2+5, by-bh/2-7);
-      } else {
-        // --- GÖRSEL GÜDÜM FAZI: şartname kilitlenme dörtgeni + AV/boyut etiketleri ---
-        // İKİ KOŞULLU KİLİT (2026-07-08): (1) AH TAMAMEN AV içinde (dört kenar; MERKEZ değil
-        // = full-box) VE (2) en az bir eksende ≥ eşik. inAV = kutunun TAMAMI AV bandında.
-        const inAV = (det.cx-det.w/2>=0.25 && det.cx+det.w/2<=0.75
-                      && det.cy-det.h/2>=0.10 && det.cy+det.h/2<=0.90);
+      } else if(inAV && gercek){
+        // --- GÖRSEL GÜDÜM FAZI: talon_gate GEÇTİ + full-box AV İÇİNDE -> kilitlenme dörtgeni
+        // (AH) + AV/boyut etiketleri çiz. (inAV/gercek YUKARIDA hesaplandı = ÇİZİM KAPISI; aksi
+        // halde bu blok HİÇ çalışmaz -> ekran temiz.) İKİ KOŞULLU KİLİT: full-box AV + ≥eşik.
         const boyOK = wPct>=lockPct || hPct>=lockPct;           // ekran ekseninde ≥ eşik
-        // SAHTE-POZİTİF KAPISI (backend ile aynı): conf + en/boy (w/h). Dar/dikey = talon değil.
-        const enboy = (det.h>0 ? (det.w/det.h)*(rc.w/rc.h) : 0);
-        const gercek = (Number(det.conf) >= 0.50 && enboy >= 1.5 && enboy <= 6.0);
-        const kilit = inAV && boyOK && gercek;
+        const kilit = inAV && boyOK && gercek;                  // burada inAV=gercek=true
         const esik = (gs.conf_esik!=null ? gs.conf_esik : 0.45);
         const zayif = Number(det.conf) < esik;
         // ŞARTNAME: kilitlenme dörtgeni (AH) HER ZAMAN KIRMIZI #FF0000 — renk koşula bağlı DEĞİL.

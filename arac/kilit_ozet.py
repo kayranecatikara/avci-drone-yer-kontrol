@@ -25,6 +25,8 @@ VERI = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
 LOCK_PCT = 6.0
 CONF_MIN = 0.50
 ASP_MIN, ASP_MAX = 1.5, 6.0
+ASP_MIN_NEAR = 0.8        # YAKIN (buyuk bbox) aspect alt siniri (talon_gate ile AYNI; terminal belly-on)
+BBOX_NEAR = 5.0          # "yakin" esigi (%): bbox herhangi ekseni >= bu -> gevsek aspect
 
 
 def _flt(x):
@@ -64,7 +66,10 @@ def _valid(r):
     asp = _flt(r.get("bbox_en_boy"))                         # yeni CSV: dogrudan; eski: yatay/dikey (16:9)
     if asp is None:
         asp = (y / d) * (16.0 / 9.0) if d > 0 else 0.0
-    return ASP_MIN <= asp <= ASP_MAX                         # en/boy (talon GENIS; dar/dikey=sahte)
+    # BBOX-KOSULLU ASPECT (talon_gate ile AYNI): yakin (buyuk bbox) belly-on talon aspect ~1.0'a
+    # duser -> alt sinir gevser. _valid zaten bbox>=%6 istedigi icin burada hep "yakin" (0.8).
+    amin = ASP_MIN_NEAR if max(y, d) >= BBOX_NEAR else ASP_MIN
+    return amin <= asp <= ASP_MAX                            # en/boy (uzak dar/dikey=sahte; yakin gevser)
 
 
 def _pencere_max_kumulatif(segs, pencere):
@@ -146,11 +151,12 @@ def _gate_gecti(r):
         return False
     conf = _flt(r.get("det_skor")) or 0.0
     asp = _flt(r.get("bbox_en_boy"))
+    y = _flt(r.get("bbox_yatay_pct")) or 0.0
+    d = _flt(r.get("bbox_dikey_pct")) or 0.0
     if asp is None:
-        y = _flt(r.get("bbox_yatay_pct")) or 0.0
-        d = _flt(r.get("bbox_dikey_pct")) or 0.0
         asp = (y / d) * (16.0 / 9.0) if d > 0 else 0.0
-    return conf >= CONF_MIN and ASP_MIN <= asp <= ASP_MAX
+    amin = ASP_MIN_NEAR if max(y, d) >= BBOX_NEAR else ASP_MIN   # bbox-kosullu (talon_gate ile AYNI)
+    return conf >= CONF_MIN and amin <= asp <= ASP_MAX
 
 
 def sahte_oran_raporu(rows, far_m=40.0):

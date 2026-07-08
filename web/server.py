@@ -668,7 +668,7 @@ def _kiyas_guncelle():
     j_e = None
 
     # Inovasyonlu J (uretim): anlik cikti -> su anki gercekle karsilastir
-    j_out = _kiyas_j.guncelle(hx, hy, hz)
+    j_out = _kiyas_j.guncelle(hx, hy, hz, _now)   # adaptif dt: wall-clock (t_wall ile ayni)
     if j_out is not None:
         j_e = float(np.linalg.norm(np.array(j_out, float) - gercek))
         _kiyas_j_hata.append(j_e)

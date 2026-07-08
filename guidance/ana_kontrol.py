@@ -305,8 +305,12 @@ class Cfg:
     # (1) conf >= esik; (2) bbox en/boy (w/h) talonun makul araliginda (talon GENIS; dar/dikey
     # = sahte). 8 Tem olcum: gercek yakin conf 0.56-0.89 asp 1.6-3.2; sahte uzak asp 0.5-0.9 dikey.
     VIS_LOCK_CONF_MIN   = 0.50   # kilit karesi asgari conf (sahte-pozitif kapisi)
-    VIS_LOCK_ASPECT_MIN = 1.5    # bbox en/boy (w/h) alt siniri (talon GENIS; dikey=sahte)
-    VIS_LOCK_ASPECT_MAX = 6.0    # bbox en/boy ust siniri
+    VIS_LOCK_ASPECT_MIN = 1.5    # bbox en/boy (w/h) alt siniri UZAK/kucuk bbox (talon GENIS; dikey=sahte)
+    VIS_LOCK_ASPECT_MAX = 6.0    # bbox en/boy ust siniri (her iki durumda ayni)
+    VIS_LOCK_ASPECT_MIN_NEAR = 0.8   # YAKIN (buyuk bbox) aspect alt siniri: terminal fazda talon
+                                     # belly-on -> kare/dikey (aspect ~1.0); conf+AV zaten sahteyi
+                                     # ayirir (7 Tem kosu t=44.8-45.3: conf 0.75-0.91, aspect 0.93-1.22).
+    VIS_LOCK_BBOX_NEAR  = 0.05   # "yakin" esigi: bbox herhangi ekseni >= %5 -> gevsek aspect uygula
     # --- GORSEL DEVIR (handover) ESIGI (2026-07-08): OTO/GPS'ten gorsele gecis, hedef YETERINCE
     # YAKIN+BUYUK olana kadar OLMAZ. Devir sarti: talon_gate + bbox >= VIS_HANDOFF_PCT (kilit %6'nin
     # altinda ama clutter'dan yukarida) + ard arda VIS_N_LOCK kare STABIL. bbox kucukse (uzak) IBVS
@@ -322,16 +326,29 @@ def talon_gate(tespit):
     """SAHTE-POZITIF KAPISI (SAF GORSEL — PnP/GPS DEGIL): tespit conf + en-boy (w/h) talon
     araliginda mi. True = gercek talon adayi -> KILIT degerlendirme VE gorsel guduum (IBVS)
     girdisi VE CSV isareti bunu kullanir (TEK dogruluk kaynagi). False = sahte (uzak clutter/
-    pervane: dar/dikey en-boy veya zayif conf). Amac: arac OLMAYAN talonu takip/kilit etmesin."""
+    pervane: zayif conf veya kucuk-bbox'ta dar/dikey en-boy). ASPECT alt siniri BBOX-KOSULLU:
+    yakin (buyuk bbox) talon belly-on gorunup kare/dikeye duser -> gevsek; uzak/kucuk -> siki."""
     if tespit is None:
         return False
     try:
         h = float(tespit["h"])
+        w = float(tespit["w"])
         if h <= 0:
             return False
-        aspect = float(tespit["w"]) / h
-        return (float(tespit.get("conf", 0.0)) >= float(Cfg.VIS_LOCK_CONF_MIN)
-                and float(Cfg.VIS_LOCK_ASPECT_MIN) <= aspect <= float(Cfg.VIS_LOCK_ASPECT_MAX))
+        if float(tespit.get("conf", 0.0)) < float(Cfg.VIS_LOCK_CONF_MIN):
+            return False                                   # conf kapisi (DEGISMEDI) — sahtenin ana filtresi
+        aspect = w / h
+        # BBOX-KOSULLU ASPECT ALT SINIRI: yakin terminal fazda (bbox buyuk) talon belly-on ->
+        # aspect ~1.0; sabit [1.5,6] gercek yakin talonu elerdi (7 Tem: conf 0.75-0.91, bbox %9-11,
+        # menzil 5-7m). bbox herhangi ekseni >= VIS_LOCK_BBOX_NEAR ise alt sinir gevser
+        # (VIS_LOCK_ASPECT_MIN_NEAR); kucuk/UZAK bbox'ta [1.5,6] KALIR (orada aspect sahte ayrimi
+        # icin degerli). Ust sinir (6.0) her iki durumda ayni.
+        W = float(tespit.get("W", 0.0)); H = float(tespit.get("H", 0.0))
+        yatay = (w / W) if W > 0 else 0.0
+        dikey = (h / H) if H > 0 else 0.0
+        buyuk = max(yatay, dikey) >= float(Cfg.VIS_LOCK_BBOX_NEAR)
+        amin = float(Cfg.VIS_LOCK_ASPECT_MIN_NEAR) if buyuk else float(Cfg.VIS_LOCK_ASPECT_MIN)
+        return amin <= aspect <= float(Cfg.VIS_LOCK_ASPECT_MAX)
     except (KeyError, TypeError, ValueError, ZeroDivisionError):
         return False
 
@@ -382,7 +399,7 @@ class AvciKontrol:
         self.son_ham = None
         self.son_temiz = None           # J'nin son gecerli ciktisi (cm, 2sn lead) - YATAY icin
         self.son_z_anlik = None         # J'nin ANLIK (lead'siz) irtifa kestirimi (cm) - DIKEY icin
-        self.son_xy_anlik = None        # J'nin ANLIK (lead'siz) yatay konumu (cm) - terminal vurus LOS'u
+        self.son_xy_anlik = None        # J'nin ANLIK (lead'siz) yatay konumu (cm) - TESHIS-only (terminal artik son_temiz)
         self.son_hiz = None             # J'nin kestirdigi hedef hizi (cm/s, 3B) - olcum/ileri kullanim
         self._fresh = False             # bu tik J'den YENI gecerli kestirim geldi mi?
 
@@ -514,7 +531,7 @@ class AvciKontrol:
         ham = self.drone.get_target_location()
         if ham != self.son_ham:               # yeni telemetri paketi
             self.son_ham = ham
-            sonuc = self.filtre.guncelle(ham[0], ham[1], ham[2])
+            sonuc = self.filtre.guncelle(ham[0], ham[1], ham[2], time.time())  # adaptif dt: wall-clock
             if sonuc is not None:
                 self.son_temiz = np.array(sonuc)   # 2sn lead'li (YATAY intercept icin)
                 self._fresh = True            # YENI gecerli kestirim
@@ -529,8 +546,9 @@ class AvciKontrol:
                 else:
                     self.son_hiz = np.array(durum["vel"], float)
                     self.son_z_anlik = float(durum["pos"][2])     # lead'siz anlik irtifa
-                    # lead'siz ANLIK yatay konum -> terminal vurus (carpisma-rotasi) LOS'u
-                    # bunu kullanir; lead son_temiz'de degil, hedef hizini eslemede otomatik.
+                    # lead'siz ANLIK yatay konum. 2026-07-08'den beri terminal LOS+menzil BUNU
+                    # DEGIL son_temiz (lead) kullanir (olcum: anlik nisan 20.5m/menzil -12.8m vs
+                    # lead 3.9m/-0.9m). son_xy_anlik yalniz TESHIS icin loglanir (xy_anlik_x/y).
                     self.son_xy_anlik = np.array([durum["pos"][0], durum["pos"][1]], float)
             else:
                 self._fresh = False           # isinma/donma -> kestirim yok
@@ -1031,15 +1049,14 @@ class AvciKontrol:
             return
         self.last_est = est
 
-        # YATAY nisan noktasi: B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde
-        #     dur. KISA lead (APPROACH_LEAD_S) ile nisan (savrulmayi onler); pozisyon KOMUTU
-        #     hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
+        # YATAY nisan noktasi: B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde dur; pozisyon
+        #     KOMUTU hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
         #     ex/ey/d_h ONCE hesaplanir: dikey look-up nisan noktasi d_h'ye (menzile) baglidir.
-        if self.son_xy_anlik is not None and self.son_hiz is not None:
-            tx = float(self.son_xy_anlik[0]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[0])  # kisa lead
-            ty = float(self.son_xy_anlik[1]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[1])
-        else:
-            tx, ty = float(est[0]), float(est[1])                 # fallback: 2sn lead
+        # NISAN + MENZIL(d_h) = son_temiz (LEAD), ANLIK DEGIL (2026-07-08 olcum, KILIT fazi): lead
+        # nisan hatasi 3.9m vs anlik 20.5m; lead menzil sapmasi -0.9m vs anlik -12.8m -> anlik
+        # gecikme-lag'i hedefi ~13m YAKIN gosterip terminali erken devrediyor/sabote ediyordu. Ayni
+        # tx,ty ARAMA+KILIT icin ortak -> faz gecisinde estimate DEGISMEZ (tutarli, ikisi de son_temiz).
+        tx, ty = float(est[0]), float(est[1])                    # son_temiz = lead (telafi_sn ufku)
         ex = tx - float(drone_pos[0])                             # HEDEFE hata (yaw/handoff/FOV/log)
         ey = ty - float(drone_pos[1])
         d_h = math.hypot(ex, ey)
