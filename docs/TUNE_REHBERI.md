@@ -1,3 +1,120 @@
+# GÖRSEL GÜDÜM — HIZLI AYAR REHBERİ (2026-07-07 v7: BASİT IBVS)
+
+> **BÜYÜK SIFIRLAMA:** PN yığını (ve 14 slider'lık eski panel) SİLİNDİ. Tek yasa:
+> görüntü merkezinden bbox merkezine ÇİZGİ; yatay bileşen → yaw, dikey bileşen →
+> gaz, çizgi büyüklüğü → ileri itkiyi kısar, roll=0. Panelde 8 slider kaldı.
+> **ALTIN KURAL: tek seferde TEK slider değiştir, bir görev uç, karşılaştır.**
+> Panel canlı (restart yok).
+
+| Belirti (videoda/logda gördüğün) | Knob | Yön | Etki |
+|---|---|---|---|
+| **Çok yavaş / hiç yaklaşamıyor** | `IBVS_ILERI` | **ARTIR** (yaklaşma hızının ana knob'u) | ★★★ |
+| Hedefe sert dalıp **ıskalıyor / kilit penceresi dolmadan varıyor** | `IBVS_ILERI` | **DÜŞÜR** | ★★★ |
+| Hedef **yatayda** (sağ/sol kenar) kaçıyor | `IBVS_K_YAW` | **ARTIR**; hâlâ yetmiyorsa `YAW_MAX` ARTIR | ★★★ |
+| **Yatay salınım** (sağa-sola sarkaç) | `IBVS_K_YAW` | **DÜŞÜR** (önce), sonra `VIS_EMA` DÜŞÜR | ★★ |
+| Hedef **üst/alt kenardan** kaçıyor | `IBVS_K_DIKEY` | **ARTIR** | ★★★ |
+| **Dikey salınım/zıplama** | `IBVS_K_DIKEY` | **DÜŞÜR** | ★★ |
+| Araç hedefin **altında takılıyor**, dikeyde kapatamıyor (25° tilt undershoot) | `IBVS_DIKEY_NISAN` | **ARTIR** (1=hız vektörünü hedefe nişanla) | ★★ |
+| Araç fazla tırmanıp **hedefin üstüne çıkıyor** (zemin arka plan) / erken yükseliyor | `IBVS_DIKEY_NISAN` | **DÜŞÜR** (0=merkezde tut, altta kal) | ★★ |
+| Hedef **manevra/dönüş** yapınca burun geriden yakalıyor (pose ile) | `IBVS_K_ROLL_LEAD` | **ARTIR** (0=kapalı; öngörü gücü) | ★★ |
+| Öngörü **erken/aşırı** dönüyor, salınım | `IBVS_K_ROLL_LEAD` **DÜŞÜR** / yanlış bank sıçraması → `IBVS_ROLL_CONF_MIN` **ARTIR** | | ★★ |
+| Öngörü **hiç çalışmıyor** (roll_ok hep pasif) | pose model/aspect kontrol: `IBVS_ROLL_CONF_MIN` **DÜŞÜR** ya da `IBVS_ASPECT_MIN` (Cfg) düşür | | ★ |
+| Öngörü **TERS** yönde (sağa bank→sola lead) | `IBVS_SIGN_ROLL = −1` (Cfg; bir kez doğrula) | | — |
+| Kenardaki hedefe doğru **körlemesine ilerliyor** (önce dönmesi lazım) | `IBVS_MERKEZ_FREN` | **ARTIR** (sapınca ileriyi keser) | ★★ |
+| Sapmada **duraksıyor**, hiç yol almıyor | `IBVS_MERKEZ_FREN` | **DÜŞÜR** (0 = hep tam gaz) | ★★ |
+| Komutlar **titrek** (bbox jitter'ı komuta geçiyor) | `VIS_EMA` | **DÜŞÜR** (daha yumuşak) | ★ |
+| Tepki **gecikiyor** (hedef kaçtıktan sonra dönüyor) | `VIS_EMA` | **ARTIR** (daha tepkili) | ★ |
+| Yanlış tespit çok / geç görüyor | `VIS_CONF_MIN` | yanlış çoksa ARTIR / geç ise DÜŞÜR | ★ |
+| Kısa tespit kopmasında hemen GPS'e dönüyor | `VIS_LOST_TO_GPS_S` | **ARTIR** (kayıpta hover süresi) | ★ |
+| Yaw/dikey **TERS** çalışıyor | `IBVS_SIGN_YAW` / `IBVS_SIGN_DIKEY` = **-1** (Cfg'den, panelde yok — bir kez doğrula) | | — |
+
+---
+
+## ÖNGÖRÜLÜ YAW LEAD (POSE ROLL) — VERİ-TABANLI TUNE PROSEDÜRÜ
+
+> "Araç sağa dönecek dediği an gerçekten sağa dönüyor mu?" sorusunu **tahminle değil ölçümle**
+> cevaplarız. Katsayıları göze göre değil, `araclar/pose_ongoru_analiz.py` çıktısına göre ayarla.
+
+**Sinyal zinciri:** pose 2 kanat ucu → `roll_img` (kanat çizgisi eğimi) → EMA (`roll_f`) →
+`lead = IBVS_SIGN_ROLL · IBVS_K_ROLL_LEAD · roll_f` → `yaw = K_YAW·ex + lead`. Yani **işaret**
+tahminin YÖNÜNÜ, **kazanç** ŞİDDETİNİ, **kapılar** ne zaman güvenildiğini belirler.
+
+### Adım 0 — Veri topla
+Kaynak=GERÇEK + vismode=GORSEL/OTO ile, **hedefin sağa-sola manevra yaptığı** bir görev uç
+(`Cfg.LOG_ENABLE=True`). Düz uçan hedefte öngörü doğrulanamaz. Log: `veri/ucus_log_*.csv`
+(`ibvs_roll`, `ibvs_lead`, `ibvs_roll_ok`, `true_tx/ty`, `vis_cx` dolu olmalı).
+
+### Adım 1 — Analiz et → İŞARETİ belirle (İLK ve EN ÖNEMLİ)
+```
+python araclar/pose_ongoru_analiz.py            # en yeni logu okur
+```
+Çıktıdaki **VERDICT**'e göre:
+
+| VERDICT | Anlamı | Yapılacak |
+|---|---|---|
+| **GEÇERLİ** (\|corr\|≥0.30, uyum≥%65) | Bank hedefin dönüşünü ~H sn önceden haber veriyor | `IBVS_SIGN_ROLL = ÖNERİ` (Cfg'ye yaz), Adım 2 |
+| **ZAYIF-POZİTİF** | Sinyal var ama gürültülü | `SIGN_ROLL = ÖNERİ`; `K_ROLL_LEAD` düşük tut, `ROLL_CONF_MIN` artır |
+| **ANLAMSIZ** (\|corr\|<0.15) | Roll ↔ dönüş ilişkisi yok | Keypoint sırası (`kp_sira_dogrula.py`) + aspect kapısı; düzelmezse `K_ROLL_LEAD=0` |
+| **BELİRSİZ** | Hedef manevra yapmamış | Dönüşlü koşu al, tekrar analiz |
+
+`ÖNERİ = sign(corr)`. **Korelasyonun İŞARETİ önemli, büyüklüğü değil** — negatif korelasyon
+"tahmin doğru ama ters bağlı" demektir → `SIGN_ROLL=−1` ile uyum% yükselir.
+(7 Tem: corr=−0.86 → `SIGN_ROLL=−1` yapıldı; +1 iken "sağ" derken hedef sola gidiyordu.)
+
+### Adım 2 — `IBVS_K_ROLL_LEAD` (öngörü ŞİDDETİ) — slider ★★
+İşaret doğruyken kazancı ayarla. **Neye göre:** dönüş anlarında hedef kadrajda merkezde kalıyor mu?
+- **Başlangıç 0.3–0.5.** Hedef dönerken burun **geriden** kalıyorsa (dönüş-dışı kenara kaçıyor) →
+  **ARTIR**. Dönüş başında burun hedefin **önüne fırlıyor**/salınıyorsa → **DÜŞÜR**.
+- Ölçüt: her koşudan sonra `pose_ongoru_analiz.py` **uyum%** + FPV'de dönüşte `ex` (yatay hata)
+  tepe değeri. İyi ayar: dönüşte \|ex\| tepesi küçülür, salınım yok.
+- Sezgi: `lead(rad) ≈ SIGN·K·roll_f`. roll_f tipik ±0.1–0.3 rad → K=0.5'te lead ±0.05–0.15.
+  `YAW_MAX`'a (0.60) sık dayanıyorsa K yüksektir.
+
+### Adım 3 — Kapılar (ne zaman GÜVENİLİR) — `IBVS_ROLL_CONF_MIN` slider ★
+- `IBVS_ROLL_CONF_MIN` (0.5): iki kanat ucu güveni bunun altındaysa lead=0. **Yanlış bank sıçraması**
+  görürsen ARTIR (0.6–0.7); öngörü çok seyrek giriyorsa (roll_ok çoğu 0) DÜŞÜR.
+- `IBVS_ASPECT_MIN` (120°, Cfg): yalnız arkadan (aspect≥eşik) lead; yandan kanat çizgisi bank'i
+  temsil etmez. PnP mesafe sık çözülmüyorsa bu kapı pasif (aspect yok → conf'a düşer).
+- `IBVS_ROLL_EMA` (0.4) roll titrekse DÜŞÜR / geç kalıyorsa ARTIR. `IBVS_POZ_STALE_S` (0.6):
+  pose bundan eskiyse lead=0.
+
+### Adım 4 — Ego-motion telafisi (`IBVS_EGO_ROLL_GAIN`) — nasıl ÖLÇERİZ
+Kamera gövdeye sabit → biz yatınca kanat çizgisi de döner, "hedef bank"ı kirletir.
+`roll_comp = roll_img − GAIN·own_roll` (kendi IMU roll'ümüz). **İyileştirdi mi, ölçümle:**
+`pose_ongoru_analiz.py` çıktısının sonunda **EGO-MOTION TELAFİ A/B** bloğu üç varyantın
+truth-korelasyonunu kıyaslar:
+```
+HAM (telafisiz)     |corr|=...
+EGO gain=+1 (-own)  |corr|=...     <- kendi roll çıkarılmış
+EGO gain=-1 (+own)  |corr|=...
+-> KAZANAN: ... -> IBVS_EGO_ROLL_GAIN=... kullan
+```
+- **En yüksek |corr| kazanır.** "EGO gain=+1" kazandıysa telafi işe yaradı → `IBVS_EGO_ROLL_GAIN=+1`.
+  "HAM" kazandıysa fayda yok → `GAIN=0` (kapat). Ters işaret kazanırsa `GAIN=−1`.
+- **UYARI:** araç "kendi roll std < 2°" derse (basit IBVS roll=0 komut verir, gövde ~düz kalır)
+  ego-comp o logda **egzersiz edilmemiştir** — fark ihmal edilebilir. Karar için **hedefi kovalarken
+  bizim de bank attığımız** (agresif/rüzgârlı) bir koşu gerekir. Yani ego-comp bir **sigorta**:
+  normal düz-gövde uçuşta etkisiz, sert manevrada sinyali temizler.
+
+### Adım 5 — Doğrula (kapan)
+Her değişiklikten sonra yeni log → `pose_ongoru_analiz.py` yeniden. Hedef: **uyum% ↑, karışıklık
+köşegeni baskın, en iyi ufuk ≥ ~0.2 sn**. Öngörü işe yaramıyorsa `IBVS_K_ROLL_LEAD=0` — saf IBVS
+zaten çalışır (öngörü yalnız bonus).
+
+---
+
+**Neden merkez = alttan yaklaşma:** kamera gövdeye +25° yukarı bakar; hedef kadraj
+merkezindeyken LOS ufka göre +25° demektir → araç hedefin ALTINDA uçar, arka plan
+gökyüzü. Ekstra dikey-geometri knob'u YOK; bu davranış geometriden bedava gelir.
+
+**Tipik ayarlama akışı:** (1) `IBVS_K_YAW` + `IBVS_K_DIKEY` ile hedefi merkezde
+sabitle (ileri düşükken) → (2) `IBVS_ILERI`'yi kademeli artır → (3) sapmada taşma
+görürsen `IBVS_MERKEZ_FREN` artır → (4) kilit penceresi (5/10 sn) videoda dolacak
+kadar hızı ayarla. İşaretler/FSM zamanlamaları/GPS PD panelde yok —
+gerekirse `guidance/ana_kontrol.py` Cfg'den.
+
+---
+
 # GPS GÜDÜM TUNE REHBERİ — "kontrollü yaklaş, hep bak, tekte vur"
 
 > Amaç: hedef araca **kontrollü** yaklaşmak, kamerayı **her an hedefte** tutmak
@@ -194,9 +311,9 @@ KP_CLOSE=0.6 · V_CLOSE_MIN=850 · KV_STRIKE=2.0 · STRIKE_TILT=0.45 · COMMIT_R
 
 ---
 
-## 9) GÖRSEL TUNE MODU (PNG çarpışma rotası — 2026-07-06)
+## 9) GÖRSEL TUNE MODU (basit IBVS — 2026-07-07 v7)
 
-Görsel güdümü (PNG, `guidance/png_gorsel.py`) **GPS yaklaşma mekaniklerine
+Görsel güdümü (basit IBVS, `guidance/ibvs_gorsel.py`) **GPS yaklaşma mekaniklerine
 takılmadan** izole test etmenin yolu:
 
 1. Oyun + arayüzü başlat; **kaynak = GERÇEK GPS** seç (J filtre sapması denklemden çıkar).

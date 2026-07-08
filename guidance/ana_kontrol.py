@@ -17,11 +17,13 @@ FAZLAR / FSM (self.durum):
   KILIT  -> ayni GPS yaklasma; d_h < HANDOFF_RANGE histerezisiyle isaretlenir
             (gorsel faz devralmaya hazir).
   GORSEL_GUDUM -> yonelim YALNIZCA kameradan: YOLO bbox (server dedektor thread
-            -> set_gorsel_tespit) -> _gorsel_guduum -> guidance/png_gorsel.py
-            (PNG carpisma rotasi, Cfg.VIS_LAW). Kayipta kademeli: kor-devam ->
-            hover -> (OTO'da) GPS'e geri don.
+            -> set_gorsel_tespit) -> _gorsel_guduum -> guidance/ibvs_gorsel.py
+            (BASIT IBVS: goruntu merkezi -> bbox merkezi cizgisi; acisi+buyuklugu
+            komuta cevrilir). Kayipta: hover -> (OTO'da) GPS'e geri don.
   Otomatik gecis (vis_mode=OTO): AUTO_VISUAL_HANDOFF + ard arda VIS_N_LOCK
   gecerli tespit + handoff yakinligi. Manuel: set_vis_mode GPS/GORSEL zorlar.
+  NOT (2026-07-07): eski PN/PNG gorsel yigini (LOS/Omega/kapanma/look-up/
+  soft-start/lead-yaw/alt-FSM) kullanici karariyla KOMPLE SILINDI -> git gecmisi.
 
 TASARIM TEZI (cevik hedefe dayaniklilik):
   GNSS gecikme-baskin + ~29 m hata tabani. GPS fazinin HEDEFI "kestirilen
@@ -38,9 +40,10 @@ import csv
 import math
 import os
 import time
+from collections import deque
 import numpy as np
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
-from guidance.png_gorsel import AvciPNGGuduum                   # gorsel PNG: bbox -> LOS -> carpisma rotasi
+from guidance.ibvs_gorsel import AvciIBVS                       # gorsel: merkez->bbox cizgisi (basit IBVS)
 
 # --- UCUS LOGU: dosya dizini + sabit kolon sirasi (arac/analiz_ucus.py isimle okur) ---
 _HERE = os.path.dirname(os.path.abspath(__file__))          # .../guidance
@@ -68,8 +71,19 @@ _LOG_COLS = [
     "thr_raw", "pitch_raw", "roll_raw", "yaw_raw", "thr_cmd", "pitch_cmd", "roll_cmd", "yaw_cmd",
     # GORSEL GUDUM (VISUAL fazi): normalize bbox-merkez hatasi + gordu/conf/alan
     "vis_ex", "vis_ey", "vis_gordu", "vis_conf", "vis_area",
-    # GORSEL PNG (VIS_LAW="PNG"): kamera-menzil (m), kapanma hizi (m/s), LOS donme (rad/s)
+    # ESKI PNG kolonlari (PN yigini 2026-07-07 SILINDI): sema uyumu icin durur, BOS yazilir.
     "png_R_m", "png_Vc", "png_omega",
+    # KILITLENME ISTERI (sartname 6.1.2/6.1.4): vis_faz eski alt-FSM'indi (artik BOS);
+    # kilit_win_s = 10 sn penceredeki kumulatif kilit suresi (sayac YASIYOR, salt gozlem).
+    "vis_faz", "kilit_win_s",
+    # HAM normalize yatay tespit konumu (vis_ey zaten dikey) — pervane yanlis-poz
+    # konumlamasi icin (EMA'siz; vis_ex EMA'li oldugundan kose kumeleri bulaniktir).
+    "vis_cx",
+    # BASIT IBVS (2026-07-07): merkez->bbox cizgisi buyuklugu + acisi (SONA eklendi; sema-guvenli)
+    "ibvs_r", "ibvs_aci",
+    # ONGORULU YAW LEAD (pose kanat uclarindan hedef bank): roll (ego-telafili, deg) + yaw lead +
+    # kapi durumu + HAM goruntu-roll (ego-telafisiz; ego-comp A/B analizi icin).
+    "ibvs_roll", "ibvs_lead", "ibvs_roll_ok", "ibvs_roll_raw",
 ]
 
 
@@ -78,7 +92,7 @@ _LOG_COLS = [
 #   [ORTAK]         : her fazda gecerli (birim/isaret/dongu/komut tavani/log)
 #   [GPS-YAKLASMA]  : YALNIZ durum != GORSEL_GUDUM iken (kalkis, standoff,
 #                     fren/speed_cap, PD, None yonetimi). Gorsel faza KARISMAZ.
-#   [GORSEL]        : kilit/kayip FSM'i + PNG carpisma rotasi (png_gorsel.py).
+#   [GORSEL]        : basit IBVS (ibvs_gorsel.py) + kilit isteri sayaci + kayip yonetimi.
 # Canli-tune: web arayuzu /api/tune ile TUNE_ALLOW listesindekileri degistirir.
 # ==========================================================
 class Cfg:
@@ -148,7 +162,23 @@ class Cfg:
     # BILINEN GERILIM (6 Tem log analizi): bu ofset yuzunden gorsel handoff hedefin
     # ~5-8 m ALTINDA baslar -> PNG'nin endgame'de kapatmasi gereken dikey acik.
     # Kucultmek kadraji bozabilir; degistirirken kamera cerceveleme ile birlikte tune et.
-    APPROACH_ALT_OFFSET = 500.0  # cm (5 m); drone hedefin ALTINDA kalacagi dikey ofset
+    APPROACH_ALT_OFFSET = 500.0  # cm (5 m); drone hedefin ALTINDA kalacagi ASGARI dikey ofset
+                                 # (LOOKUP_ELEV_DEG menzil-olcekli offset bunun UZERINE cikar)
+
+    # --- LOOK-UP GEOMETRISI (asagi-bakma/clutter cozumu) ---
+    # PROBLEM: avci hedefin USTUNDEN takip edince kamera ASAGI bakar; hedef arazi
+    # dokusu (clutter) onunde dusuk kontrast -> YOLO tespiti kopar. ALTTAN (look-up)
+    # bakista arka plan GOKYUZU -> siluet, yuksek kontrast + planform izdusumu maksimum.
+    # COZUM: avci hedefin ALTINDA kalsin, LOS YUKSELIS acisi her an >= LOOKUP_ELEV_DEG.
+    # SABIT irtifa farki YETMEZ: ayni dh uzak menzilde kucuk aci verir -> menzil-olcekli:
+    #   GPS fazi: z_ref = z_hedef - max(APPROACH_ALT_OFFSET, tan(eps)*d_h)  [aci >= eps garanti]
+    #   Gorsel faz (PNG): asin(u_hat[2]) < eps iken alcalma bias'i (u_hat[2]=sin(elev)).
+    LOOKUP_ELEV_DEG   = 6.0      # eps; LOS yukselis aci SETPOINT'i (deg). 0 = look-up KAPALI.
+                                # Gorsel faz dikeyi bu aciyi TUTAR (alt->alcal, ust->tirman).
+                                # 5-8 tavsiye (kucuk=zayif siluet, buyuk=cok alttan; 7 Tem: 8->6
+                                # cunku v1 tek-yon bias hedefi ust kenara atiyordu, ey_ort -0.19)
+    LOOKUP_MIN_ALT_CM = 800.0   # cm; alcalma TABAN irtifasi (yere cakilma korumasi; taban
+                                # altinda ALCALMA dayatilmaz ama tirmanisa izin var)
 
     # --- PD GAINS (hata cm cinsinden) — DEGISTIRME ---
     KP_H = 0.00025              # yatay konum -> komut
@@ -171,8 +201,9 @@ class Cfg:
                               # ustundeyken THR=-0.40 komutuna RAGMEN +3 m/s tirmanmaya devam
                               # ediyordu (ileri-ucus tasimasi -0.40'i yeniyor). Tam inme yetkisi
                               # gerekli; PD sadece cok yukaridayken -1'e gider, hedefe yakinda 0'a doner.
-    YAW_MAX   = 0.45           # burnu (kamerayi) hedefe donuk tutar (sim-tune 2026-07-03: 0.30->0.45,
-                               # burun manevrali hedefe daha hizli doner -> FOV kaybi azalir; salinim yok).
+    YAW_MAX   = 0.60           # burnu (kamerayi) hedefe donuk tutar (sim-tune 2026-07-03: 0.30->0.45;
+                               # 7 Tem: 0.45->0.60 — canli logda gorsel kayip anlarinin %42'sinde yaw
+                               # DOYGUNLUKTA (0.45'e dayanmis) + hedef kenarda -> tavan yukseltildi).
 
     # --- HIZ LIMITI (bank rate uyumlu; salinim onleyici) ---
     MAX_DELTA = 0.05           # komut/tik max degisim
@@ -203,66 +234,94 @@ class Cfg:
     # gorsel-temas-kaybi teshisi yapar. Yarismada/uretimde False yap.
     LOG_ENABLE = True
 
-    # ================= [GORSEL] (kilit/kayip FSM + PNG yasasi) =================
+    # ================= [GORSEL] (basit IBVS + kilit isteri sayaci) =================
     # --- GORSEL GUDUM — gorsel temas SONRASI yonelim (YALNIZCA kamera) ---
-    # Kilit: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec.
-    # Kayipta kademeli: kor-devam -> hover -> (OTO'da) GPS'e geri don.
+    # Gecis: conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL_GUDUM'a gec.
+    # Kayipta: HOVER (yeniden tespit bekle) -> (OTO'da) VIS_LOST_TO_GPS_S sonra GPS'e don.
     VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "best.pt")   # tespit modeli (task=detect, sinif: talon)
+    VIS_POSE_MODEL_PATH = os.path.join(_PROJ_ROOT, "models", "talon_pose.pt")  # poz modeli (task=pose, 6 keypoint)
+    # PERVANE MASKESI (yanlis-pozitif engelleme): avcinin KENDI pervanesi arada bir
+    # "ucak" olarak algilaniyor (dedektor sinif-agnostik en-yuksek-conf'u secer -> bir
+    # karede pervane hedefi bastirabilir). Pervane KADRAJDA SABIT konumdadir (kendi
+    # aracimizda). Bu bolgelerde MERKEZI olan kutular dedektorde ELENIR (argmax ONCESI).
+    # Normalize (0..1) dikdortgen listesi [x0,y0,x1,y1]; bos liste = kapali.
+    # DEGER: 7 Tem log analizi — 60 kesin yanlis-poz (gercek hedef 126m uzak/kadraj disi
+    # iken conf~0.48 tespit) SAG-ALT'ta kumelendi (ex~0.75-1.0, ey~0.25). Canli FPV'de
+    # dogrula/rafine et (arayuz maskeyi kirmizi tarama ile cizer; vis_cx/vis_ey loglanir).
+    PROP_MASKE = [(0.80, 0.55, 1.0, 0.95)]   # sag-alt kose (on-sag pervane)
     VIS_CONF_MIN     = 0.45     # kilit/komut icin asgari guven
     VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
-    VIS_DEADRECKON_S = 0.5      # kayipta son EMA yonuyle KISA kor-devam, sonra hover
-    VIS_LOST_TO_GPS_S = 1.0     # kayip bu sureyi asarsa GPS guduumune GERI DON (yeniden yaklas +
-                               # gorseli yeniden kilitle). 0 = asla donme (eski "hover sonsuza"
-                               # davranisi). Sure _vis_lost_count ile olculur -> son gorusten
-                               # itibaren ~ (VIS_STALE_S + bu) toplam kayipta GPS'e doner.
+    VIS_LOST_TO_GPS_S = 2.0     # kayip bu sureyi asarsa GPS guduumune GERI DON (yeniden yaklas +
+                               # gorseli yeniden kilitle). 0 = asla donme. Sure _vis_lost_count
+                               # ile olculur -> son gorusten itibaren ~(VIS_STALE_S + bu) toplam
+                               # kayipta doner. Kayip boyunca komut = HOVER (yerinde bekle).
     VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
-    # DIKEY REFERANS — KAMERA 25 DERECE YUKARI TILT TELAFISI (SDK v2.2 resmilesti).
-    # Kamera burnu 25 derece yukari baktigindan "bbox tam merkezde" = hedef burnun
-    # 25 derece USTUNDE demek -> drone dengelenmek icin hedefin ALTINA iner (20 m'de
-    # ~9 m!). Cozum: hedefi merkezin ALTINDAKI su referans cizgide tut; dikey hata
-    # (ey - VIS_EY_REF) olur -> yaklasma DUZ/ayni-irtifa geometrisinde kalir.
-    # Deger: tan(25)/tan(vFOV/2). 125 derece YATAY FOV (dogrulandi) + 16:9 ->
-    # vFOV/2 ~47.2 derece -> ref ~0.43. Ince ayar SIM'DE: hedef seninle AYNI
-    # irtifadayken slider'i bbox merkezinin oturdugu cizgiye getir (turuncu REF).
-    VIS_EY_REF       = 0.43     # yalniz ARAYUZ turuncu REF cizgisi (elev=0 gostergesi);
-                                # guduum kullanmaz (PNG dikeyi LOS vektorunden turetir)
-    VIS_TILT_DEG     = 25.0     # kamera yukari tilt (SDK v2.2 resmi; png_gorsel LOS'a katar)
-    # Yaw kanali (PNG'de PN'in parcasi degil; govdeye sabit kamerayi hedefte tutar)
-    VIS_SIGN_YAW     = +1.0     # ex>0 (hedef SAGDA) -> burnu hedefe cevir
-    VIS_K_YAW        = 0.5      # yatay ortalama kazanci (yaw = SIGN*K*ex)
+    # --- BASIT IBVS (2026-07-07): goruntu merkezi -> bbox merkezi cizgisi ---
+    # TEK gorsel yasa (guidance/ibvs_gorsel.py): cizginin YATAY bileseni yaw'a,
+    # DIKEY bileseni throttle'a gider; BUYUKLUGU (merkeze sapma "mesafesi") ileri
+    # itkiyi kisar (once ortala, sonra ilerle). Roll HEP 0 (bank yok — eski PN'de
+    # bank hedefi kadrajdan atip kamerayi yere ceviriyordu). Kamera +25 tilt'li
+    # oldugundan hedefi MERKEZDE tutmak araci hedefin ALTINDA tutar (gokyuzu
+    # arka plan / alttan yaklasma) — ekstra dikey geometri kodu GEREKMEZ.
+    IBVS_K_YAW       = 0.8      # yatay kazanc: yaw = SIGN*K*ex (clamp +-YAW_MAX) ⚙
+    IBVS_SIGN_YAW    = +1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir; ters tepki gorursen -1
+    IBVS_K_DIKEY     = 1.2      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
+    IBVS_SIGN_DIKEY  = +1.0     # hedef YUKARIDA (ey<0) -> TIRMAN (thr>0; GPS faziyla ayni kanon).
+                                # SIM'de dikey TERS tepki gorursen -1 yap (tek isaret, tek yer).
+    IBVS_ILERI       = 0.45     # sabit ileri itki komutu (0..1; pitch kanali) ⚙
+    IBVS_MERKEZ_FREN = 1.0      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
+                                # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙
+    # --- DIKEY NISAN (tilt-farkinda; hiz vektorunu hedefe kilitle) ---
+    # Kamera +TILT derece YUKARI sabit. Hedefi kadraj MERKEZINDE tutmak = hiz vektorunu
+    # hedefin ~TILT altina nisanlamak (kronik dikey undershoot). Hedefi hiz vektorunun
+    # goruntudeki yerine (FOE) tutarsak "hedefte" = "burun hedefe kilitli" -> dogrudan
+    # carpisma rotasi. ey_ref = NISAN * tan(TILT) / tan(VFOV_yari) (tilt'ten TURETILIR).
+    IBVS_TILT_DEG      = 25.0   # kamera YUKARI tilt (DOGRULANDI; kullanici teyidi)
+    IBVS_VFOV_HALF_DEG = 47.2   # dikey FOV yari acisi (16:9 + HFOV 125'ten)
+    IBVS_DIKEY_NISAN   = 1.0    # 0 = hedefi MERKEZDE tut (altta kal / gokyuzu arka plan),
+                                # 1 = HIZ VEKTORUNU hedefe nisanla (ey_ref~0.43; terminal carpisma) ⚙
+    # --- ONGORULU YAW LEAD (pose kanat uclarindan hedef ROLL/bank) ---
+    # Hedefi ARKADAN takip ederken iki kanat ucu pikselinden (kp[1]=sol, kp[2]=sag)
+    # goruntu-uzayi bank acisi: roll_img=atan2(dy,dx). Bankli ucak alcak kanadi yonune
+    # doner -> hedefin GIDECEGI yon oncelenir, yaw'a ILERI-BESLEME eklenir:
+    # yaw = K_YAW*ex + SIGN_ROLL*K_ROLL_LEAD*roll_img. Sadece YAW; thr/pitch/roll degismez.
+    # Pose GORSEL veri (kameradan keypoint) -> yarisma kuralina uygun (GPS/J degil).
+    IBVS_K_ROLL_LEAD   = 0.5    # roll_img (rad) -> yaw lead kazanci ⚙ (0 = ongoru kapali)
+    IBVS_SIGN_ROLL     = -1.0   # bank -> yaw isareti. VERI ile belirlendi (7 Tem, ucus_log_220539):
+                                # araclar/pose_ongoru_analiz.py corr=-0.86 @0.2sn, %86 uyum -> SIGN=-1.
+                                # (roll_img>0 iken hedef goruntude SOLA gidiyor; +1 TERS'ti.) Yeni pose
+                                # modeli/kamera degisince analizi tekrar kos, ONERI'yi uygula.
+    IBVS_ROLL_CONF_MIN = 0.5    # iki kanat ucu icin asgari keypoint guveni (kapi) ⚙
+    IBVS_ROLL_EMA      = 0.4    # roll yumusatma (pose seyrek/gurultulu; POZ_HER_N=3)
+    # EGO-MOTION TELAFISI: kamera govdeye sabit -> biz yatinca (kendi roll) kanat cizgisi de
+    # doner ve "hedef bank"i kirletir. Kendi roll'umuzu (IMU) goruntu-roll'unden cikaririz:
+    # roll_comp = roll_img - GAIN*own_roll. GAIN=0 kapali; isaret canlida araclar/
+    # pose_ongoru_analiz ego A-B'siyle dogrulanir (+1 varsayildi, veriyle teyit et).
+    # NOT: own_roll KENDI IMU'muz (ego-motion), hedef konumu DEGIL -> yarisma kurali ihlali degil.
+    IBVS_EGO_ROLL_GAIN = 1.0
+    IBVS_ASPECT_MIN    = 120.0  # arkadan-takip kapisi (deg; yalniz aspect PnP'den mevcutken).
+                                # yandan/onden gorunumde kanat cizgisi bank'i temsil etmez -> lead=0
+    IBVS_POZ_STALE_S   = 0.6    # poz bayatlik esigi (guduumde): bundan eski poz -> lead yok
 
-    # --- GORSEL PNG (bbox -> LOS -> oransal seyrusefer carpisma rotasi) ---
-    # TEK gorsel yasa: hedefin GIDECEGI noktayi kesen carpisma rotasi (PN).
-    # (IBVS alternatifi 2026-07-06 temizliginde KALDIRILDI; git: guidance/ibvs_guidance.py)
-    # Ayrinti: guidance/png_gorsel.py docstring. Menzil = bbox + pinhole (GNSS bagimsizligi).
-    VIS_LAW          = "PNG"    # bilgi amacli sabit (arayuz 'law' gosterir); tek yasa PNG
-    VIS_PN_N         = 4.0      # navigasyon sabiti (3..5); png_sim'de dogrulandi
-    VIS_PN_A_MAX     = 9.81 * math.tan(math.radians(35.0)) * 100.0   # ~687 cm/s^2 yanal ivme
-                               # tavani (35 derece bank'in cektigi yanal ivme; eski A_MAX_STRIKE
-                               # ile ayni formul — deger import aninda zaten kopyalaniyordu)
-    VIS_PN_TILT      = 0.8      # ivme -> pitch/roll yetki carpani
-    VZ_MAX           = 3333.0   # cm/s; oyun max dikey hiz (120 km/h). PNG dikey kanali
-                               # throttle ~ vz_des/VZ_MAX olcegiyle kullanir (png_gorsel)
-    VIS_SPAN_CM      = 171.8    # Talon kanat acikligi (talon_keypoints ile dogrulandi)
-    VIS_R_EMA        = 0.25     # pinhole menzil EMA
-    VIS_VC_EMA       = 0.30     # kapanma hizi EMA
-    VIS_OMEGA_EMA    = 0.35     # LOS donme vektoru EMA
-    VIS_OMEGA_MAX    = 3.0      # rad/s; Omega bilesen clamp (tek-kare bbox sicramasi patlatmasin)
-    VIS_R_MIN        = 100.0    # cm; menzil taban clamp
-    VIS_R_MAX        = 30000.0  # cm; menzil tavan clamp (300 m otesi guvenilmez)
-    VIS_W_PX_MIN     = 4.0      # px; bbox bundan darsa menzil GUNCELLEME (tut / J-yedek)
-    VIS_VC_CAP       = 1200.0   # cm/s (12 m/s); kapanma hizi tavani (eski V_CLOSE kopyasiydi)
-    VIS_VC_MIN       = 700.0    # cm/s (7 m/s); kapanma hizi tabani (temasta geri atilmayi
-                               # onler; eski V_CLOSE_MIN kopyasiydi — deger ayni)
-    VIS_KP_CLOSE     = 0.6      # 1/s; v_close_des = clamp(KP*R, VC_MIN, VC_CAP)
-    VIS_KV_CLOSE     = 2.5      # 1/s; LOS-boyu ivme = KV*(v_close_des - Vc)
-    VIS_COMMIT_R     = 500.0    # cm; altinda yanal PN kisilir (LOS-rate singularitesi)
-    VIS_COMMIT_LAT   = 0.25     # commit'te yanal yetki tabani
-    VIS_TAU_Z        = 0.5      # s; dikey PN ivmesi -> dikey hiz komutu zaman sabiti
-    VIS_PN_SIGN_VZ   = -1.0     # dikey komut isareti (SIM'de dogrulandi: LOS-z ile TERS calisiyordu
-                               # -> hedef yukarida iken alcaliyordu). +1 yaparsan eski/duz esleme.
-    VIS_PN_FALLBACK_J = True    # menzil gecersizken Vc/R BUYUKLUGU J'den (YON asla kameradan cikmaz)
+    # (ESKI "GORSEL PNG" blogu — VIS_LAW/PN_N/PN_A_MAX/PN_TILT/TRACK_TILT/VZ_MAX/
+    #  SPAN_CM/R_EMA/OMEGA_*/W_PX_MIN/VC_CAP — 2026-07-07 SILINDI; git gecmisinde.)
+    # (ESKI kapanma/soft-start/look-up sabitleri — VIS_KP_CLOSE/KV_CLOSE/TERM_PCT/
+    #  COMMIT_PCT/TAKIP_VC/SOFTSTART_*/COMMIT_LAT/TAU_Z/PN_SIGN_VZ/LOOKUP_VZ/HOLD_PCT —
+    #  2026-07-07 SILINDI; git gecmisinde. LOOKUP_ELEV_DEG yalniz GPS z_ref'te yasar.)
+
+    # --- KILITLENME ISTERI SAYACI (sartname 6.1.2 + 6.1.4, Sekil 2) — SALT GOZLEM ---
+    # Gudume KARISMAZ (eski YAKLASMA/TAKIP/TERMINAL alt-FSM'i silindi); arayuz/video
+    # kaniti icin sayilir: kirmizi kilit dortgeni + 5/10 sn pencere + ANGAJMAN cipi.
+    # Kilit tanimi (her tik): hedef MERKEZI Hedef Vurus Alani (AV) icinde VE bbox
+    # ekranin EN AZ BIR ekseninde >= VIS_LOCK_PCT. Kesintili kilit sayilir.
+    VIS_LOCK_PCT     = 0.06     # bbox eksen orani esigi. Sartname kurali >=0.05 ama
+                                # tam sinirda calisan algoritma hakem incelemesinde
+                                # "hatali kilit paketi" sayilabilir -> tavsiye edilen 0.06
+    VIS_AV_X         = 0.25     # AV yatay kenar payi (sartname sabiti: %25-%75 bandi)
+    VIS_AV_Y         = 0.10     # AV dikey kenar payi (sartname sabiti: %10-%90 bandi)
+    VIS_WIN_S        = 10.0     # degerlendirme penceresi (sartname sabiti)
+    VIS_WIN_NEED_S   = 5.0      # pencerede gereken kumulatif kilit (sartname sabiti)
 
 
 # ==========================================================
@@ -348,16 +407,24 @@ class AvciKontrol:
         self._log_f = None
         self._log_w = None
 
-        # --- GORSEL GUDUM (PNG) durumu ---
+        # --- GORSEL GUDUM (basit IBVS) durumu ---
         # son_tespit: server.dedektor_dongusu'nin beyin_lock icinde yazdigi son bbox dict.
         self.son_tespit = None          # {cx,cy,w,h,conf,W,H,t} | None
         self.son_tespit_t = None        # o tespitin perf_counter zamani (bayatlik kontrolu)
+        self.son_poz = None             # normalize poz dict {kp,conf,ok,aspect_deg,...} | None (GORSEL veri)
+        self.son_poz_t = None           # o pozun perf_counter zamani (bayatlik; POZ_HER_N seyrek)
         self._vis_pos_count = 0         # ardisik gecerli-tespit (kilit histerezisi)
-        self._vis_lost_count = 0        # ardisik kayip (kor-devam -> hover karari)
+        self._vis_lost_count = 0        # ardisik kayip (hover -> GPS'e donus karari)
         self._vis_ilan = False          # "GPS kesildi" anonsu bir kez basilsin
-        self.pngg = AvciPNGGuduum()     # bbox -> LOS -> PN carpisma rotasi (tek gorsel yasa)
-        self.png_tlm = {}               # son PNG telemetrisi (server build_telemetry okur; salt-okunur)
+        self.ibvs = AvciIBVS()          # merkez->bbox cizgisi (tek gorsel yasa; basit IBVS)
+        self.ibvs_tlm = {}              # son IBVS telemetrisi (server build_telemetry okur; salt-okunur)
         self.vis_mode = "OTO"           # guduum pipeline switch (test): OTO | GPS | GORSEL
+        # --- KILITLENME ISTERI SAYACI (sartname 6.1.2/6.1.4; SALT GOZLEM, komuta girmez) ---
+        self.kilit_win = deque()        # (t, kilit_anlik) ornekleri — son VIS_WIN_S penceresi
+        self.kilit_sure = 0.0           # penceredeki kumulatif kilit suresi (s)
+        self.kilit_anlik = False        # bu tik kilit kosulu (AV icinde + boyut >= LOCK_PCT)
+        self.kilit_ok = False           # LATCH: pencere isteri (>=WIN_NEED_S) saglandi
+        self.kilit_boyut = None         # bu tik bbox eksen orani max(w/W, h/H) (telemetri)
 
     # ----------------------------------------------------------------
     #  Guduum kaynagini CANLI degistir (v2/Gercek butonlari)
@@ -391,14 +458,32 @@ class AvciKontrol:
         # GORSEL GUDUM: yeni gorev -> gorsel kilit/kor-devam durumunu da taze basla
         self.son_tespit = None
         self.son_tespit_t = None
+        self.son_poz = None
+        self.son_poz_t = None
         self._vis_pos_count = 0
         self._vis_lost_count = 0
         self._vis_ilan = False
-        self.pngg.sifirla()
-        self.png_tlm = {}
+        self.ibvs.sifirla()
+        self.ibvs_tlm = {}
+        # kilitlenme isteri sayaci: yeni gorev -> pencere ve latch dahil taze basla
+        self.kilit_win.clear()
+        self.kilit_sure = 0.0
+        self.kilit_anlik = False
+        self.kilit_ok = False
+        self.kilit_boyut = None
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
         # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
-        # donmez; temiz dosya icin server'i yeniden baslat ya da kaynak degistir.
+        # donmez; server "Gorev Baslat"ta log_dondur()'u AYRICA kosulsuz cagirir
+        # (her gorev = ayri ucus_log dosyasi = veri/tune_parametreler/ucus_N klasoru).
+        self.log_dondur()
+
+    # ----------------------------------------------------------------
+    #  UCUS LOGUNU DONDUR (gudum-disi; salt dosya yasam dongusu): acik log
+    #  dosyasini kapatir; sonraki tik taze zaman-damgali dosya acar. Server
+    #  her "Gorev Baslat"ta cagirir -> her gorev kendi ucus_log dosyasini
+    #  (dolayisiyla kendi tune_parametreler/ucus_N klasorunu) alir.
+    # ----------------------------------------------------------------
+    def log_dondur(self):
         if self._log_f is not None:
             try: self._log_f.close()
             except Exception: pass
@@ -606,7 +691,13 @@ class AvciKontrol:
         self._vis_pos_count = 0          # switch -> gorsel kilit/EMA temiz baslasin
         self._vis_lost_count = 0
         self._vis_ilan = False
-        self.pngg.sifirla()
+        self.ibvs.sifirla()
+        # switch = yeni deneme -> kilitlenme penceresi ve latch de taze baslasin
+        self.kilit_win.clear()
+        self.kilit_sure = 0.0
+        self.kilit_anlik = False
+        self.kilit_ok = False
+        self.kilit_boyut = None
         return True
 
     def set_gorsel_tespit(self, det):
@@ -615,6 +706,15 @@ class AvciKontrol:
             self.son_tespit_t = det.get("t", time.perf_counter())
         # det None ise ESKI tespiti SILME: tek bos kare kilidi dusurmesin. Bayatlik
         # (VIS_STALE_S) _oku'da elenir; kayip histerezisini _vis_lost_count yonetir.
+
+    def set_gorsel_poz(self, poz):
+        """Pose dedektor NORMALIZE ciktisini (kp/conf/aspect_deg...) beyne yaz — GORSEL
+        veri (kameradan keypoint), ONGORULU yaw lead'i besler. server.dedektor_dongusu
+        beyin_lock altinda TAZE pose kostugunda cagirir. det deseni: None ise eskisini
+        SILME (bayatlik _gorsel_guduum'da IBVS_POZ_STALE_S ile elenir)."""
+        if poz is not None:
+            self.son_poz = poz
+            self.son_poz_t = time.perf_counter()
 
     def _gorsel_tespit_oku(self):
         """Bayat-olmayan son tespiti dondur; yoksa/bayatsa None (kayip mantigi devreye girer)."""
@@ -642,83 +742,127 @@ class AvciKontrol:
             "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
             "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
             "drone_pos": drone_pos, "drone_yaw": drone_yaw,
-            # vis_ex: PNG'nin EMA'li yatay hatasi (yaw kanali girdisi); vis_ey: ham
-            # tespitten normalize dikey hata (IBVS ile ayni tanim: (cy-H/2)/(H/2)).
-            "vis_ex": self.pngg.ex_f,
+            # vis_ex: IBVS'in EMA'li yatay hatasi (yaw kanali girdisi); vis_ey: ham
+            # tespitten normalize dikey hata (ayni tanim: (cy-H/2)/(H/2)).
+            "vis_ex": self.ibvs.ex_f,
             "vis_ey": (((float(tespit["cy"]) - float(tespit["H"]) / 2.0)
                         / (float(tespit["H"]) / 2.0))
                        if (tespit is not None and float(tespit.get("H", 0) or 0) > 1) else None),
             "vis_gordu": 1 if tespit is not None else 0,
+            # kilitlenme isteri sayaci (sartname isteri teshisi; vis_faz kolonu bos kalir)
+            "kilit_win_s": self.kilit_sure,
+            # HAM normalize yatay konum (pervane konumlamasi; vis_ey dikey karsiligi)
+            "vis_cx": (((float(tespit["cx"]) - float(tespit["W"]) / 2.0)
+                        / (float(tespit["W"]) / 2.0))
+                       if (tespit is not None and float(tespit.get("W", 0) or 0) > 1) else None),
         }
         if tespit is not None:
             d["vis_conf"] = float(tespit.get("conf", 0.0))
             W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
             if W > 1 and H > 1:
                 d["vis_area"] = (float(tespit["w"]) * float(tespit["h"])) / (W * H)
-        pt = self.png_tlm or {}
-        if pt:
-            d["png_R_m"] = pt.get("R_m"); d["png_Vc"] = pt.get("Vc_ms")
-            d["png_omega"] = pt.get("omega_rads")
+        it = self.ibvs_tlm or {}
+        if it:
+            # merkez->bbox cizgisi: buyukluk (0=merkez) + aci (0=sag, +90=yukari)
+            d["ibvs_r"] = it.get("buyukluk"); d["ibvs_aci"] = it.get("aci_deg")
+            # ongorulu yaw lead (pose kanat uclarindan hedef bank) + kapi (roll_ok):
+            # roll_ok=1 -> roll TAZE (kanat conf + aspect + bayatlik kapisi gecti, lead uygulandi);
+            # 0 -> kapi kapali, ibvs_roll stale (analiz bu satirlari elemeli).
+            d["ibvs_roll"] = it.get("roll_deg"); d["ibvs_lead"] = it.get("lead")
+            d["ibvs_roll_ok"] = 1 if it.get("roll_ok") else 0
+            d["ibvs_roll_raw"] = it.get("roll_raw_deg")   # ham goruntu-roll (ego-comp A/B)
         self._log("VISUAL", d)
 
     # ----------------------------------------------------------------
-    #  GORSEL GUDUM (PNG carpisma rotasi) — YONELIM YALNIZCA KAMERADAN.
-    #  Gorsel temas VARKEN GPS/filtre YONELIMI KULLANILMAZ (yarisma kurali).
-    #  tespit VAR -> pngg.hesapla(bbox -> LOS -> PN ivme -> angle-mode komut).
-    #  tespit YOK -> KADEMELI: (1) VIS_DEADRECKON_S kor-devam, (2) VIS_LOST_TO_GPS_S'e
-    #  kadar hover (ararken bekle), (3) o da asilirsa GPS guduumune GERI DON (re-acquire)
-    #  -> durumu ARAMA yap, gorsel kilidi sifirla, None dondur (adim() GPS yoluna duser).
+    #  KILITLENME PENCERESI (sartname 6.1.4): her gorsel tikte kilit kosulunu
+    #  degerlendir + 10 sn kayan penceredeki KUMULATIF kilit suresini guncelle.
+    #  Kilit kosulu: hedef MERKEZI AV icinde (yatay %25-%75, dikey %10-%90) VE
+    #  bbox EN AZ BIR eksende >= VIS_LOCK_PCT. Kesintili kilit sayilir (sartname
+    #  ornegi: 1+2+2 sn = 5 sn -> gecerli). VIS_WIN_NEED_S dolunca kilit_ok
+    #  LATCH'lenir -> arayuz ANGAJMAN cipi / kirmizi dortgen / olay kaydi.
+    #  SALT GOZLEM: sonucu hicbir kontrol komutuna GIRMEZ (basit IBVS tek yasa).
+    # ----------------------------------------------------------------
+    def _kilit_degerlendir(self, tespit, t):
+        kilit = False
+        self.kilit_boyut = None                      # bu tik bbox eksen orani (telemetri)
+        if tespit is not None:
+            W = float(tespit.get("W", 0) or 0); H = float(tespit.get("H", 0) or 0)
+            if W > 1 and H > 1:
+                cxn = float(tespit["cx"]) / W
+                cyn = float(tespit["cy"]) / H
+                boyut = max(float(tespit["w"]) / W, float(tespit["h"]) / H)
+                self.kilit_boyut = boyut
+                av_x = float(Cfg.VIS_AV_X); av_y = float(Cfg.VIS_AV_Y)
+                kilit = (av_x <= cxn <= 1.0 - av_x
+                         and av_y <= cyn <= 1.0 - av_y
+                         and boyut >= float(Cfg.VIS_LOCK_PCT))
+        self.kilit_anlik = kilit
+        win = self.kilit_win
+        win.append((t, kilit))
+        while win and (t - win[0][0]) > float(Cfg.VIS_WIN_S):
+            win.popleft()
+        # kumulatif sure: onceki ornek kilitliyse iki ornek arasi dt sayilir
+        # (0.5 sn ustu bosluk = gorsel faz disinda gecen zaman; sayilmaz)
+        sure = 0.0
+        for i in range(1, len(win)):
+            dt = win[i][0] - win[i - 1][0]
+            if win[i - 1][1] and 0.0 < dt < 0.5:
+                sure += dt
+        self.kilit_sure = sure
+        if (not self.kilit_ok) and sure >= float(Cfg.VIS_WIN_NEED_S):
+            self.kilit_ok = True                     # kalici latch (gorev boyunca)
+            print("[KILIT] %.0f sn pencerede %.1f sn kumulatif kilit -> KILIT ISTERI SAGLANDI "
+                  "(sartname 6.1.4: >= %.0f sn)." % (Cfg.VIS_WIN_S, sure, Cfg.VIS_WIN_NEED_S))
+        return kilit
+
+    # ----------------------------------------------------------------
+    #  GORSEL GUDUM (basit IBVS) — YONELIM YALNIZCA KAMERADAN.
+    #  Gorsel temas VARKEN GPS/filtre YONELIMI KULLANILMAZ (yarisma kurali;
+    #  ibvs_gorsel.hesapla'ya zaten YALNIZ bbox pikselleri girer — konum/hiz
+    #  parametresi imzada bile yok, kural yapisal olarak saglanir).
+    #  tespit VAR -> ibvs.hesapla (merkez->bbox cizgisi -> thr/pitch/roll/yaw).
+    #  tespit YOK -> HOVER (server son tespiti VIS_STALE_S boyunca sunar; buraya
+    #  dusen gercek kayiptir) -> VIS_LOST_TO_GPS_S asilirsa (yalniz OTO) GPS'e
+    #  GERI DON: durum=ARAMA, None dondur -> adim() GPS yoluna duser.
     #  return: (throttle,pitch,roll,yaw) | None (=GPS'e don). _send rate-limit'ler.
     # ----------------------------------------------------------------
-    def _gorsel_guduum(self, tespit, t, drone_pos, rot_rpy, v_own, revert_izin=True):
+    def _gorsel_guduum(self, tespit, t, revert_izin=True, own_roll_rad=None):
         # revert_izin=False (manuel GORSEL switch): kayipta GPS'e DONME, hover'da kal.
+        # own_roll_rad: aracin KENDI roll'u (IMU) — pose roll ego-motion telafisi (hedef degil).
+        # KILITLENME ISTERI SAYACI (sartname 6.1.2/6.1.4): SALT GOZLEM — kirmizi
+        # dortgen / ANGAJMAN cipi / olay gunlugu icin sayilir, KOMUTA GIRMEZ.
+        self._kilit_degerlendir(tespit, t)
+        # YARISMA KURALI: gorsel temastan SONRA hareket komutu YALNIZ GORSEL veriden.
+        # GPS/J (yon YA DA buyukluk) GECIRILMEZ -> diskalifiye. IBVS yalniz bbox okur.
         if tespit is not None:
             self._vis_lost_count = 0
-            komut = self.pngg.hesapla(tespit, drone_pos, rot_rpy, v_own, Cfg,
-                                      j_fallback=self._j_fallback(drone_pos, v_own))
-            self.png_tlm = self.pngg.durum()
+            # TAZE poz (GORSEL keypoint): bayat degilse ongorulu yaw lead'i besler.
+            # Pose seyrek (POZ_HER_N) -> bayatlik esigi IBVS_POZ_STALE_S. Yoksa None -> saf IBVS.
+            poz = self.son_poz
+            if poz is None or self.son_poz_t is None or \
+                    (time.perf_counter() - self.son_poz_t) > float(getattr(Cfg, "IBVS_POZ_STALE_S", 0.6)):
+                poz = None
+            komut = self.ibvs.hesapla(tespit, Cfg, poz=poz, own_roll_rad=own_roll_rad)
+            self.ibvs_tlm = self.ibvs.durum()
             return komut
-        # --- KAYIP: kademeli tepki ---
+        # --- KAYIP: HOVER (yeniden tespit bekle) -> uzarsa (yalniz OTO) GPS'e don ---
         self._vis_lost_count += 1
         lost_s = self._vis_lost_count * Cfg.DT
-        if lost_s <= Cfg.VIS_DEADRECKON_S:
-            komut = self.pngg.kor_devam(Cfg, Cfg.DT)   # 1) son Omega/Vc ile LOS'u ilerlet
-            self.png_tlm = self.pngg.durum()
-            return komut
         if (not revert_izin) or Cfg.VIS_LOST_TO_GPS_S <= 0 or lost_s <= Cfg.VIS_LOST_TO_GPS_S:
-            return 0.0, 0.0, 0.0, 0.0            # 2) hover: ararken bekle (manuel GORSEL'de KAL)
-        # 3) UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
+            return 0.0, 0.0, 0.0, 0.0            # hover: ararken bekle (manuel GORSEL'de HEP)
+        # UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
         print("[GORSEL] Hedef %.1fs kayip -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)
         self.durum = "ARAMA"
         self._vis_pos_count = 0
         self._vis_lost_count = 0
         self._vis_ilan = False
-        self.pngg.sifirla()
+        self.ibvs.sifirla()
+        # kilit penceresi temizlenir; kilit_ok LATCH'i KORUNUR (sartname isteri
+        # gecmiste saglandiysa gecerli kalir; sayac yeniden dolmak zorunda degil).
+        self.kilit_win.clear()
+        self.kilit_sure = 0.0
+        self.kilit_anlik = False
         return None                              # -> adim() GPS yoluna DUSER (bu tik)
-
-    # ----------------------------------------------------------------
-    #  J-YEDEK (yalniz BUYUKLUK): bbox menzili gecersizken PNG'ye R/Vc buyuklugu ver.
-    #  YON verilmez (yarisma kurali: gorsel fazda yonelim yalniz kameradan). son_xy_anlik/
-    #  son_z_anlik lead'siz ANLIK kestirim (LOS icin dogru), son_hiz hedef hizi.
-    #  Doner: (R_cm, Vc_cms) | None (J kestirimi yoksa).
-    # ----------------------------------------------------------------
-    def _j_fallback(self, drone_pos, v_own):
-        if not Cfg.VIS_PN_FALLBACK_J or self.son_xy_anlik is None or self.son_z_anlik is None:
-            return None
-        r = np.array([float(self.son_xy_anlik[0]) - float(drone_pos[0]),
-                      float(self.son_xy_anlik[1]) - float(drone_pos[1]),
-                      float(self.son_z_anlik) - float(drone_pos[2])])
-        R = float(np.linalg.norm(r))
-        if R < 1e-6:
-            return None
-        u = r / R
-        Vc = None
-        if self.son_hiz is not None:
-            # Vc = kapanma hizi = dot(u, v_own - v_target) ; own dikey hiz ~0 kabul
-            v_i = np.array([float(v_own[0]), float(v_own[1]), 0.0])
-            v_t = np.array([float(self.son_hiz[0]), float(self.son_hiz[1]), float(self.son_hiz[2])])
-            Vc = float(np.dot(u, v_i - v_t))
-        return (R, Vc)
 
     # ----------------------------------------------------------------
     #  Debug olcum: J gercekten ham'dan iyi mi?
@@ -799,8 +943,11 @@ class AvciKontrol:
                         self._vis_ilan = True
 
         if self.durum == "GORSEL_GUDUM":
-            sonuc = self._gorsel_guduum(tespit, t, drone_pos, rot_rpy, v_own,
-                                        revert_izin=(mod == "OTO"))
+            # kendi roll'umuz (IMU) -> pose roll ego-motion telafisi (hedef verisi DEGIL).
+            own_roll_rad = (math.radians(float(rot_rpy[0])) if Cfg.ROT_IN_DEGREES
+                            else float(rot_rpy[0]))
+            sonuc = self._gorsel_guduum(tespit, t, revert_izin=(mod == "OTO"),
+                                        own_roll_rad=own_roll_rad)
             if sonuc is not None:
                 thr, pitch, roll, yaw = sonuc
                 self._send(thr, pitch, roll, yaw)
@@ -834,13 +981,7 @@ class AvciKontrol:
         # YATAY nisan noktasi: B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde
         #     dur. KISA lead (APPROACH_LEAD_S) ile nisan (savrulmayi onler); pozisyon KOMUTU
         #     hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
-        # DIKEY: lead'siz anlik irtifa (lead dikeyde irtifa asimina/yukari kacmaya yol aciyor).
-        z_ref = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
-        # KAMERA CERCEVELEME: hedefi kadrajda merkezin BIRAZ USTUNDE tut. z_ref'i (hedef
-        # irtifasi) APPROACH_ALT_OFFSET kadar ASAGI cek -> drone hedefin altinda dengelenir
-        # -> 25 derece yukari-tilt kamerada hedef LOS'u yukselir -> kadrajda yukari kayar.
-        z_ref -= Cfg.APPROACH_ALT_OFFSET
-        ez = float(z_ref - drone_pos[2])
+        #     ex/ey/d_h ONCE hesaplanir: dikey look-up nisan noktasi d_h'ye (menzile) baglidir.
         if self.son_xy_anlik is not None and self.son_hiz is not None:
             tx = float(self.son_xy_anlik[0]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[0])  # kisa lead
             ty = float(self.son_xy_anlik[1]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[1])
@@ -849,6 +990,19 @@ class AvciKontrol:
         ex = tx - float(drone_pos[0])                             # HEDEFE hata (yaw/handoff/FOV/log)
         ey = ty - float(drone_pos[1])
         d_h = math.hypot(ex, ey)
+
+        # DIKEY nisan (LOOK-UP geometrisi): avci hedefin ALTINDA kalsin, LOS yukselis
+        # acisi her an >= LOOKUP_ELEV_DEG olsun -> hedef GOKYUZUNE karsi siluet, YOLO
+        # tespiti kopmaz (asagi-bakma/clutter cozumu). SABIT ofset yetmez (ayni dh uzak
+        # menzilde kucuk aci) -> MENZIL-OLCEKLI: dh_off = tan(eps)*d_h; asgari
+        # APPROACH_ALT_OFFSET (kadraj icin). z_ref taban LOOKUP_MIN_ALT_CM'e clamp'lenir
+        # (hedef cok alcaksa nisanin yere sokulmasini onler). DIKEY: lead'siz anlik irtifa.
+        z_tgt = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
+        dh_off = (math.tan(math.radians(Cfg.LOOKUP_ELEV_DEG)) * d_h
+                  if Cfg.LOOKUP_ELEV_DEG > 0.0 else 0.0)
+        alt_off = max(Cfg.APPROACH_ALT_OFFSET, dh_off)            # aci >= eps garanti + kadraj tabani
+        z_ref = max(z_tgt - alt_off, Cfg.LOOKUP_MIN_ALT_CM)       # yere cakilma korumasi
+        ez = float(z_ref - drone_pos[2])
         # POZISYON KOMUT hatasi (PD bunu surer): standoff noktasina git.
         if d_h > 1e-6:
             _ux, _uy = ex / d_h, ey / d_h

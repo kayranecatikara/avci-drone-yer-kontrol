@@ -1,8 +1,0 @@
-# Kayra'nin best_son tespit modeli (main bc1e0b3'ten; 2026-07-07).
-# imgsz=1280 SART: model 1280'de egitildi (main server yorumu + bizim olcum:
-# 640'ta 12 karede 5 zayif tespit, conf med 0.13; 1280+ ile gercek talon bulunur).
-# conf=0.45 = main'in calisma esigi (Cfg.VIS_CONF_MIN ile ayni) -> A/B kiyasinda
-# iki branch'in ALGI girdisi birebir esit (kiyas saf guduum yasasi kiyasi olur).
-imgsz: 1280
-conf: 0.45
-aciklama: "tespit (talon) - Kayra best_son @1280; eski best.pt HUD-overfit (veri/ab/tani2 kaniti)"

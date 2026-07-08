@@ -57,17 +57,37 @@ class HedefDedektor:
         except Exception:
             pass
 
-    def tespit_et(self, frame):
+    @staticmethod
+    def _maskede(cxn, cyn, maske):
+        """Normalize merkez (cxn,cyn) verilen dikdortgenlerden birinin ICINDE mi?
+        maske: [(x0,y0,x1,y1), ...] normalize (0..1). None/bos -> False."""
+        if not maske:
+            return False
+        for r in maske:
+            try:
+                x0, y0, x1, y1 = r
+            except Exception:
+                continue
+            if x0 <= cxn <= x1 and y0 <= cyn <= y1:
+                return True
+        return False
+
+    def tespit_et(self, frame, maske=None):
         """frame: PIL Image (RGB, tercih) veya ndarray. -> en-yuksek-conf bbox dict | None.
-        dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi)."""
-        hepsi = self.tespit_hepsi(frame)
+        dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi).
+        maske: PERVANE bolgeleri [(x0,y0,x1,y1),...] normalize; MERKEZI icinde olan
+        kutular ELENIR (argmax ONCESI) -> kendi pervanemiz hedef sanilmaz. Tum kutular
+        maskeliyse None doner (o kare tespit yok)."""
+        hepsi = self.tespit_hepsi(frame, maske=maske)
         return hepsi[0] if hepsi else None
 
-    def tespit_hepsi(self, frame):
+    def tespit_hepsi(self, frame, maske=None):
         """Karedeki TUM tespitler, conf'a gore AZALAN sirali liste (bos olabilir).
         Cok-nesneli sahnede (orn. park etmis ikinci Talon) cagiranin SECIM
         yapabilmesi icin; uretim tek-kutu API'si (tespit_et) ilk elemani alir,
-        davranisi degismez. Eleman semasi tespit_et ile ayni."""
+        davranisi degismez. Eleman semasi tespit_et ile ayni; pose modelinde her
+        kutuya 'keypoints' [[x,y,conf],...] eklenir (detect modelinde alan yok).
+        maske: pervane bolgeleri — merkezi maskede olan kutular listeye GIRMEZ."""
         if not self.hazir:
             return []
         import time as _t
@@ -84,7 +104,7 @@ class HedefDedektor:
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
             t = _t.perf_counter()
             # POSE modeli ise keypoints da gelir (pose'suz detect modelinde None ->
-            # FAZ 2 PnP otomatik pasif). Her kutuya kendi keypoint setini esle.
+            # PnP tuketicisi otomatik pasif). Her kutuya kendi keypoint setini esle.
             kpts = getattr(res, "keypoints", None)
             kp_xy = kp_conf = None
             if kpts is not None:
@@ -98,6 +118,12 @@ class HedefDedektor:
             cikti = []
             for i in range(len(boxes)):
                 x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
+                # PERVANE MASKESI: merkezi maskede olan kutu listeye girmez.
+                if maske and W > 0 and H > 0:
+                    cxn = ((x1 + x2) / 2.0) / W
+                    cyn = ((y1 + y2) / 2.0) / H
+                    if self._maskede(cxn, cyn, maske):
+                        continue                          # kendi pervanemiz -> atla
                 d = {
                     "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
                     "w": (x2 - x1), "h": (y2 - y1),

@@ -252,9 +252,17 @@ def connection_manager():
             drone.connect()  # oyun kapaliysa sessizce False doner, sorun olmaz
         # Pencere-yakalamayi ayakta tut: oyun penceresi acilinca baslar; kapaninca
         # on_closed birakir -> burada (her 2 sn) yeniden baslar.
-        if (pencere_yakala_motoru is not None and pencere_yakala_motoru.hazir
-                and not pencere_yakala_motoru.calisiyor()):
-            pencere_yakala_motoru.baslat()
+        pym = pencere_yakala_motoru
+        if pym is not None and pym.hazir:
+            if not pym.calisiyor():
+                pym.baslat()
+            elif pym.yeniden_baglanmali(stale_s=2.5):
+                # WATCHDOG: 'calisyor' ama kare bayat/yok ya da pencere degisti
+                # (oyun penceresi yeniden yaratildi / WGC dondu / yanlis pencereye
+                # baglanildi -> dedektor farkli yeri goruyordu). TAZE yeniden bagla.
+                print("[PENCERE_YAKALA] WATCHDOG: kare bayat/yanlis pencere -> yeniden baglaniliyor")
+                pym.durdur()
+                pym.baslat()
         time.sleep(2.0)
 
 
@@ -272,29 +280,68 @@ gorev_aktif = False
 #  Kontrol dongusu Cfg.X'i HER tik okudugundan degisiklik ANINDA etki eder
 #  (server yeniden baslatmaya gerek YOK). Guvenlik icin sadece bu allowlist.
 # ----------------------------------------------------------
+#  BASIT IBVS SETI (2026-07-07): arayuz slider'lariyla 1:1. Eski PN knob yigini
+#  yasayla birlikte SILINDI. Yapisal sabitler (isaretler, FSM zamanlamalari, GPS PD)
+#  Cfg'de sabit (gerekirse ana_kontrol.py'den duzenle). Yeni slider = TUNE_DEFS ile ES.
 TUNE_ALLOW = {
-    # (GPS terminal vurus/strike parametreleri 2026-07-06 temizliginde kaldirildi —
-    #  vurus gorsel PNG fazinin isi; PNG tunable'lari asagida)
-    # komut yumusakligi
-    "MAX_DELTA",
-    # yaw / burun
-    "YAW_MAX", "KP_YAW",
-    # yatay yaklasma
-    "KP_H", "KD_H",
-    # yaklasma hiz profili (kontrollu yaklasma; speed_cap her tik Cfg okur -> canli)
-    "V_CAP_FAR", "V_CAP_NEAR", "BRAKE_DIST",
-    # dikey (irtifa) PID
-    "KP_Z", "KI_Z", "KD_Z", "THR_UP", "THR_DN",
-    # GORSEL GUDUM (PNG): yaw kanali + kilit guveni + PN cekirdek parametreleri
-    # (IBVS-only tunable'lar 2026-07-06 temizliginde IBVS ile birlikte kaldirildi)
-    "VIS_SIGN_YAW", "VIS_K_YAW", "VIS_EMA", "VIS_CONF_MIN",
-    "VIS_KP_CLOSE",  # kapanma hizi talebi (v_close_des = KP*R) — 1 numarali tune dugmesi
-    "VIS_PN_N",      # navigasyon sabiti (3..5)
-    "VIS_PN_TILT",   # PN ivme -> pitch/roll yetki carpani
-    "VIS_TAU_Z",     # dikey kanal ataklik zaman sabiti
-    "VIS_EY_REF",   # arayuz turuncu REF cizgisi (elev=0 gostergesi; sim'de kalibre)
-    "VIS_TILT_DEG", # kamera tilt (png_gorsel LOS geometrisine katar)
+    "IBVS_ILERI",        # sabit ileri itki — yaklasma hizinin ana knob'u
+    "IBVS_K_YAW",        # yatay kazanc (cizginin yatay bileseni -> yaw)
+    "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
+    "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)
+    "IBVS_MERKEZ_FREN",  # sapma buyuyunce ileriyi kis (0=hep tam gaz)
+    "IBVS_K_ROLL_LEAD",  # ongorulu yaw lead kazanci (pose hedef bank -> erken donus)
+    "IBVS_SIGN_ROLL",    # ongoru YONU (roll->yaw isareti): FPV oku gercek donusle ters ise cevir
+    "IBVS_ROLL_CONF_MIN",# ongoru kapisi: iki kanat ucu icin asgari keypoint guveni
+    "VIS_EMA",           # ex/ey yumusatma (titriyorsa dusur=daha yumusak... buyuk=daha tepkili)
+    "YAW_MAX",           # yaw tavani (doygunluk)
+    "VIS_CONF_MIN",      # tespit guven esigi
+    "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
 }
+
+# ----------------------------------------------------------
+#  TUNE LOGU (1 Hz): slider degerleri SANIYE BAZINDA veri/tune_log_*.csv'ye yazilir.
+#  Amac: ucus SIRASINDA parametre degistirip "iyilesti mi?" bakabilmek — rapor
+#  (web/tune_rapor.py) bu logu ucus loguyla t_wall uzerinden hizalar ve her
+#  parametre-degisim SEGMENTI icin metrikleri ayri satirda kiyaslar. Boylece tek
+#  ucusta bircok tune denemesi test edilir (ucus basina tek set kisiti kalkar).
+# ----------------------------------------------------------
+_TUNE_LOG_PATH = None
+_TUNE_LOG_KOLON = None   # sirali param listesi (baslikla ayni sira garanti)
+
+
+def tune_log_dongusu():
+    global _TUNE_LOG_PATH, _TUNE_LOG_KOLON
+    _TUNE_LOG_KOLON = sorted(TUNE_ALLOW)
+    _TUNE_LOG_PATH = os.path.join(VERI_DIR, time.strftime("tune_log_%Y%m%d_%H%M%S.csv"))
+    try:
+        f = open(_TUNE_LOG_PATH, "w", encoding="utf-8")
+        f.write("t_wall," + ",".join(_TUNE_LOG_KOLON) + "\n")
+        f.flush()
+    except Exception as e:
+        print("[TUNE_LOG] acilamadi:", e)
+        _TUNE_LOG_PATH = None
+        return
+    while True:
+        try:
+            vals = [getattr(Cfg, k) for k in _TUNE_LOG_KOLON]
+            # DEGISMEDIYSE de yazilir (saniye bazli kesintisiz zaman ekseni);
+            # dosya kucuk kalir (~saatte 300 KB'den az), rapor hizalamasi basit olur.
+            f.write("%.3f," % time.time()
+                    + ",".join("%g" % float(v) for v in vals) + "\n")
+            f.flush()
+        except Exception:
+            pass
+        time.sleep(1.0)
+
+
+# "Degerleri Yazdir" Excel raporuna slider setine EK yazilan sabitler: kosu kosullarini
+# tam kayda gecirmek icin (isaretler + ongoru kapilari + kilit isteri esikleri).
+# hasattr ile okunur -> Cfg'den kalkan bir isim raporu KIRMAZ, sadece dusurulur.
+TUNE_SABIT_RAPOR = (
+    "IBVS_SIGN_YAW", "IBVS_SIGN_DIKEY", "IBVS_EGO_ROLL_GAIN", "IBVS_ROLL_EMA",
+    "IBVS_ASPECT_MIN", "IBVS_POZ_STALE_S", "IBVS_TILT_DEG", "IBVS_VFOV_HALF_DEG",
+    "VIS_WIN_NEED_S", "VIS_LOCK_PCT", "VIS_STALE_S",
+)
 
 # ----------------------------------------------------------
 #  MANUEL MOD (klavyeyle kontrol)
@@ -356,7 +403,7 @@ GNSS_KESINTI_S    = 1.0    # sn; hedef GPS paketi bu suredir yenilenmediyse KESI
                            # (nominal 5 Hz -> 0.2 s; sartname kesintisi ~2 s -> 5x marj)
 VURUS_ESIK_M      = 3.0    # m; angajmanda mesafe bu esigin altina inerse VURUS (sim'de kalibre)
 BASARI_GECIKME_S  = 1.5    # sn; VURUS latch'inden sonra BASARI ilani
-TAKIP_TAM_KAYIP_S = Cfg.VIS_STALE_S + Cfg.VIS_LOST_TO_GPS_S   # 1.5 s; takip-ID kapanma esigi
+TAKIP_TAM_KAYIP_S = Cfg.VIS_STALE_S + Cfg.VIS_LOST_TO_GPS_S   # ~2.5 s; takip-ID kapanma esigi
                            # (gudumun GPS'e donus penceresiyle AYNI -> tutarli anlatim)
 
 olay_lock = threading.Lock()          # YAPRAK kilit: tutulurken asla beyin_lock/SDK cagrisi YOK
@@ -380,7 +427,7 @@ _gorev = {"faz": "HAZIR", "t0": None, "vurus": False, "basari": False,
           "en_yakin_m": None, "vurus_t": None, "mesafe_kaynak": None}
 _izci = {"durum_prev": None, "handoff_prev": False, "kilit_ilan": False,
          "angajman_ilan": False, "angajman_min": None, "iska_ilan": False,
-         "kesinti": False, "son_paket_t": None, "png_ilan": False}
+         "kesinti": False, "son_paket_t": None, "kilit_ok_prev": False}
 
 
 def _gorev_sifirla(faz):
@@ -389,7 +436,8 @@ def _gorev_sifirla(faz):
     _gorev.update(faz=faz, t0=time.time(), vurus=False, basari=False,
                   en_yakin_m=None, vurus_t=None, mesafe_kaynak=None)
     _izci.update(durum_prev=None, handoff_prev=False, kilit_ilan=False,
-                 angajman_ilan=False, angajman_min=None, iska_ilan=False, png_ilan=False)
+                 angajman_ilan=False, angajman_min=None, iska_ilan=False,
+                 kilit_ok_prev=False)
 
 
 def _mesafe_olc():
@@ -477,14 +525,26 @@ def _gorev_izle():
     elif beyin._vis_pos_count == 0:
         _izci["kilit_ilan"] = False
 
+    # 3.5) KILITLENME ISTERI kenari (beyin.kilit_ok latch'i; sartname 6.1.2/6.1.4
+    #      isterinin olay gunlugu kaniti — kural 8: sadece kenar tespiti. Eski
+    #      YAKLASMA/TAKIP/TERMINAL alt-FSM'i basit-IBVS gecisinde SILINDI.)
+    if getattr(beyin, "kilit_ok", False) and not _izci["kilit_ok_prev"]:
+        _izci["kilit_ok_prev"] = True
+        olay_ekle("iyi", "KILIT ISTERI SAGLANDI — 10 sn pencerede >= %.0f sn kumulatif kilit"
+                  % float(getattr(Cfg, "VIS_WIN_NEED_S", 5.0)))
+    elif not getattr(beyin, "kilit_ok", False):
+        _izci["kilit_ok_prev"] = False
+
     # 4) GOREV FAZI + VURUS/BASARI (mesafe 50 Hz olculur -> vurus ani atlanmaz)
     mesafe, kaynak = _mesafe_olc()
     if mesafe is not None:
         if _gorev["en_yakin_m"] is None or mesafe < _gorev["en_yakin_m"]:
             _gorev["en_yakin_m"] = mesafe
 
-    # ANGAJMAN: gorsel faz aktif + takip canli (GPS-strike test kipi 2026-07-06'da kaldirildi)
-    angajman = (durum == "GORSEL_GUDUM" and _takip["aktif"])
+    # ANGAJMAN: gorsel faz aktif + takip canli + KILIT ISTERI SAGLANMIS (kilit_ok latch).
+    # Sartname 6.1.3: angajman cipi ancak kilitlenme isteri (5/10 sn) doldugunda yanar;
+    # oncesinde faz cipi "KILIT"te kalir. (Guduum yasasi tek: basit IBVS; cip salt gosterim.)
+    angajman = (durum == "GORSEL_GUDUM" and _takip["aktif"] and bool(getattr(beyin, "kilit_ok", False)))
 
     if _gorev["basari"]:
         _gorev["faz"] = "BASARI"
@@ -498,15 +558,7 @@ def _gorev_izle():
         _gorev["faz"] = "ANGAJMAN"
         if not _izci["angajman_ilan"]:
             _izci["angajman_ilan"] = True
-            olay_ekle("kritik", "ANGAJMAN — gorsel yaklasma basladi")
-        # PN GUDUM AKTIF olayi (kenar-tespitli, tek sefer): gorsel yasa PNG ise carpisma-rotasi
-        if not _izci["png_ilan"] and getattr(Cfg, "VIS_LAW", "IBVS") == "PNG":
-            _izci["png_ilan"] = True
-            _pt = getattr(beyin, "png_tlm", {}) or {}
-            _r = _pt.get("R_m"); _vc = _pt.get("Vc_ms")
-            olay_ekle("bilgi", "PN GUDUM AKTIF — carpisma rotasi (R=%s Vc=%s)" % (
-                ("%.1fm" % _r) if _r is not None else "?",
-                ("%.1fm/s" % _vc) if _vc is not None else "?"))
+            olay_ekle("kritik", "ANGAJMAN — kilit isteri dolu, gorsel (IBVS) yaklasma suruyor")
         if mesafe is not None and mesafe < VURUS_ESIK_M:          # VURUS latch (kalici)
             _gorev["vurus"] = True
             _gorev["vurus_t"] = now
@@ -523,7 +575,9 @@ def _gorev_izle():
         _izci["angajman_ilan"] = False
         _izci["angajman_min"] = None
         _izci["iska_ilan"] = False
-        _gorev["faz"] = "KILIT" if durum == "KILIT" else "YAKLASMA"
+        # GORSEL_GUDUM ama kilit isteri henuz dolmadi -> KILIT cipi: sartname akisinda
+        # bu "kilitlenme ve takip asamasi"dir; ANGAJMAN ancak kilit_ok latch'i ile.
+        _gorev["faz"] = "KILIT" if durum in ("KILIT", "GORSEL_GUDUM") else "YAKLASMA"
 
 
 def _gps_log_yaz():
@@ -659,7 +713,8 @@ _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock 
 # dosyasi yoksa veya yuklenemezse sessizce kapali (hazir=False deseni).
 # Kalite notu (pose/degerlendir_foto.py, egitim karelerinde iyimser): <10 m'de
 # mesafe medyan ~%8, yaw medyan ~6 der; 15 m+ guvenilmez -> terminal faz araci.
-POSE_MODEL_PATH = os.path.join(PROJ_ROOT, "models", "talon_pose.pt")
+POSE_MODEL_PATH = getattr(Cfg, "VIS_POSE_MODEL_PATH",
+                          os.path.join(PROJ_ROOT, "models", "talon_pose.pt"))
 poz_dedektor = None        # PozDedektor | None (lazy; ilk gorev tikinde denenir)
 poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
 _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
@@ -771,7 +826,9 @@ def dedektor_dongusu():
             dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN))
             bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
             # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
-            det = dedektor.tespit_et(bgr) if bgr is not None else None
+            # PERVANE MASKESI canli okunur (Cfg.PROP_MASKE) -> kendi pervanemiz elenir.
+            det = (dedektor.tespit_et(bgr, maske=getattr(Cfg, "PROP_MASKE", None))
+                   if bgr is not None else None)
         except Exception:
             bgr, det = None, None
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
@@ -816,6 +873,8 @@ def dedektor_dongusu():
             onceki_ui = (ui_det["cx"], ui_det["cy"], t_det)
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det_beyin)
+            if poz_kostu and poz_ui is not None:      # TAZE poz -> beyne (ongorulu yaw lead besler)
+                beyin.set_gorsel_poz(poz_ui)          # GORSEL veri (kameradan keypoint); GPS/J DEGIL
             _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle
@@ -881,7 +940,16 @@ def build_telemetry():
         vis_pos = beyin._vis_pos_count
         vis_lost = beyin._vis_lost_count
         vis_mode = getattr(beyin, "vis_mode", "OTO")   # guduum pipeline switch
-        png_tlm = dict(getattr(beyin, "png_tlm", {}) or {})   # gorsel PNG ic durumu (salt-okunur)
+        ibvs_tlm = dict(getattr(beyin, "ibvs_tlm", {}) or {})  # gorsel IBVS ic durumu (salt-okunur)
+        # KILITLENME ISTERI sayaci (sartname 6.1.2/6.1.4) — anlik kopya
+        b_kilit = {"anlik": bool(getattr(beyin, "kilit_anlik", False)),
+                   "sure": round(float(getattr(beyin, "kilit_sure", 0.0)), 2),
+                   "gerek": float(getattr(Cfg, "VIS_WIN_NEED_S", 5.0)),
+                   "pencere": float(getattr(Cfg, "VIS_WIN_S", 10.0)),
+                   "ok": bool(getattr(beyin, "kilit_ok", False)),
+                   "esik_pct": float(getattr(Cfg, "VIS_LOCK_PCT", 0.06)),
+                   "boyut_pct": (round(float(beyin.kilit_boyut), 4)
+                                 if getattr(beyin, "kilit_boyut", None) is not None else None)}
         # --- IZLEYICI/GUDUM alanlari (video isterleri) — hepsi ayni kilit altinda anlik kopya ---
         prev_cmd = dict(beyin.prev)                    # uygulanan 4 komut (tek dogruluk kaynagi)
         b_handoff = bool(beyin.handoff)
@@ -964,8 +1032,8 @@ def build_telemetry():
         "roll": prev_cmd.get("roll", 0.0), "yaw": prev_cmd.get("yaw", 0.0),
         "durum": j_durum, "mod": vis_mode, "kaynak": j_kaynak,
         "handoff": b_handoff, "d_h_m": d_h_m,
-        "law": getattr(Cfg, "VIS_LAW", "IBVS"),     # aktif gorsel yasa (PNG | IBVS)
-        "png": png_tlm,                             # {law,R_m,Vc_ms,omega_rads,commit,kaynak} | {}
+        "law": "IBVS",                              # tek gorsel yasa: basit IBVS (merkez->bbox cizgisi)
+        "ibvs": ibvs_tlm,                           # {law,ex,ey,buyukluk,aci_deg,kisma,dikey,ileri,yaw} | {}
     }
     kayip_s = 0.0
     if takip_s.get("id") is not None and (not takip_s.get("aktif")) and takip_s.get("kayip_t"):
@@ -993,12 +1061,15 @@ def build_telemetry():
     gorsel = {
         "durum": j_durum,                          # ARAMA | GORSEL_GUDUM
         "mod": vis_mode,                           # OTO | GPS | GORSEL (manuel switch)
-        "ey_ref": float(getattr(Cfg, "VIS_EY_REF", 0.0)),   # dikey referans (tilt telafisi; overlay cizer)
         "gps_kesildi": (j_durum == "GORSEL_GUDUM"),
         "pos_count": vis_pos, "lost_count": vis_lost, "n_lock": Cfg.VIS_N_LOCK,
         "dedektor_hazir": bool(dedektor is not None and getattr(dedektor, "hazir", False)),
+        "kare_kaynak": _fpv_kaynak.get("ad"),      # dedektorun gordugu kaynak (windows-capture / mss)
         "conf_esik": float(Cfg.VIS_CONF_MIN),      # gudum/kilit esigi (alti = zayif, UI turuncu cizer)
         "tespit": vis_tespit,                      # None | {ex,ey,cx,cy,w,h,conf,cls,sinif,id} (normalize)
+        "kilit": b_kilit,                          # {anlik,sure,gerek,pencere,ok,esik_pct,boyut_pct}
+        # PERVANE MASKESI (yanlis-poz engelleme): UI kirmizi tarama ile cizer (kullanici dogrular)
+        "prop_maske": [list(r) for r in (getattr(Cfg, "PROP_MASKE", None) or [])],
     }
     # POZ KESTIRIMI (kamera): gozlemci akisi — kp REF sirada normalize, mesafe/yaw
     # KAMERADAN. yaw_gercek kiyas icin telemetriden eklenir (sim/debug gostergesi).
@@ -1115,6 +1186,8 @@ class Handler(BaseHTTPRequestHandler):
                 kaynak = {"start": "v2", "start_v2": "v2", "start_gercek": "gercek"}[cmd]
                 with beyin_lock:
                     beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
+                    beyin.log_dondur()        # KOSULSUZ yeni ucus logu: ayni kaynak
+                    # ust uste secilse de her "Gorev Baslat" = ayri ucus dosyasi/klasoru
                     _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
@@ -1220,6 +1293,43 @@ class Handler(BaseHTTPRequestHandler):
                     ok = False
             self._send(200, json.dumps({"ok": ok, "param": p, "value": val}).encode("utf-8"),
                        "application/json")
+        elif self.path == "/api/tune_rapor":
+            # "DEGERLERI YAZDIR" RAPORU: canli tune degerleri + bu ucusun gorsel-faz
+            # performans metrikleri (ilk tespit / kilit / takip surekliligi / merkezleme /
+            # hareket tutarliligi / yaklasma) -> veri/tune_rapor_*.xlsx (web/tune_rapor.py).
+            # Metrik kaynagi: beynin yazdigi AKTIF ucus logu (yoksa en yeni ucus_log_*.csv).
+            try:
+                from web.tune_rapor import (rapor_uret, en_yeni_log,
+                                            ucus_klasoru, dosyayi_klasore_al)
+                tune_vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
+                sabit_vals = {k: getattr(Cfg, k) for k in TUNE_SABIT_RAPOR if hasattr(Cfg, k)}
+                with beyin_lock:
+                    lf = getattr(beyin, "_log_f", None)
+                    log_path = lf.name if lf is not None else None
+                    if lf is not None:
+                        try:
+                            lf.flush()        # son tikler de rapora girsin
+                        except Exception:
+                            pass
+                if log_path is None:
+                    log_path = en_yeni_log(VERI_DIR)
+                # UCUS KLASORU: veri/tune_parametreler/ucus_N -> bu ucusun TUM
+                # verileri tek yerde (log kopyalari + raporlar; kiyas kolay).
+                klasor = ucus_klasoru(os.path.join(VERI_DIR, "tune_parametreler"),
+                                      log_path)
+                dosyayi_klasore_al(log_path, klasor)
+                dosyayi_klasore_al(_TUNE_LOG_PATH, klasor)
+                yol, ozet = rapor_uret(tune_vals, sabit_vals, log_path, klasor,
+                                       kilit_gerek_s=float(getattr(Cfg, "VIS_WIN_NEED_S", 5.0)),
+                                       tune_log_path=_TUNE_LOG_PATH)
+                self._send(200, json.dumps({"ok": True, "dosya": yol,
+                                            "klasor": klasor,
+                                            "log": os.path.basename(log_path) if log_path else None,
+                                            "ozet": ozet}).encode("utf-8"), "application/json")
+            except Exception as e:
+                # openpyxl yok / log okunamadi vb. -> arayuze sebebi soyle, cokme yok
+                self._send(200, json.dumps({"ok": False, "hata": str(e)}).encode("utf-8"),
+                           "application/json")
         else:
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
@@ -1239,6 +1349,9 @@ def main():
     threading.Thread(target=kontrol_dongusu, daemon=True).start()
     # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
+    # Tune logu (1 Hz): slider degerlerini saniye bazinda kaydet -> raporda
+    # parametre-degisim segmentleri ucus performansiyla kiyaslanir.
+    threading.Thread(target=tune_log_dongusu, daemon=True).start()
 
     try:
         server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
