@@ -1461,6 +1461,12 @@ def main():
     # Gorsel tespit (YOLO) AYRI thread: gorev aktifken best.pt ile hedef bbox uretir.
     threading.Thread(target=dedektor_dongusu, daemon=True).start()
 
+    # COKLU-ORNEK KORUMASI (8 Tem teshisi): http.server varsayilani allow_reuse_address=True,
+    # Windows'ta SO_REUSEADDR "port zaten dinleniyorken bile" ikinci baglanmaya izin verir ->
+    # bat'a ikinci tiklama HATASIZ ikinci bir "hayalet" arayuz acar, trafik ikiye bolunur
+    # (8 Tem: 3 ornek ustuste birikti, dogrulama olcumunu bozdu). False ile ikinci ornek
+    # asagidaki OSError'a duser ve zaten yazili [HATA] mesaji gorunur (kodun niyeti buydu).
+    ThreadingHTTPServer.allow_reuse_address = False
     try:
         server = ThreadingHTTPServer(("127.0.0.1", WEB_PORT), Handler)
     except OSError as e:

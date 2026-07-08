@@ -72,7 +72,12 @@ Model TEK sefer + warmup ile yükleniyor; `verbose=False`; çizim tarayıcı can
    0'a düşer (bugünkü davranışla birebir); canlı ölçüm zaten ~11-16 Hz'ti →
    güdüm kadansı DÜŞMEZ (kilit 5 ardışık = 0.33 s @15 Hz < VIS_STALE_S=0.5).
    `0` = eski serbest koşu (tek satır geri dönüş).
-3. Uygulanmayanlar (ölçüm gerekçesiyle): `half=True` (kazanç yok, deprecated),
+3. **Çoklu-örnek koruması** (`web/server.py`): `allow_reuse_address=False`.
+   Windows'ta http.server varsayılanı, port dinlenirken İKİNCİ sunucunun hatasız
+   bağlanmasına izin veriyordu → 8 Tem doğrulamasında 3 "hayalet" arayüz üst üste
+   birikti (yeni kod hiç devreye girmedi). Artık ikinci örnek `[HATA] 8000 portu
+   açılamadı` deyip çıkar — bat'taki "TEK arayüz" uyarısının teknik karşılığı.
+4. Uygulanmayanlar (ölçüm gerekçesiyle): `half=True` (kazanç yok, deprecated),
    `max_det=1` (etkisiz), dxcam'e geçiş (WGC zaten latest-frame + occlusion-proof,
    yaş ~22 ms sağlıklı), 640-crop (contention çözülmeden gerekçe yok).
 
