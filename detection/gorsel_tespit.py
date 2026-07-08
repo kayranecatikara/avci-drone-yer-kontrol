@@ -26,6 +26,8 @@ class HedefDedektor:
         self.imgsz = int(imgsz)
         self.device = device
         self.hata = None
+        self.task = None            # 'detect' | 'pose' (yukleme sonrasi)
+        self.kpt_shape = None       # pose ise (n, dim); PnP [6,3] bekler
         try:
             from ultralytics import YOLO
             if self.device is None:                       # cihaz otomatik: cuda varsa kullan
@@ -36,6 +38,10 @@ class HedefDedektor:
                     self.device = "cpu"
             self.model = YOLO(model_path)
             self.names = dict(getattr(self.model, "names", {}) or {})
+            self.task = getattr(self.model, "task", None)
+            if self.task == "pose":
+                ks = getattr(getattr(self.model, "model", None), "kpt_shape", None)
+                self.kpt_shape = tuple(ks) if ks is not None else None
             self.hazir = True
             self._warmup()                                # ilk predict yavas -> onceden isit
         except Exception as e:
@@ -72,46 +78,71 @@ class HedefDedektor:
         maske: PERVANE bolgeleri [(x0,y0,x1,y1),...] normalize; MERKEZI icinde olan
         kutular ELENIR (argmax ONCESI) -> kendi pervanemiz hedef sanilmaz. Tum kutular
         maskeliyse None doner (o kare tespit yok)."""
+        hepsi = self.tespit_hepsi(frame, maske=maske)
+        return hepsi[0] if hepsi else None
+
+    def tespit_hepsi(self, frame, maske=None):
+        """Karedeki TUM tespitler, conf'a gore AZALAN sirali liste (bos olabilir).
+        Cok-nesneli sahnede (orn. park etmis ikinci Talon) cagiranin SECIM
+        yapabilmesi icin; uretim tek-kutu API'si (tespit_et) ilk elemani alir,
+        davranisi degismez. Eleman semasi tespit_et ile ayni; pose modelinde her
+        kutuya 'keypoints' [[x,y,conf],...] eklenir (detect modelinde alan yok).
+        maske: pervane bolgeleri — merkezi maskede olan kutular listeye GIRMEZ."""
         if not self.hazir:
-            return None
+            return []
         import time as _t
+        import numpy as np
         try:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
                                      device=self.device, verbose=False)[0]
         except Exception:
-            return None
+            return []
         boxes = getattr(res, "boxes", None)
         if boxes is None or len(boxes) == 0:
-            return None
+            return []
         try:
             H, W = int(res.orig_shape[0]), int(res.orig_shape[1])
-            confs = boxes.conf
-            xyxy = boxes.xyxy
-            cls_t = boxes.cls
-            # PERVANE MASKESI: merkezi maskede olan kutulari ele, kalanlardan en-yuksek conf.
-            en_i, en_c = -1, -1.0
-            for j in range(len(confs)):
-                x1, y1, x2, y2 = [float(v) for v in xyxy[j]]
+            t = _t.perf_counter()
+            # POSE modeli ise keypoints da gelir (pose'suz detect modelinde None ->
+            # PnP tuketicisi otomatik pasif). Her kutuya kendi keypoint setini esle.
+            kpts = getattr(res, "keypoints", None)
+            kp_xy = kp_conf = None
+            if kpts is not None:
+                try:
+                    kp_xy = kpts.xy.cpu().numpy() if hasattr(kpts.xy, "cpu") else np.asarray(kpts.xy)
+                    kc = getattr(kpts, "conf", None)
+                    if kc is not None:
+                        kp_conf = kc.cpu().numpy() if hasattr(kc, "cpu") else np.asarray(kc)
+                except Exception:
+                    kp_xy = kp_conf = None
+            cikti = []
+            for i in range(len(boxes)):
+                x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
+                # PERVANE MASKESI: merkezi maskede olan kutu listeye girmez.
                 if maske and W > 0 and H > 0:
                     cxn = ((x1 + x2) / 2.0) / W
                     cyn = ((y1 + y2) / 2.0) / H
                     if self._maskede(cxn, cyn, maske):
                         continue                          # kendi pervanemiz -> atla
-                c = float(confs[j])
-                if c > en_c:
-                    en_c, en_i = c, j
-            if en_i < 0:                                   # tum kutular maskeli -> tespit yok
-                return None
-            x1, y1, x2, y2 = [float(v) for v in xyxy[en_i]]
-            cls = int(cls_t[en_i]) if cls_t is not None else -1
-            return {
-                "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
-                "w": (x2 - x1), "h": (y2 - y1),
-                "conf": float(confs[en_i]), "cls": cls,
-                "W": W, "H": H, "t": _t.perf_counter(),
-            }
+                d = {
+                    "cx": (x1 + x2) / 2.0, "cy": (y1 + y2) / 2.0,
+                    "w": (x2 - x1), "h": (y2 - y1),
+                    "conf": float(boxes.conf[i]),
+                    "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
+                    "W": W, "H": H, "t": t,
+                }
+                if kp_xy is not None and i < len(kp_xy):
+                    # [[x,y,conf], ...] biciminde (PnP tuketicisi bekler)
+                    if kp_conf is not None and i < len(kp_conf):
+                        d["keypoints"] = [[float(x), float(y), float(c)]
+                                          for (x, y), c in zip(kp_xy[i], kp_conf[i])]
+                    else:
+                        d["keypoints"] = [[float(x), float(y), 1.0] for x, y in kp_xy[i]]
+                cikti.append(d)
+            cikti.sort(key=lambda d: -d["conf"])
+            return cikti
         except Exception:
-            return None
+            return []
 
 
 def siniflar(model_path):
