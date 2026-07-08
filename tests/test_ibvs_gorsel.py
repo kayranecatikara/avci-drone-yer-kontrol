@@ -3,8 +3,9 @@
 BASIT IBVS dogrulama (oyunsuz): goruntu merkezi -> bbox merkezi cizgisi.
 
 Test edilenler:
-  1) Yon eslemesi: hedef SAGDA -> yaw>0; SOLDA -> yaw<0; YUKARIDA -> thr>0
-     (tirman); ASAGIDA -> thr<0; MERKEZDE -> yaw~0, thr~0, ileri TAM.
+  1) Yon eslemesi: hedef SAGDA/SOLDA -> yaw isareti SIGN_YAW ile tutarli (isaret
+     VERI-belirli, canlida -1 dogrulandi); YUKARIDA -> thr>0 (tirman); ASAGIDA ->
+     thr<0; MERKEZDE -> yaw~0, thr~0, ileri TAM.
   2) Merkez freni: cizgi buyudukce ileri itki kisilir.
   3) Aci/buyukluk aritmetigi: sag=0, yukari=+90, asagi=-90.
   4) Clamp'ler: |yaw| <= YAW_MAX, thr THR_DN..THR_UP; roll HEP 0.
@@ -64,11 +65,14 @@ class _CfgVar:
 
 
 def test_yon_eslemesi():
-    # CFG0 (nisan=merkez): cekirdek yon eslemesi (ey_ref=0 -> merkez setpoint)
-    thr, _, _, yaw = _tek(0.75, 0.5)             # hedef SAGDA
-    assert yaw > 0 and abs(thr) < 1e-9, "sagda: yaw>0 thr=0 bekleniyordu"
-    _, _, _, yaw = _tek(0.25, 0.5)               # SOLDA
-    assert yaw < 0
+    # CFG0 (nisan=merkez): cekirdek yon eslemesi (ey_ref=0 -> merkez setpoint).
+    # yaw = SIGN_YAW*K*ex -> isaret VERI-belirli sabit (canlida -1 dogrulandi, 2026-07-08);
+    # bu yuzden ex ile SIGN_YAW*ex iliskisini denetle (mutlak yon degil).
+    s = float(Cfg.IBVS_SIGN_YAW)
+    thr, _, _, yaw = _tek(0.75, 0.5)             # hedef SAGDA (ex>0) -> yaw isareti = SIGN_YAW
+    assert yaw * s > 0 and abs(thr) < 1e-9, "sagda: yaw isareti SIGN_YAW ile ayni + thr=0 bekleniyordu"
+    _, _, _, yaw = _tek(0.25, 0.5)               # SOLDA (ex<0) -> yaw isareti = -SIGN_YAW
+    assert yaw * s < 0
     thr, _, _, yaw = _tek(0.5, 0.25)             # YUKARIDA
     assert thr > 0 and abs(yaw) < 1e-9, "yukarida: thr>0 (tirman) bekleniyordu"
     thr, _, _, _ = _tek(0.5, 0.75)               # ASAGIDA

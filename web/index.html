@@ -409,6 +409,9 @@
               <div><i style="background:#25e0a0"></i>Avcı</div>
               <div><i style="background:#ff5d5d"></i>Hedef (ham GPS)</div>
               <div><i style="background:#b98cff"></i>Hedef (J-temiz)</div>
+              <!-- >>> DEV-ONLY >>> -->
+              <div><i style="background:#ffcf3f"></i>Hedef (GERÇEK GPS)</div>
+              <!-- <<< DEV-ONLY <<< -->
               <div style="color:#55627a">sağ-sürükle: döndür · çift tık: sıfırla</div>
             </div>
             <div class="mm-zoom">
@@ -478,6 +481,18 @@
           <div class="row"><span class="k">🟣 İnov. J hata</span><span class="v mono" id="kJ">—</span></div>
           <div class="row"><span class="k">J düzeltme (anlık)</span><span class="v mono" id="gnssJd">—</span></div>
         </div>
+
+        <!-- >>> DEV-ONLY >>>  TALON GERÇEK GPS (truth) — DEV kıyas kartı; teslim paketinde SİLİNİR -->
+        <div class="card" id="gercekKart" style="border-color:#4a3f18;display:none">
+          <div class="title" style="color:#ffcf3f">🛰️ TALON GERÇEK GPS <small style="color:var(--muted);font-weight:400">(truth · yalnız sim/debug)</small></div>
+          <div class="note" style="margin:-4px 0 8px">Bozulmamış hedef konumu — grafikteki <b style="color:#ffcf3f">altın</b> iz. Ham(kırmızı)/J(mor) ile kıyas.</div>
+          <div class="row"><span class="k">Konum X / Y</span><span class="v mono" id="gercekXY">—</span></div>
+          <div class="row"><span class="k">İrtifa Z</span><span class="v mono" id="gercekZ">—</span></div>
+          <div class="row"><span class="k">Ham GPS sapması</span><span class="v mono" id="gercekHamSap">—</span></div>
+          <div class="row"><span class="k">🟣 J-temiz sapması</span><span class="v mono" id="gercekJSap">—</span></div>
+          <div class="row"><span class="k">Avcı'ya gerçek mesafe</span><span class="v mono" id="gercekMes">—</span></div>
+        </div>
+        <!-- <<< DEV-ONLY <<< -->
 
         <!-- TAKİP (ister 5/6/7): aktif/pasif + ID + kayıp/yeniden -->
         <div class="card" style="border-color:#203a2f">
@@ -1224,6 +1239,9 @@
 
   // ---- 3B mini-harita: X/Y/Z eksenli ortografik izdüşüm, sağ-sürükle döndürme + zoom (ister 2) ----
   let mmAvci=[], mmHam=[], mmTemiz=[], mmT0=null, mmSonT=null;
+  // >>> DEV-ONLY >>>  Talon GERCEK GPS (truth) izi — DEV gorsellestirme; teslim paketinde SILINIR.
+  let mmGercek=[];
+  // <<< DEV-ONLY <<<
   const MM_AZ0=-90, MM_EL0=35;             // el=90 + az=-90 => eski kuşbakışıyla birebir (+X sağ, +Y yukarı)
   let mmAz=MM_AZ0, mmEl=MM_EL0, mmZoom=1;  // azimut°, elevasyon°, zoom çarpanı
   function cizMinimap(t){ mmGuncelle(t); mmCiz(); }
@@ -1232,11 +1250,19 @@
     mmSonT=t;
     // görev t0 değişti (yeni görev) -> izleri sıfırla
     const t0 = (t.gorev && t.gorev.t0) ? t.gorev.t0 : null;
-    if(t0!==mmT0){ mmT0=t0; mmAvci=[]; mmHam=[]; mmTemiz=[]; }
+    if(t0!==mmT0){ mmT0=t0; mmAvci=[]; mmHam=[]; mmTemiz=[];
+      // >>> DEV-ONLY >>>
+      mmGercek=[];
+      // <<< DEV-ONLY <<<
+    }
     const d=t.drone, g=t.target, j=t.j;
     if(d && d.x!=null){ mmAvci.push([d.x,d.y,d.z!=null?d.z:0]); if(mmAvci.length>600)mmAvci.shift(); }
     if(g && g.x!=null){ mmHam.push([g.x,g.y,g.z!=null?g.z:0]); if(mmHam.length>600)mmHam.shift(); }
     if(j && j.temiz){ mmTemiz.push([j.temiz.x,j.temiz.y,j.temiz.z!=null?j.temiz.z:0]); if(mmTemiz.length>600)mmTemiz.shift(); }
+    // >>> DEV-ONLY >>>  Talon GERCEK konum (truth) izi
+    const _tr=(t.debug && t.debug.available && t.debug.target_real)?t.debug.target_real:null;
+    if(_tr && _tr.x!=null){ mmGercek.push([_tr.x,_tr.y,_tr.z!=null?_tr.z:0]); if(mmGercek.length>600)mmGercek.shift(); }
+    // <<< DEV-ONLY <<<
   }
   function mmCiz(){
     const cv=$("minimap"); if(!cv) return;
@@ -1304,6 +1330,11 @@
       else nokta(mmHam,"#ff5d5d",4);
     }
     if(mmTemiz.length) nokta(mmTemiz,"#b98cff",4);
+    // >>> DEV-ONLY >>>  Talon GERCEK GPS izi (altin/amber) — ham(kirmizi) ve J(mor) ile kiyas
+    sap(mmGercek,"rgba(255,207,63,.25)");
+    ciz(mmGercek,"rgba(255,207,63,.65)");
+    if(mmGercek.length) nokta(mmGercek,"#ffcf3f",4);
+    // <<< DEV-ONLY <<<
     // avcı + yön çentiği (yaw; dünya boyu 14/s m => ekranda ~14 px sabit)
     if(mmAvci.length){ const p=mmAvci[mmAvci.length-1], q=P(p[0],p[1],p[2]);
       nokta(mmAvci,"#25e0a0",5);
@@ -1368,6 +1399,24 @@
       $("dist").textContent = f1(t.distance_m);
       // GERCEK GPS-avci mesafe (debug truth varsa; yoksa "—")
       $("dist_gercek").textContent = (t.gercek_mesafe_m != null) ? f1(t.gercek_mesafe_m) : "—";
+      // >>> DEV-ONLY >>>  TALON GERÇEK GPS kartı (truth): konum + ham/J sapması + mesafe
+      (function(){
+        const dbgT=t.debug||{}, tr=(dbgT.available&&dbgT.target_real)?dbgT.target_real:null;
+        const kart=$("gercekKart"); if(!kart) return;
+        if(!tr){ kart.style.display="none"; return; }
+        kart.style.display="";
+        $("gercekXY").innerHTML = f1(tr.x)+' / '+f1(tr.y)+' <small>m</small>';
+        $("gercekZ").innerHTML  = f1(tr.z)+' <small>m</small>';
+        $("gercekHamSap").innerHTML = (dbgT.target_raw_error_m!=null)
+          ? f1(dbgT.target_raw_error_m)+' <small>m</small>' : '—';
+        const jt=(t.j&&t.j.temiz)?t.j.temiz:null;
+        if(jt){ const dj=Math.hypot(jt.x-tr.x, jt.y-tr.y, (jt.z!=null?jt.z:0)-tr.z);
+          $("gercekJSap").innerHTML = f1(dj)+' <small>m</small>'; }
+        else $("gercekJSap").textContent = '—';
+        $("gercekMes").innerHTML = (t.gercek_mesafe_m!=null)
+          ? f1(t.gercek_mesafe_m)+' <small>m</small>' : '—';
+      })();
+      // <<< DEV-ONLY <<<
 
       // 🔎 İrtifa / Z teşhis — Gerçek GPS modunda drone neden inmiyor?
       // Güdüm dikey komutu: throttle ≈ (Hedef Z gerçek − Drone Z). + → tırman, − → alçal.

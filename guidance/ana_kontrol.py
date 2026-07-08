@@ -163,7 +163,20 @@ class Cfg:
                                # efektif ~20m; efektifi ~10m'ye indirmek icin komut 5m'ye cekildi.
                                # TUNE (sim): hala uzaksa dusur / KP_H veya V_CAP_NEAR ile kapanisi guclendir.
                                # (sim-tune 2026-07-03: 30m -> 10m; 2026-07-04: efektif ~20m -> komut 5m)
-    APPROACH_LEAD_S   = 0.5     # s; yaklasma nisan noktasi icin KISA lead (tam 2sn overshoot yapiyordu)
+    APPROACH_LEAD_S   = 0.5     # s; ("sabit" mod) yaklasma nisan noktasi icin KISA lead
+    # --- KESISIM (INTERCEPT) LEAD — capraz/karsidan gecen hedef (2026-07-08) ---
+    # "sabit"     = eski davranis: nisan = hedef + APPROACH_LEAD_S*Vt (SAF TAKIP; hedef
+    #               capraz/karsidan gecerken drone arkasinda kalir -> yanindan gecer + yaw
+    #               satur/kendi etrafinda doner). Kuyruk-kovalamada iyi calisir.
+    # "intercept" = nisan = hedef + Vt*t_go; t_go kesisim geometrisinden cozulur (elimizdeki
+    #               hedef konumu son_xy_anlik + hedef hizi son_hiz + varsayilan kapanma hizi
+    #               APPROACH_VO). SABIT-KERTERIZ carpisma rotasi: hedefin GIDECEGI yere nisan
+    #               alir -> onunu keser, kerteriz donmez -> yaw satur/donme biter (iki sorunu
+    #               ayni anda cozer). Kuyruk-kovalamada da dogru cikar (t_go makul).
+    APPROACH_LEAD_MODE = "intercept"   # "intercept" | "sabit" (eski davranisa tek satirla don)
+    APPROACH_TGO_MAX   = 4.0           # s; kesisim lead tavani -> hedef manevrasinda asiri lead'i sinirla
+    APPROACH_VO        = 2500.0        # cm/s; kesisim cozumunde varsayilan avci kapanma hizi
+                                       # (~V_CAP_FAR). Gercek hiz DEGIL; yalniz bulusma nisanini belirler.
     # KAMERA CERCEVELEME (dikey): drone hedefin bu kadar ALTINDA ucar -> kamera 25 derece
     # YUKARI tilt'li oldugundan hedef kadrajin MERKEZININ BIRAZ USTUNDE durur (net gorunur,
     # gorsel kilide hazir). Geometri (~10 m standoff'ta): ~466 cm hedefi tam ortalar; "biraz
@@ -291,7 +304,13 @@ class Cfg:
     # oldugundan hedefi MERKEZDE tutmak araci hedefin ALTINDA tutar (gokyuzu
     # arka plan / alttan yaklasma) — ekstra dikey geometri kodu GEREKMEZ.
     IBVS_K_YAW       = 0.8      # yatay kazanc: yaw = SIGN*K*ex (clamp +-YAW_MAX) ⚙
-    IBVS_SIGN_YAW    = +1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir; ters tepki gorursen -1
+    IBVS_SIGN_YAW    = -1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir. CANLI DOGRULANDI
+                                # (2026-07-08 kullanici gozlemi): +1'de gorsel fazda avci hedefin
+                                # kadraj-cikis tarafinin TERSINE donuyordu (merkezleme ters) -> -1.
+                                # GPS fazi AYRI isaret (YAW_SIGN=+1) kullanir, dogru; goruntu ex ekseni
+                                # ters kanon (muhtemel yatay ayna) -> gorsel -1, GPS +1 tutarli. Ongorulu
+                                # lead SIGN_ROLL=-1 zaten bu gercek yaw->ex iliskisine gore kalibreliydi
+                                # (veri) -> simdi merkezleme de ayni yone, iki terim uyumlu.
     IBVS_K_DIKEY     = 1.3      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
                                 # 8 Tem ucus_2: 1.3 en iyi merkezleme (1.9 asiri tepkili,
                                 # 0.65 yetersiz kaldi — episod kiyasi r_ort medyan ~0.21).
@@ -405,6 +424,39 @@ def speed_cap(d_horiz):
         return Cfg.V_CAP_FAR
     t = d_horiz / Cfg.BRAKE_DIST                      # 0..1
     return Cfg.V_CAP_NEAR + (Cfg.V_CAP_FAR - Cfg.V_CAP_NEAR) * t
+
+
+def intercept_tgo(rx, ry, vtx, vty, vo, tgo_max):
+    """[GPS-YAKLASMA] Kesisim (collision-course) zamani t_go (s) — sabit-kerteriz lead.
+    r = hedef - drone (yatay menzil vek), Vt = hedef hizi, vo = avci varsayilan kapanma
+    hizi. Avci vo ile hedefe kaparken bulusma zamanini cozer -> nisan = hedef + Vt*t_go
+    hedefin GIDECEGI yer olur (capraz/karsidan gecen hedefin ONUNU keser; saf takipteki
+    "arkasinda kal -> yanindan gec + yaw satur/kendi etrafinda don" biter).
+    Denklem:  |r + Vt*t| = vo*t  ->  (|Vt|^2 - vo^2) t^2 + 2(r.Vt) t + |r|^2 = 0
+    En kucuk pozitif kok alinir. Kesisim yoksa (hedef vo'dan hizli/kaciyor, disc<0)
+    menzil/vo pursuit-lead'e duser. t_go [0, tgo_max]'a clamp'lenir (manevrada asiri
+    lead'i sinirlar). Saf fonksiyon (sim gerektirmez) -> tests/test_intercept.py."""
+    R2 = rx * rx + ry * ry
+    if R2 < 1e-6:
+        return 0.0
+    a = vtx * vtx + vty * vty - vo * vo
+    b = 2.0 * (rx * vtx + ry * vty)
+    c = R2
+    t = None
+    if abs(a) < 1e-6:                                 # hedef hizi ~ vo -> lineer coz
+        if abs(b) > 1e-9:
+            t = -c / b
+    else:
+        disc = b * b - 4.0 * a * c
+        if disc >= 0.0:
+            sq = math.sqrt(disc)
+            kokler = ((-b - sq) / (2.0 * a), (-b + sq) / (2.0 * a))
+            poz = [k for k in kokler if k > 1e-3]
+            if poz:
+                t = min(poz)
+    if t is None or t <= 0.0:                         # kesisim yok -> menzil/vo pursuit-lead
+        t = math.sqrt(R2) / max(vo, 1.0)
+    return clamp(t, 0.0, tgo_max)
 
 
 # Guduum kaynagi -> filtre fabrikasi. "gercek" filtre kullanmaz (truth'a gider).
@@ -1102,12 +1154,21 @@ class AvciKontrol:
         self.last_est = est
 
         # YATAY nisan noktasi: B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde
-        #     dur. KISA lead (APPROACH_LEAD_S) ile nisan (savrulmayi onler); pozisyon KOMUTU
-        #     hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
+        #     dur. LEAD ile nisan (savrulmayi onler); pozisyon KOMUTU hedefe DEGIL,
+        #     APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
         #     ex/ey/d_h ONCE hesaplanir: dikey look-up nisan noktasi d_h'ye (menzile) baglidir.
+        #     LEAD MODU (Cfg.APPROACH_LEAD_MODE): "intercept" = kesisim geometrisi (t_go;
+        #     capraz/karsidan gecen hedefin onunu keser) | "sabit" = eski KISA lead (APPROACH_LEAD_S*Vt).
         if self.son_xy_anlik is not None and self.son_hiz is not None:
-            tx = float(self.son_xy_anlik[0]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[0])  # kisa lead
-            ty = float(self.son_xy_anlik[1]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[1])
+            if getattr(Cfg, "APPROACH_LEAD_MODE", "sabit") == "intercept":
+                rx = float(self.son_xy_anlik[0]) - float(drone_pos[0])
+                ry = float(self.son_xy_anlik[1]) - float(drone_pos[1])
+                tgo = intercept_tgo(rx, ry, float(self.son_hiz[0]), float(self.son_hiz[1]),
+                                    Cfg.APPROACH_VO, Cfg.APPROACH_TGO_MAX)   # kesisim zamani (s)
+            else:
+                tgo = Cfg.APPROACH_LEAD_S                          # eski davranis: sabit kisa lead
+            tx = float(self.son_xy_anlik[0]) + tgo * float(self.son_hiz[0])
+            ty = float(self.son_xy_anlik[1]) + tgo * float(self.son_hiz[1])
         else:
             tx, ty = float(est[0]), float(est[1])                 # fallback: 2sn lead
         ex = tx - float(drone_pos[0])                             # HEDEFE hata (yaw/handoff/FOV/log)
