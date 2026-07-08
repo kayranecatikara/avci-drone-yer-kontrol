@@ -182,33 +182,42 @@ def _mss_grab_bgr():
     return kaynak, frame[:, :, :3].copy()                  # BGRA -> BGR (alpha at)
 
 
-def grab_frame_bgr():
-    """(BGR kare, W, H) doner — YOLO dedektorunun kare kaynagi. DOGAL COZUNURLUK
+def grab_frame_bgr_t():
+    """(BGR kare, W, H, t_kare) doner — YOLO dedektorunun kare kaynagi. DOGAL COZUNURLUK
     (kucultme YOK): YOLO zaten imgsz=1280'e kendi letterbox'lar; kareyi once 960'a
     indirip modele geri buyuttermek kucuk/uzak hedefin detayini olduruyordu
     (canli 20-40 m tespit orani offline'in cok altindaydi, 6 Tem log analizi).
     960 kucultme yalnizca FPV JPEG akisinda (fpv_jpeg) yapilir.
+    t_kare: karenin YAKALANDIGI perf_counter ani (windows-capture: WGC thread'inin
+    kareyi teslim ettigi an; mss: grab su anda yapildigi icin simdi). Kare yasi
+    (yakalama -> sonuc yayini) teshisi bununla olculur; kare yoksa None.
     HER ZAMAN kare uretmeye calisir (fallback zinciri):
       1) windows-capture canli karesi (occlusion-proof; oyun arkada olsa bile dogru)
       2) mss oyun-penceresi bolgesi (oyun goruunur/onde ise)
       3) mss tum ekran (son care; ayna riski)
-    Yalnizca mss de basarisizsa (None, 0, 0)."""
+    Yalnizca mss de basarisizsa (None, 0, 0, None)."""
     pym = pencere_yakala_motoru
     if pym is not None and pym.hazir and pym.calisiyor():
-        bgr = pym.get_latest_bgr()
+        bgr, t_kare = pym.get_latest_bgr_t()
         if bgr is not None:
             _fpv_log("windows-capture (pencere icerigi)")
             bgr = np.ascontiguousarray(bgr)            # cv2/ultralytics contiguous ister
-            return bgr, bgr.shape[1], bgr.shape[0]
+            return bgr, bgr.shape[1], bgr.shape[0], t_kare
     # Fallback: mss (windows-capture yok / henuz kare uretmedi / pencere bulunamadi)
     try:
         kaynak, bgr = _mss_grab_bgr()
         _fpv_log(kaynak)
         bgr = np.ascontiguousarray(bgr)
-        return bgr, bgr.shape[1], bgr.shape[0]
+        return bgr, bgr.shape[1], bgr.shape[0], time.perf_counter()
     except Exception as e:
         _fpv_log("KARE YOK", " (%s)" % e)
-        return None, 0, 0
+        return None, 0, 0, None
+
+
+def grab_frame_bgr():
+    """Eski imza (FPV/fpv_jpeg kullanir): (BGR kare, W, H). Zaman damgasiz sarmalayici."""
+    bgr, w, h, _t = grab_frame_bgr_t()
+    return bgr, w, h
 
 
 def fpv_jpeg():
@@ -666,6 +675,166 @@ _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
 _son_poz_ui = None         # UI icin son NORMALIZE poz (beyin_lock ile korunur)
 
 
+# ----------------------------------------------------------
+#  CANLI INFERENCE TESHISI (2026-07-08 — olcum katmani, davranis DEGISTIRMEZ)
+#  dedektor_dongusu'nun her turunu asamalara kronometreler:
+#    kare_yas  : karenin yakalanma ani -> inference baslangici (capture tazeligi)
+#    capture   : grab_frame_bgr_t suresi (windows-capture'da ~0; mss'te gercek grab)
+#    infer     : best.pt predict suresi (letterbox dahil)
+#    poz       : talon_pose.pt + PnP suresi (yalniz kostugu turlarda)
+#    yaz       : normalize + beyin_lock bekleme + sonuc yazimi
+#    uctan_uca : yakalama ani -> sonucun beyne/UI'ya yazildigi an ("frame age")
+#  Cikti: veri/teshis_zaman_<ts>.csv (kare basina satir) + her ~10 sn konsol ozeti
+#  + GET /api/teshis (son ozet JSON). Kuyruk YOK (latest-frame tasarimi) ama
+#  uctan_uca ZAMANLA BUYUYORSA backlog/contention var demektir (kesin bulgu).
+#  A/B kare testi: POST /api/teshis {"dump_kare":100} -> modele giren array'in
+#  BIREBIR aynisi PNG olarak veri/teshis_kareler/<ts>/ altina yazilir (Asama 3).
+# ----------------------------------------------------------
+TESHIS_AKTIF = True
+TESHIS_OZET_S = 10.0        # konsol ozet periyodu (sn)
+_teshis_lock = threading.Lock()
+_teshis_dump = {"kalan": 0, "toplam": 0, "klasor": None}
+_teshis_ozet = {}           # son pencere ozeti (GET /api/teshis dondurur)
+_teshis_birikim = []        # ozet penceresindeki satirlar (yalniz dedektor thread'i yazar)
+_teshis_son_ozet_t = None
+_teshis_son_t4 = None       # onceki turun bitis ani (FPS icin)
+_teshis_csv_f = None
+_teshis_csv_yol = None
+
+
+def _teshis_csv():
+    """Teshis CSV'sini lazy ac (ilk olculen karede; bos dosya birakmaz)."""
+    global _teshis_csv_f, _teshis_csv_yol
+    if _teshis_csv_f is None:
+        _teshis_csv_yol = os.path.join(
+            VERI_DIR, "teshis_zaman_%s.csv" % time.strftime("%Y%m%d_%H%M%S"))
+        _teshis_csv_f = open(_teshis_csv_yol, "w", encoding="utf-8")
+        _teshis_csv_f.write("t,kaynak,kare_yas_ms,capture_ms,infer_ms,poz_ms,"
+                            "yaz_ms,dongu_ms,uctan_uca_ms,fps,det,conf\n")
+        print("[TESHIS] zamanlama logu -> %s" % _teshis_csv_yol)
+    return _teshis_csv_f
+
+
+def _teshis_kaydet(t0, t_kare, t1, t2, t3, t4, det, poz_kostu):
+    """Bir dedektor turunun olcumunu CSV'ye yaz + ~10 sn'de bir ozet bas.
+    Yalniz dedektor thread'i cagirir (kilit gerekmez); toplam maliyet ~0.1 ms."""
+    global _teshis_son_ozet_t, _teshis_son_t4
+    if not TESHIS_AKTIF:
+        return
+    kaynak_ad = _fpv_kaynak["ad"] or "?"
+    kaynak = "wc" if kaynak_ad.startswith("windows") else ("mss" if "mss" in kaynak_ad else "?")
+    fps = None
+    if _teshis_son_t4 is not None and t4 > _teshis_son_t4:
+        fps = 1.0 / (t4 - _teshis_son_t4)
+    _teshis_son_t4 = t4
+    satir = {
+        "kare_yas_ms": (t1 - t_kare) * 1000.0 if t_kare is not None else None,
+        "capture_ms": (t1 - t0) * 1000.0,
+        "infer_ms": (t2 - t1) * 1000.0,
+        "poz_ms": (t3 - t2) * 1000.0 if poz_kostu else None,
+        "yaz_ms": (t4 - t3) * 1000.0,
+        "dongu_ms": (t4 - t0) * 1000.0,
+        "uctan_uca_ms": (t4 - t_kare) * 1000.0 if t_kare is not None else None,
+        "fps": fps, "kaynak": kaynak,
+        "det": 1 if det is not None else 0,
+        "conf": float(det.get("conf", 0.0)) if det is not None else None,
+    }
+    try:
+        f = _teshis_csv()
+        f.write("%.3f,%s,%s,%.1f,%.1f,%s,%.2f,%.1f,%s,%s,%d,%s\n" % (
+            time.time(), kaynak,
+            ("%.1f" % satir["kare_yas_ms"]) if satir["kare_yas_ms"] is not None else "",
+            satir["capture_ms"], satir["infer_ms"],
+            ("%.1f" % satir["poz_ms"]) if satir["poz_ms"] is not None else "",
+            satir["yaz_ms"], satir["dongu_ms"],
+            ("%.1f" % satir["uctan_uca_ms"]) if satir["uctan_uca_ms"] is not None else "",
+            ("%.1f" % fps) if fps is not None else "",
+            satir["det"],
+            ("%.3f" % satir["conf"]) if satir["conf"] is not None else ""))
+        f.flush()
+    except Exception:
+        pass
+    _teshis_birikim.append(satir)
+    simdi = time.perf_counter()
+    if _teshis_son_ozet_t is None:
+        _teshis_son_ozet_t = simdi
+    if simdi - _teshis_son_ozet_t >= TESHIS_OZET_S and _teshis_birikim:
+        _teshis_son_ozet_t = simdi
+        _teshis_ozetle()
+
+
+def _teshis_ozetle():
+    """Biriken pencereyi ozetle: konsola bas + _teshis_ozet'i guncelle (API okur)."""
+    global _teshis_birikim
+    rows = _teshis_birikim
+    _teshis_birikim = []
+
+    def _ist(ad):
+        v = [r[ad] for r in rows if r.get(ad) is not None]
+        if not v:
+            return None
+        a = np.array(v, float)
+        return {"ort": float(a.mean()), "p50": float(np.percentile(a, 50)),
+                "p95": float(np.percentile(a, 95)), "n": int(a.size)}
+    ozet = {"n_kare": len(rows), "pencere_s": TESHIS_OZET_S,
+            "kaynak": rows[-1]["kaynak"], "t": time.time()}
+    for ad in ("kare_yas_ms", "capture_ms", "infer_ms", "poz_ms",
+               "yaz_ms", "dongu_ms", "uctan_uca_ms", "fps"):
+        ozet[ad] = _ist(ad)
+    det_n = sum(r["det"] for r in rows)
+    ozet["det_orani"] = det_n / float(len(rows))
+    confs = [r["conf"] for r in rows if r["conf"] is not None]
+    ozet["conf_ort"] = (sum(confs) / len(confs)) if confs else None
+    with _teshis_lock:
+        _teshis_ozet.clear()
+        _teshis_ozet.update(ozet)
+
+    def _f(d, k="p50"):
+        return ("%.0f" % d[k]) if d else "-"
+    print("[TESHIS] %d kare | kaynak=%s | FPS ort %s | kare_yas p50/p95 %s/%s ms | "
+          "infer p50/p95 %s/%s ms | poz p50 %s ms (n=%s) | yaz p50 %s ms | "
+          "UCTAN-UCA p50/p95 %s/%s ms | det %%%d%s" % (
+              ozet["n_kare"], ozet["kaynak"],
+              ("%.1f" % ozet["fps"]["ort"]) if ozet["fps"] else "-",
+              _f(ozet["kare_yas_ms"]), _f(ozet["kare_yas_ms"], "p95"),
+              _f(ozet["infer_ms"]), _f(ozet["infer_ms"], "p95"),
+              _f(ozet["poz_ms"]), ozet["poz_ms"]["n"] if ozet["poz_ms"] else 0,
+              _f(ozet["yaz_ms"]),
+              _f(ozet["uctan_uca_ms"]), _f(ozet["uctan_uca_ms"], "p95"),
+              round(ozet["det_orani"] * 100),
+              (" (conf ort %.2f)" % ozet["conf_ort"]) if ozet["conf_ort"] else ""))
+
+
+def _teshis_kare_dump(bgr):
+    """A/B testi (Asama 3): modele giren BGR array'in birebir aynisini PNG yaz.
+    Sonuc yazildiktan SONRA cagrilir -> PNG yazimi zamanlama olcumune karismaz
+    (dump sirasinda FPS dusebilir, normal). cv2 yoksa PIL ile yazar."""
+    if bgr is None or _teshis_dump["kalan"] <= 0:
+        return
+    with _teshis_lock:
+        if _teshis_dump["kalan"] <= 0:
+            return
+        klasor = _teshis_dump["klasor"]
+        idx = _teshis_dump["toplam"] - _teshis_dump["kalan"]
+        _teshis_dump["kalan"] -= 1
+        kalan = _teshis_dump["kalan"]
+    try:
+        if idx == 0:                       # ilk karede oturum metasi (A/B raporu icin)
+            with open(os.path.join(klasor, "meta.json"), "w", encoding="utf-8") as mf:
+                json.dump({"W": int(bgr.shape[1]), "H": int(bgr.shape[0]),
+                           "kaynak": _fpv_kaynak["ad"], "t": time.time(),
+                           "not": "modele giren array birebir (BGR->PNG)"}, mf, indent=2)
+        yol = os.path.join(klasor, "kare_%04d.png" % idx)
+        if cv2 is not None:
+            cv2.imwrite(yol, bgr)
+        else:
+            Image.fromarray(bgr[:, :, ::-1].copy()).save(yol)
+        if kalan == 0:
+            print("[TESHIS] kare dump TAMAM (%d kare) -> %s" % (_teshis_dump["toplam"], klasor))
+    except Exception as e:
+        print("[TESHIS] kare dump hatasi: %r" % e)
+
+
 def _normalize_tespit(det):
     """Dedektor px ciktisini overlay/telemetri icin normalize et (cozunurluk-bagimsiz)."""
     if det is None:
@@ -763,17 +932,22 @@ def dedektor_dongusu():
         if not dedektor.hazir:
             time.sleep(1.0)                           # kurulum yok -> CPU yakma
             continue
+        t0 = time.perf_counter()                      # TESHIS: tur baslangici
+        t_kare = None
         try:
             # Predict esigi UI icin dusuk (UI_CONF_MIN): zayif tespitler arayuzde
             # turuncu cizilir. GUDUM yine yalnizca conf>=VIS_CONF_MIN gorur
             # (asagida det_beyin kapisi) -> beyin/kilit davranisi DEGISMEZ.
             # Slider VIS_CONF_MIN'i daha da dusururse predict onu izler (canli-tune).
             dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN))
-            bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
+            bgr, _fw, _fh, t_kare = grab_frame_bgr_t()   # AGIR is: pencere karesi al (kilit DISINDA)
+            t1 = time.perf_counter()                  # TESHIS: capture bitti
             # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
             det = dedektor.tespit_et(bgr) if bgr is not None else None
         except Exception:
             bgr, det = None, None
+            t1 = time.perf_counter()
+        t2 = time.perf_counter()                      # TESHIS: best.pt inference bitti
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
         # takip rozeti, gorsel guduum eski predict-esigi davranisiyla BIREBIR ayni.
         det_beyin = (det if det is not None
@@ -803,6 +977,7 @@ def dedektor_dongusu():
                     poz_ui = _normalize_poz(pdet, poz, yp)
             except Exception:
                 poz_ui = None
+        t3 = time.perf_counter()                      # TESHIS: poz inference bitti
         # UI tespiti + NORMALIZE HIZ (vx,vy [1/s]): arayuz bbox'u tespit YASI kadar
         # ILERI cizer (inference + aktarim gecikmesi telafisi; /api/gorsel tasir).
         ui_det = _normalize_tespit(det)
@@ -819,6 +994,10 @@ def dedektor_dongusu():
             _son_tespit_ui = ui_det
             if poz_kostu or det is None:              # ara turlarda SON pozu tut (iskelet
                 _son_poz_ui = poz_ui                  # yanip sonmesin); hedef yoksa temizle
+        t4 = time.perf_counter()                      # TESHIS: sonuc yayinlandi
+        if bgr is not None:
+            _teshis_kaydet(t0, t_kare, t1, t2, t3, t4, det, poz_kostu)
+            _teshis_kare_dump(bgr)                    # A/B dumpi EN SONDA (olcume karismaz)
         if bgr is None:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
@@ -1086,6 +1265,14 @@ class Handler(BaseHTTPRequestHandler):
             # Mevcut tune parametre degerlerini dondur (slider'lari baslatmak icin).
             vals = {k: getattr(Cfg, k) for k in TUNE_ALLOW}
             self._send(200, json.dumps(vals).encode("utf-8"), "application/json")
+        elif self.path == "/api/teshis":
+            # TESHIS OZETI: dedektor dongusunun son ~10 sn zamanlama istatistikleri
+            # (konsol ozetinin JSON hali) + dump durumu + aktif CSV yolu.
+            with _teshis_lock:
+                ozet = dict(_teshis_ozet)
+                ozet["dump"] = dict(_teshis_dump)
+            ozet["csv"] = _teshis_csv_yol
+            self._send(200, json.dumps(ozet).encode("utf-8"), "application/json")
         elif self.path.startswith("/api/frame"):
             try:
                 jpeg = fpv_jpeg()                 # ham oyun karesi (pencere-icerigi / mss)
@@ -1220,6 +1407,28 @@ class Handler(BaseHTTPRequestHandler):
                     ok = False
             self._send(200, json.dumps({"ok": ok, "param": p, "value": val}).encode("utf-8"),
                        "application/json")
+        elif self.path == "/api/teshis":
+            # A/B KARE DUMPI (Asama 3): {"dump_kare": N} -> dedektore giden SIRADAKI
+            # N kare, modele girmeden onceki haliyle PNG yazilir (gorev aktif olmali).
+            length = int(self.headers.get("Content-Length", 0))
+            raw = self.rfile.read(length).decode("utf-8") if length else "{}"
+            try:
+                n = int(json.loads(raw).get("dump_kare", 0))
+            except Exception:
+                n = 0
+            if n > 0:
+                n = min(n, 1000)                      # disk emniyeti (1080p PNG ~2-3 MB/kare)
+                klasor = os.path.join(VERI_DIR, "teshis_kareler",
+                                      time.strftime("%Y%m%d_%H%M%S"))
+                os.makedirs(klasor, exist_ok=True)
+                with _teshis_lock:
+                    _teshis_dump.update(kalan=n, toplam=n, klasor=klasor)
+                print("[TESHIS] kare dump basladi: %d kare -> %s" % (n, klasor))
+                self._send(200, json.dumps({"ok": True, "kare": n, "klasor": klasor})
+                           .encode("utf-8"), "application/json")
+            else:
+                self._send(200, json.dumps({"ok": False, "msg": "dump_kare > 0 gonder"})
+                           .encode("utf-8"), "application/json")
         else:
             self._send(404, b"yok", "text/plain; charset=utf-8")
 

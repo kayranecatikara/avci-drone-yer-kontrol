@@ -15,6 +15,7 @@ ZARIF BOZULMA: windows-capture yoksa / pencere bulunamazsa hazir=False, get_late
 -> server.py mss'e geri duser (mevcut davranis korunur, sistem cokmez).
 """
 import threading
+import time
 
 
 GAME_PROC_HINTS = ("dronesofwar",)      # oyun exe/surec adi bunu icermeli (kucuk harf)
@@ -96,6 +97,7 @@ class PencereYakala:
         self.hazir = False
         self.aktif_pencere = None
         self._latest = None
+        self._latest_t = None            # son karenin VARIS ani (perf_counter; kare yasi olcumu)
         self._lock = threading.Lock()
         self._baslat_lock = threading.Lock()   # baslat() cift-cagri yarisini onler
         self._control = None
@@ -160,8 +162,10 @@ class PencereYakala:
                 def on_frame_arrived(frame, capture_control):
                     try:
                         bgr = np.ascontiguousarray(frame.convert_to_bgr().frame_buffer)
+                        t = time.perf_counter()
                         with self._lock:
                             self._latest = bgr
+                            self._latest_t = t
                     except Exception:
                         pass
 
@@ -170,6 +174,7 @@ class PencereYakala:
                     # Pencere kapandi: kareyi temizle; control birakilir -> restart edilebilir.
                     with self._lock:
                         self._latest = None
+                        self._latest_t = None
                     self._control = None
 
                 try:
@@ -194,6 +199,7 @@ class PencereYakala:
         self._control = None
         with self._lock:
             self._latest = None
+            self._latest_t = None
         if c is not None:
             try:
                 c.stop()
@@ -203,3 +209,9 @@ class PencereYakala:
     def get_latest_bgr(self):
         with self._lock:
             return self._latest
+
+    def get_latest_bgr_t(self):
+        """(kare, varis_t) — varis_t: karenin WGC thread'inden geldigi perf_counter ani.
+        Kare yasi (yakalama -> sonuc) olcumu icin; kare yoksa (None, None)."""
+        with self._lock:
+            return self._latest, self._latest_t
