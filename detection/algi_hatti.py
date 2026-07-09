@@ -106,8 +106,8 @@ class AlgiHatti:
             except Exception:
                 H_cmc = None
 
-        # 3) TAKIP (ByteTrack + CMC) -> onayli track
-        hedef = self.takipci.guncelle(tespitler, dt, H_cmc)
+        # 3) TAKIP (HybridSort) -> onayli track. Frame SART (HybridSort kendi ECC-CMC'si icin).
+        hedef = self.takipci.guncelle(tespitler, dt, H_cmc, frame=frame)
 
         # 4) PnP (FAZ 2; hedef keypoints'i varsa) — opsiyonel. t verilir ki
         # oryantasyon low-pass'i algi timestamp'iyle calissin.

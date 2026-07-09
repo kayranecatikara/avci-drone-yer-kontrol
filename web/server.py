@@ -1057,7 +1057,8 @@ def dedektor_dongusu():
                 att = None
             dt_takip = (simdi - onceki_takip_t) if onceki_takip_t is not None else 0.05
             onceki_att, onceki_takip_t = att, simdi
-            det = takipci.guncelle(dets, dt_takip, H_cmc, cmc_cap)
+            # HybridSort kareyi ISTER (frame=bgr); dt/H_cmc/cmc_cap adaptorde yok sayilir.
+            det = takipci.guncelle(dets, dt_takip, H_cmc, cmc_cap, frame=bgr)
             if det is not None:
                 det.setdefault("t", simdi)            # coast ciktisi: tahmin ani = simdi
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,

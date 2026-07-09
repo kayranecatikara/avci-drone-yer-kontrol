@@ -29,3 +29,4 @@ openpyxl
 # (web/server.py: PENCERE_YAKALA_AKTIF bayragi; o durumda oyun ONDE tutulmali).
 windows-capture; platform_system == "Windows"
 psutil; platform_system == "Windows"
+boxmot>=21.0.0   # HybridSort tracker (detection/takip.py)
