@@ -410,8 +410,14 @@ class Cfg:
     # Pose GORSEL veri (kameradan keypoint) -> yarisma kuralina uygun (GPS/J degil).
     IBVS_K_ROLL_LEAD   = 0.0    # roll_img (rad) -> yaw lead kazanci ⚙ (0 = ongoru kapali)
                                 # 8 Tem: kilit-tut fazinda KAPALI (kullanici tercihi) — hedef
-                                # cogunlukla duz kaciyor, oncelu donus geregi az; terminal
-                                # fazda / bankli hedefte tekrar acilir (0.5 iyi baslangic).
+                                # cogunlukla duz kaciyor, oncelu donus geregi az.
+                                # ⚠ 9 Tem canli (ucus 175052): slider'dan 0.6'ya cekilince "yaw
+                                # yanlis tarafa doniyor" hissi -> ANA yaw (ex-tabanli) DOGRU
+                                # (truth bearing %100 uyum, |ex| 0.125->0.072 yakinsiyor); suclu
+                                # LEAD: hedefin gercek donusunu yalniz %38 dogru ongordu (n=8) ve
+                                # 0.373'e sicrayip ex-terimini (~0.08) bastirdi. KAPALI KALSIN.
+                                # Acmadan once araclar/pose_ongoru_analiz.py ile YENI modelde
+                                # isaret+dogruluk dogrulanmali (n buyuk); duz-kacan hedefte fayda az.
     IBVS_SIGN_ROLL     = -1.0   # bank -> yaw isareti. VERI ile belirlendi (7 Tem, ucus_log_220539):
                                 # araclar/pose_ongoru_analiz.py corr=-0.86 @0.2sn, %86 uyum -> SIGN=-1.
                                 # (roll_img>0 iken hedef goruntude SOLA gidiyor; +1 TERS'ti.) Yeni pose
