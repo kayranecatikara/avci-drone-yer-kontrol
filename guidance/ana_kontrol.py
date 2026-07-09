@@ -286,8 +286,10 @@ class Cfg:
     # NOT: bu bant kadraj MERKEZI -> ufuk ALTINDA kalan hedefi de eleyebilir; kamera
     # +25 tilt hedefi ufuk USTUNDE (gokyuzu) tuttugundan pratikte guvenli. FPV kirmizi
     # overlay'e bakip daralt/genislet.
-    PROP_MASKE = [(0.80, 0.55, 1.0, 0.95),   # sag-alt kose (on-sag pervane)
-                  (0.31, 0.49, 0.70, 0.65)]  # merkez HUD metni (ARMED/TRIGGER:NOT READY)
+    PROP_MASKE = []   # KAPALI (2026-07-10 kullanici istegi): sag(pervane)+orta(HUD) eleme
+                      # bolgeleri KALDIRILDI. Bos liste = hic kutu konuma gore elenmez.
+                      # Pervane/HUD yanlis-pozitif riski artik tracker (HybridSort onay) ile emilir.
+                      # Geri istersen: [(0.80,0.55,1.0,0.95),(0.31,0.49,0.70,0.65)] (sag pervane + orta HUD).
     VIS_CONF_MIN     = 0.15     # kilit/komut icin asgari guven. 0.45->0.15 (8 Tem ucus_1
                                 # segment kiyasi: tespit %22-33 -> %50-64; yanlis-poz ana
                                 # kumesi PROP_MASKE ile zaten eleniyor). Cok yanlis tespit
