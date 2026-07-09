@@ -385,6 +385,16 @@ class Cfg:
                                 # 0.1->-0.25 (8 Tem: arac hedefin USTUNE cikip zemin clutter'da
                                 # tespit kaybediyordu; -0.25 -> ey_ref~-0.108 -> hedef cyn~0.45'te,
                                 # AV %10-90 bandinin rahat icinde. Daha da alttan: -0.4.)
+    # --- YUMUSAK GECIS / SOFT-HANDOFF (GPS->gorsel gecis surekliligi, 2026-07-09) ---
+    # GPS ve gorsel yasa farkli mimaride; gecis aninda gorsel yasa (1) uzakta tam ILERI
+    # lunge verip govdeyi yatirinca kamera dusuyor, (2) dikey nisani merkezden alttan-vur'a
+    # ANIDEN kaydirinca ani alcalis veriyor -> hedef kadrajdan cikip gorsel temas kesiliyordu.
+    # Cozum: gorsel faz basindan itibaren bu SURE boyunca ileri-itki ve dikey-nisan 0'dan
+    # rampalanir (ibvs_gorsel.hesapla, s: 0->1). Yaw/dikey-ortalama ilk tikten tam guctedir.
+    # Salt kamera verisi + faz-giris zamanlayicisi -> gorsel-faz GPS yasagina UYGUN.
+    # 0 = KAPALI (eski davranis bit-ayni). Canli tune: cok uzunsa yaklasma gecikir, cok
+    # kisaysa lunge geri gelir (slider; 0.6-1.5 sn dene).
+    IBVS_HANDOFF_S     = 1.0    # gorsel faz basi yumusak-gecis rampasi (s); 0 = kapali ⚙
     # --- ALCALMA FRENI (gorsel anti-lift-carry, 2026-07-08) ---
     # GPS yolundaki alc_oncelik'in gorsel-faz aynasi: hedef nisan noktasinin ALTINDAysa
     # (eyy>0 = arac cok yuksekte) ileri itki carpimsal kisilir ->
@@ -1163,6 +1173,10 @@ class AvciKontrol:
                 if (Cfg.AUTO_VISUAL_HANDOFF
                         and self._vis_pos_count >= Cfg.VIS_N_LOCK and self.handoff):
                     self.durum = "GORSEL_GUDUM"
+                    # YUMUSAK GECIS: gorsel yasayi TAZE basla -> EMA sifirdan + soft-handoff
+                    # rampa penceresi (ibvs._handoff_t) ilk gorsel tikte damgalanir. Gecis
+                    # aninda tam-lunge/dikey-sicrama yerine ileri-itki+nisan 0'dan acilir.
+                    self.ibvs.sifirla()
                     if not self._vis_ilan:
                         print("[GORSEL] Yakinlik + gorsel kilit saglandi -> GPS YAKLASMAYI BIRAKTI, "
                               "yonelim/saldiri yalnizca KAMERA verisiyle.")

@@ -89,6 +89,10 @@ class AvciIBVS:
         self.roll_f = 0.0            # EMA hedef bank (EGO-TELAFILI roll, rad; pose kanat uclarindan)
         self._roll_had = False       # ilk gecerli roll EMA'siz alinir
         self._roll_raw_deg = 0.0     # ANLIK ham goruntu-roll (ego-telafisiz, EMA'siz; teshis/A-B)
+        self._handoff_t = None       # GORSEL faza GIRIS ani (perf_counter); yumusak-gecis rampasi
+                                     # ilk hesapla tikinde damgalanir. sifirla her gorsel-baslangicta
+                                     # cagrildigindan (OTO handoff + manuel switch + GPS revert) her
+                                     # yeni gorsel faz taze bir rampa penceresi alir.
         self._tlm = {}               # son telemetri (server build_telemetry okur)
 
     # ------------------------------------------------------------------
@@ -153,6 +157,25 @@ class AvciIBVS:
             self.ex_f, self.ey_f, self.boyut_f = ex, ey, boyut
             self._had = True
 
+        # YUMUSAK GECIS (soft-handoff) RAMPASI — GPS->gorsel gecis surekliligi.
+        # GPS ve gorsel yasa TAMAMEN farkli mimaride; gecis tikinde iki sey hedefi
+        # kadrajdan atiyor: (1) uzakta ileri itki tavana doyup tam LUNGE veriyor ->
+        # govde one yatiyor, kamera dusuyor, hedef ustten kaciyor; (2) dikey nisan
+        # merkezden "alttan vur"a ANIDEN kayip ani alcalis veriyor. Cozum: gorsel
+        # faz basindan itibaren s: 0->1 rampasi (IBVS_HANDOFF_S sn). YALNIZ bu iki
+        # kanali (ileri itki + dikey nisan) yumusatir; yaw/dikey-ORTALAMA ilk tikten
+        # tam guctedir (hedefi kadrajda tutan kanallar). Zamanlayici = gorsel faza
+        # giris ani (faz durumu; GPS verisi DEGIL -> kural uygun). IBVS_HANDOFF_S=0
+        # -> s=1 hep -> KAPALI (eski davranis bit-ayni; A/B + geri-uyum).
+        t_now = det.get("t")
+        if self._handoff_t is None and t_now is not None:
+            self._handoff_t = float(t_now)             # ilk gorsel tik: pencereyi baslat
+        hs = float(getattr(p, "IBVS_HANDOFF_S", 0.0))
+        if hs <= 1e-6 or t_now is None or self._handoff_t is None:
+            s = 1.0                                    # rampa kapali / zaman yok -> tam guc
+        else:
+            s = clamp((float(t_now) - self._handoff_t) / hs, 0.0, 1.0)
+
         # DIKEY NISAN (tilt-farkinda): kamera +TILT derece YUKARI baktigindan, hedefi kadraj
         # MERKEZINDE tutmak = hiz vektorunu hedefin ~TILT altina nisanlamak. Hedefi hiz
         # vektorunun goruntudeki yerine (FOE) tutmak icin dikey setpoint:
@@ -183,7 +206,11 @@ class AvciIBVS:
                 ey_kul = self.ey_f - g * math.tan(float(own_pitch_rad)) / tan_v
 
         # NISAN NOKTASINDAN -> bbox cizgisi: yatay ex, dikey (ey_kul - ey_ref) = nisandan sapma.
-        eyy = ey_kul - ey_ref                         # dikey sapma (ego-telafili, nisana gore)
+        # RAMPA (B): gecis basinda ey_ref_eff=0 (merkez, GPS'in biraktigi konumla ayni) ->
+        # dikey sapma yalnizca hedefi merkeze cekmeye calisir (ani alcalis YOK); pencere
+        # boyunca ey_ref_eff kademeli olarak tam "alttan vur" degerine kayar.
+        ey_ref_eff = s * ey_ref
+        eyy = ey_kul - ey_ref_eff                     # dikey sapma (ego-telafili, nisana gore)
         r = math.hypot(self.ex_f, eyy)
         aci = math.degrees(math.atan2(-eyy, self.ex_f)) if r > 1e-9 else 0.0
 
@@ -229,14 +256,20 @@ class AvciIBVS:
         yak = clamp(ileri_istek / ileri_cap, 0.0, 1.0) if ileri_cap > 1e-6 else 0.0
         kisma_eff = yak + (1.0 - yak) * kisma
         alcal_eff = yak + (1.0 - yak) * alcal
-        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma_eff * alcal_eff
+        # RAMPA (A): YALNIZ ILERI (pozitif) itki s ile olceklenir -> gecer gecmez tam
+        # lunge YOK; drone once ortalar (yaw/thr tam guc), sonra ileri 0'dan acilir.
+        # Geri-kacis (negatif terim) DOKUNULMAZ (yalniz hedefe cok yakinken olur, gecis
+        # aninda degil). yak/fren baypasi tam ileri_istek'ten hesaplanir (degismez).
+        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma_eff * alcal_eff * s
                                        + min(ileri_istek, 0.0))
         roll = 0.0
 
         self._tlm = {
             "law": "IBVS",
             "ex": round(self.ex_f, 3), "ey": round(self.ey_f, 3),
-            "ey_ref": round(ey_ref, 3),       # dikey nisan (hiz-vektoru FOE; tilt'ten)
+            "ey_ref": round(ey_ref_eff, 3),   # dikey nisan (rampa sonrasi EFEKTIF; FPV cizgisi buna uysun)
+            "ey_ref_hedef": round(ey_ref, 3), # tam nisan hedefi (rampa dolunca ulasilacak)
+            "handoff_s": round(s, 3),         # yumusak-gecis rampa faktoru (0=giris, 1=tamam/kapali)
             "ey_ego": round(ey_kul, 3),       # ego-pitch TELAFILI dikey hata (yasa bunu kullanir)
             "buyukluk": round(r, 3),          # nisandan sapma (0=hedef nisan noktasinda)
             "aci_deg": round(aci, 1),         # cizgi acisi (0=sag, +90=yukari)

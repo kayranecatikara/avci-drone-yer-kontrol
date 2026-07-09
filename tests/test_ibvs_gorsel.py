@@ -24,6 +24,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from guidance.ibvs_gorsel import AvciIBVS
 from guidance.ana_kontrol import Cfg
 
+# CEKIRDEK YASA testleri yumusak-gecis rampasini KAPALI test eder (ilk tik = tam yasa
+# ciktisi; rampa yoksa s=1). Rampa davranisi AYRI olarak test_handoff_* ile dogrulanir.
+# (Rampa acikken ilk tik s=0 -> ileri=0/nisan=merkez oldugundan cekirdek geometri testleri
+# rampayi izole etmek icin kapatir; bu modul-duzeyi ayar tum test surecini etkiler.)
+Cfg.IBVS_HANDOFF_S = 0.0
+
 W, H = 1920.0, 1080.0
 
 
@@ -412,6 +418,55 @@ def test_roll_lead_poz_yok_eski_komut():
     a = AvciIBVS().hesapla(dict(det), Cfg)
     b = AvciIBVS().hesapla(dict(det), Cfg, poz=None)
     assert a == b, "poz=None eski davranisi bit-bit korumali: %s vs %s" % (a, b)
+
+
+# ============================================================
+#  YUMUSAK GECIS (soft-handoff) RAMPASI — GPS->gorsel surekliligi
+# ============================================================
+def test_handoff_ileri_rampalanir():
+    # Uzak/kucuk bbox (istek tavanda). Rampa ACIK: ilk tik (t=handoff) ileri~0;
+    # pencere sonrasi (t=HANDOFF_S) ileri TAVANA ulasir. Merkezdeki hedef -> saf ileri.
+    p = _CfgVar(IBVS_HANDOFF_S=1.0, IBVS_DIKEY_NISAN=0.0)
+    ibvs = AvciIBVS()
+    # ilk gorsel tik: pencere baslar (t=100.0). Kucuk bbox -> istek doygun.
+    _, pitch0, _, _ = ibvs.hesapla(_det(0.5, 0.5, wp=0.02, hp=0.01, t=100.0), p)
+    assert abs(pitch0) < 1e-6, "ilk tik (s=0) ileri itki ~0 olmali (lunge yok): %.3f" % pitch0
+    # pencere ortasi (t=100.5, s=0.5): ileri kismi acilmis olmali
+    _, pitch_mid, _, _ = ibvs.hesapla(_det(0.5, 0.5, wp=0.02, hp=0.01, t=100.5), p)
+    # pencere sonu (t=101.0, s=1.0): tavana ulasmali
+    _, pitch_full, _, _ = ibvs.hesapla(_det(0.5, 0.5, wp=0.02, hp=0.01, t=101.0), p)
+    assert pitch_full > pitch_mid > pitch0, ("ileri itki rampa boyunca ARTMALI: %.3f<%.3f<%.3f"
+                                             % (pitch0, pitch_mid, pitch_full))
+    assert abs(pitch_full - float(Cfg.IBVS_ILERI)) < 1e-6, \
+        "pencere sonunda ileri TAVANA ulasmali: %.3f vs %.3f" % (pitch_full, Cfg.IBVS_ILERI)
+
+
+def test_handoff_nisan_merkezden_baslar():
+    # Merkezdeki hedef + negatif nisan. Rampa ACIK: ilk tik ey_ref_eff=0 -> eyy=0 -> thr~0
+    # (ani alcalis YOK); pencere sonrasi ey_ref tam alttan-vur -> merkezdeki hedef icin thr<0.
+    p = _CfgVar(IBVS_HANDOFF_S=1.0, IBVS_DIKEY_NISAN=-0.25)
+    ibvs = AvciIBVS()
+    thr0, _, _, _ = ibvs.hesapla(_det(0.5, 0.5, t=200.0), p)       # ilk tik: nisan=merkez
+    assert abs(thr0) < 1e-6, "ilk tik merkezdeki hedef -> thr~0 (ani alcalis yok): %.3f" % thr0
+    tlm0 = ibvs.durum()
+    assert abs(tlm0["ey_ref"]) < 1e-6, "ilk tik ey_ref_eff~0 (merkez): %.3f" % tlm0["ey_ref"]
+    # pencere sonu: tam nisan -> merkezdeki hedef icin thr negatif (alttan-vur alcaltir)
+    thr_full, _, _, _ = ibvs.hesapla(_det(0.5, 0.5, t=201.0), p)
+    assert thr_full < -1e-3, "pencere sonu merkezdeki hedef -> thr<0 (alttan-vur): %.3f" % thr_full
+
+
+def test_handoff_kapali_eski_davranis():
+    # IBVS_HANDOFF_S=0 -> s=1 hep -> rampa YOK -> cikti eski yasayla bit-ayni.
+    p_off = _CfgVar(IBVS_HANDOFF_S=0.0, IBVS_DIKEY_NISAN=-0.25)
+    p_yok = _CfgVar(IBVS_DIKEY_NISAN=-0.25)   # HANDOFF_S alani yok -> getattr default 0.0
+    d = _det(0.6, 0.4, wp=0.03, hp=0.02, t=5.0)
+    a = AvciIBVS().hesapla(dict(d), p_off)
+    b = AvciIBVS().hesapla(dict(d), p_yok)
+    assert a == b, "HANDOFF_S=0 ile yok ayni olmali: %s vs %s" % (a, b)
+    # ve ilk tik zaten TAM ileri (rampa yok) — kucuk bbox istek doygun
+    _, pitch, _, _ = AvciIBVS().hesapla(_det(0.5, 0.5, wp=0.02, hp=0.01, t=5.0), p_off)
+    assert abs(pitch - float(Cfg.IBVS_ILERI)) < 1e-6, \
+        "rampa kapali -> ilk tik TAM ileri: %.3f vs %.3f" % (pitch, Cfg.IBVS_ILERI)
 
 
 if __name__ == "__main__":
