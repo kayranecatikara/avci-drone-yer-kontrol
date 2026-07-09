@@ -293,6 +293,33 @@ class Cfg:
                                # son gorusten itibaren toplam ~(VIS_STALE_S + bu) sn'de doner.
                                # Manuel GORSEL switch'te donus YOK (revert_izin=False), hep hover.
     VIS_EMA          = 0.4      # ex/ey EMA yumusatma (tek-kare yanlis tespiti bastir)
+    # --- TAKIP (ByteTrack) ANAHTARLARI (2026-07-09, canli regresyon sonrasi) ---
+    # TAKIP_AKTIF=False -> tracker DEVRE DISI: ham argmax tespit dogrudan beyne
+    # (ByteTrack oncesi davranisla bire bir) -> canli sorun cikarsa hizli geri-donus.
+    TAKIP_AKTIF      = True
+    # --- gyro-CMC (jiroskop hareket telafisi) ---
+    # Avcinin donusu (yaw/pitch/roll) uzak hedefin goruntudeki kutusunu kaydirir;
+    # CMC bu kaymayi IMU attitude'undan turetilen homografiyle ONCEDEN telafi eder
+    # (eslestirme oncesi Kalman merkezini warp'lar) -> hizli donuste iz kopmaz.
+    # Girdi = KENDI attitude'umuz (ego-motion), HEDEF konumu DEGIL -> gorsel-faz
+    # GPS yasagina UYGUN (ego-roll/pitch telafisinin emsali).
+    # 2026-07-09: acildi -> CANLI KOTULESTIRDI (kullanici gozlemi + veri: CMC-acik ucus
+    # 258 sn'de GORSEL_GUDUM'a HIC giremedi; CMC-kapali ucus girmisti). Muhtemelen
+    # sim attitude isareti ters (Blokor B) -> ters CMC kaymayi 2x yapip donuste izi
+    # kiriyor. KAPATILDI. Kod + emniyet knob'lari duruyor; DOGRU acmak icin once
+    # arac/attitude_dogrula.py ile isaret dogrulanmali (gerekirse TAKIP_CMC_SIGN=-1).
+    TAKIP_CMC_AKTIF  = False
+    # ISARET ANAHTARI: sim attitude konvansiyonu (R_govde_to_dunya pitch/roll isareti
+    # + Euler sirasi) bu simde truth ile HENUZ dogrulanmadi ("Blokor B", MEVCUT_DURUM).
+    # Warp TERS yonde kaydiriyorsa (FPV'de donuste kutu hedeften UZAKLASIYOR) bunu
+    # -1 yap -> att sirasi takas edilir, warp yonu tersine doner (kodu degistirmeden
+    # canli duzeltme). Kesin dogrulama: arac/cmc_isaret_testi.py / attitude_dogrula.py.
+    TAKIP_CMC_SIGN   = +1.0
+    # EMNIYET: tek tikte CMC kutuyu en fazla bu kadar (kare genisligi orani) kaydirir.
+    # Yanlis-isaret + buyuk yaw kutuyu ekrandan firlatip esleşmeyi aninda kirmasin;
+    # asilirsa o tik warp ATLANIR (CMC'siz predict). Mesru hizli yaw ~%6·W/tik (8 FPS,
+    # 60°/s) -> %25 tavani 4x marj birakir. 0 = clamp kapali.
+    TAKIP_CMC_MAX_KAYDIRMA = 0.25
     # --- GORUNTU-DUZLEMI KOPRU / OLU-HESAP (2026-07-08, kullanici onayi) ---
     # Sorun: dedektor 15-40 m'de duzenli 0.5+ sn delik aciyor -> VIS_STALE_S dolunca
     # gorsel faz dusuyordu (8 Tem ucus_2: 22 episodun hepsi 1-2.4 sn; kilit isteri

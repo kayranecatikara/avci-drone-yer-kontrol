@@ -206,16 +206,22 @@ class PencereYakala:
             return False
 
         # Hedef (hwnd en saglam, sonra pencere adi) x yakalama ayarlari kombinasyonlari.
-        # Bazi Windows surumlerinde (orn. Win10 LTSC 19044) 'capture border' / 'cursor'
-        # API'leri YOK -> bunlara False gecirmek OTURUMU patlatir. Once istedigimiz
-        # ayarlar, olmazsa ayarlara HIC dokunmayan (None=varsayilan) kombinasyon.
+        # DIKKAT (imlec-talon FP kok nedeni): iki WGC ayarinin build gereksinimi FARKLI:
+        #   - cursor_capture (IsCursorCaptureEnabled) -> build 19041+ (Win10 2004+); LTSC 19044 DESTEKLER.
+        #   - draw_border    (IsBorderRequired)       -> build 22000+ (Win11/Server2022); LTSC 19044 YOK.
+        # Ikisini TEK sette paketlersek (cursor_capture=False, draw_border=False), LTSC 19044'te
+        # draw_border satiri OTURUMU patlatir -> tum set duser -> varsayilana (imlec ACIK) inilir ->
+        # mouse imleci karelere girer, YOLO 'talon' saniyordu. Cozum: cursor-only ara set. Once
+        # ideal (yeni Windows), olmazsa YALNIZ cursor_capture=False (LTSC: imleci yine de kapatir),
+        # en son ayarlara HIC dokunmayan (None=varsayilan) son care.
         hedefler = []
         if hwnd:
             hedefler.append(("hwnd", dict(window_hwnd=int(hwnd))))
         if ad:
             hedefler.append(("ad", dict(window_name=ad)))
-        ayar_setleri = [dict(cursor_capture=False, draw_border=False),
-                        dict(cursor_capture=None, draw_border=None)]
+        ayar_setleri = [dict(cursor_capture=False, draw_border=False),  # Win11/Server2022+: imlec+kenar kapali
+                        dict(cursor_capture=False),                     # LTSC 19044: yalniz imlec kapali (draw_border'a dokunma)
+                        dict(cursor_capture=None, draw_border=None)]     # son care: varsayilan (imlec ACIK)
         son_hata = None
         for yontem, hkw in hedefler:
             for akw in ayar_setleri:

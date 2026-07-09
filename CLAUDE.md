@@ -367,6 +367,82 @@ KOŞULSUZ çağrılır (`ana_kontrol.py`'de güdüm-dışı küçük metod; ayn�
 üste seçilse bile log dosyası döner → her görev ayrı ucus_N klasörü alır).
 Test: `tests/test_tune_rapor.py` (20/20, sentetik uçuş+tune logu).
 
+## ⭐ BYTETRACK + GYRO-CMC CANLI HATTA BAĞLANDI (2026-07-09)
+`yarisma-pipeline` branch'inin tracking bağlaması main'e taşındı. Kütüphane katmanı
+(`detection/takip.py` ByteTrack, `detection/kamera_model.py` cmc_homografi,
+`detection/algi_hatti.py`) zaten PR#2 merge'üyle main'deydi ama **server'a bağlı değildi**
+(dedektör argmax tek kutu kullanıyordu → A/B kıyasında 120 sn'de 72 tespit-kaybı kenarı /
+30 farklı ID; `docs/BYTETRACK_ENTEGRASYON_NOTU.md` + `docs/AB_KIYAS_KARAR_20260707.md`).
+Yapılan (branch'teki kanıtlanmış bağlama, main'in FP16/perf ölçümü korunarak):
+- `dedektor_dongusu`: `tespit_hepsi` (TÜM kutular, maske sonrası) → `Takipci.guncelle
+  (dets, dt, H_cmc)`; H_cmc her turda `drone.get_drone_rotation()` çiftinden
+  (`kamera_model.cmc_homografi`) — kendi dönüşümüz kutu kaydırmasını telafi eder.
+  Predict eşiği `min(UI_CONF_MIN, VIS_CONF_MIN, takipci.cfg.CONF_DUSUK)` — BYTE'ın
+  düşük-conf ikinci turu izi yaşatır (yeni track açamaz). Görev pasifken `takipci.sifirla()`.
+- **GÜDÜM KAPISI DEĞİŞMEDİ:** `det_beyin` = yalnız `tespit_mi=True` (coast beyne gitmez;
+  görüntü-düzlemi KÖPRÜ ile çift ölü-hesap olmasın) + `conf>=VIS_CONF_MIN`. Coast karesinde
+  poz inference de koşmaz.
+- `takip.py cikti()`: son ölçümün `cls` + `t`'sini taşır (UI sınıf etiketi + yaş telafisi;
+  coast'ta `t` taşınmaz, server `simdi` atar). Test: `test_cikti_t_ve_cls_tasima` (14/14).
+- UI: `_normalize_tespit` → `track_id/track_durumu/tespit_mi`; `_takip` makinesi GERÇEK
+  ByteTrack ID kullanır (ID değişimi = YENİDEN TESPİT olayı; `ilk` bayrağı); `/api/gorsel`
+  `id`=track_id; index.html coast kutusunu KESİKLİ + "(tahmin)" çizer. UI hız kestirimi
+  aynı-track_id şartına bağlandı (ID değişiminde sahte hız yok).
+- `pencere_yakala.py`: WGC ayar setine cursor-only ara kademe (LTSC 19044'te draw_border
+  yok → set komple düşüp imleç AÇIK kalıyordu → imleç 'talon' FP'si; branch'ten alındı).
+- **⛔ CANLI REGRESYON + DÜZELTME (aynı gün, 2. iterasyon):** İlk bağlama canlıda sistemi
+  ÇÖKERTTİ (kullanıcı testi: kutu hedefe bir kez çizilip rastgele yöne yürüyor, tespit
+  kesiliyor). VERİ: <25 m tespit oranı önce %14-30 → sonra %0-1.2; en uzun kesintisiz takip
+  2.2 s → 0.4 s (9 Tem 15:xx uçuşları). KÖK NEDEN: tracker eşikleri 50 Hz varsayımıyla tik
+  cinsindendi, canlı döngü GPU paylaşımından ~8 FPS: (1) `MIN_HITS=5 ARDIŞIK` + tek kaçırmada
+  TENTATIVE ölümü → dedektörün bilinen delikleriyle iz ONAYLANAMIYOR → beyne hiçbir şey
+  gitmiyor (%0 uçuşlar); (2) `MAX_COAST=25 tik` = 8 FPS'te ~3 sn hayalet kutu (gürültülü
+  Kalman hızıyla "rastgele yürüyen bbox"); (3) `en_iyi_track=max(hits)` coast'taki eski izi
+  taze ölçülen izin önüne koyuyordu. Branch'in kendi uçuşları görsel faza HİÇ girmediğinden
+  (A/B dok.) bu bağlama gerçek tespitle hiç test edilmemişti. DÜZELTMELER (`takip.py`):
+  yaşam döngüsü SÜRE-tabanlı (`ONAY_MIN_HIT=3` toplam ölçüm — ardışık ŞART DEĞİL;
+  `TENT_COAST_S=0.30` aday izin kaçırma affı; `COAST_S=0.60` hayalet tavanı, VIS_STALE_S
+  ile uyumlu); `en_iyi_track` önce `tespit_mi=True` (ölçülen iz hayaleti bastırır).
+  Simülasyon (8 FPS delikli desen): eski cfg ham tespitlerin %0'ını, yeni %99'unu beyne
+  ulaştırıyor. Testler yeni semantiğe uyarlandı (test_takip 16/16).
+- **ANAHTARLAR (Cfg, ana_kontrol.py):** `TAKIP_AKTIF=True` — False = tracker devre dışı,
+  ham argmax tespit doğrudan beyne (ByteTrack öncesi davranışla bire bir; hızlı geri-dönüş).
+- CANLI DOĞRULAMA BEKLİYOR: bir uçuş + tune raporu "kayıp sayısı / en uzun kesintisiz
+  takip" kıyası (baz: 8-9 Tem gece uçuşları %14-30). NOT (9 Tem): kullanıcı canlı gözlemle
+  "tracking düzeldi" dedi; DETECTION log kolonlarında hata var (loga güvenme, FPV/gözlem esas).
+
+## ⭐ GYRO-CMC DENENDİ → KAPATILDI (2026-07-09, canlı kötüleştirdi)
+**DURUM: `TAKIP_CMC_AKTIF=False` (KAPALI).** Kullanıcı isteğiyle açıldı, canlıda KÖTÜLEŞTİRDİ,
+geri kapatıldı. KANIT (durum-geçişi kıyası, bozuk tespit kolonundan BAĞIMSIZ): CMC-açık uçuş
+(165030) 258 sn'de GORSEL_GUDUM'a HİÇ giremedi; CMC-kapalı uçuş (163042) girmişti. Muhtemel
+kök neden: sim attitude işareti ters (Blokör B açık) → ters CMC kaymayı 2x yapıp her dönüşte
+izi kırıyor → görsel faza geçilemiyor. Kod + emniyet knob'ları DURUYOR (silinmedi); DOĞRU
+açmak için önce `arac/attitude_dogrula.py` (uçuşlu truth sweep) ile işaret doğrulanmalı,
+ters çıkarsa `TAKIP_CMC_SIGN=-1`, sonra `TAKIP_CMC_AKTIF=True`. **ByteTrack (TAKIP_AKTIF=True)
+korunuyor — kullanıcı onu canlı gözlemle beğendi; sadece gyro-CMC katmanı kapalı.**
+
+Aşağıdaki teknik detay açılırsa geçerli (şimdilik referans):
+gyro-CMC (jiroskop hareket telafisi) `dedektor_dongusu`'nda `TAKIP_CMC_AKTIF` ile devreye girer.
+- **NE YAPAR:** avcının kendi dönüşü (yaw/pitch/roll) uzak hedefin bbox'unu görüntüde kaydırır;
+  CMC bu kaymayı IMU attitude'undan türetilen homografiyle (`kamera_model.cmc_homografi`)
+  ÖNCEDEN telafi eder (eşleştirme öncesi Kalman merkezini warp'lar) → hızlı yaw'da iz kopmaz.
+  Girdi = KENDİ attitude (ego-motion), HEDEF konumu DEĞİL → görsel-faz GPS yasağına UYGUN
+  (ego-roll/pitch telafisinin emsali). Uçtan uca sim: doğru işaretle hızlı yaw'da iz kayması
+  **136 px → 0 px**.
+- **⛔ İŞARET RİSKİ (Blokör B, hâlâ açık):** sim attitude konvansiyonu (`R_govde_to_dunya`
+  pitch/roll işareti + Euler sırası) bu simde truth ile HENÜZ doğrulanmadı (`MEVCUT_DURUM.md`).
+  TERS işaretli CMC kaymayı DÜZELTMEK yerine İKİYE KATLAR (sim doğrulama: sign=-1 → 136→248 px).
+  Güvenlik katmanları: (1) **`TAKIP_CMC_SIGN=+1`** — FPV'de dönüşte kutu hedeften UZAKLAŞIYORSA
+  `-1` yap (att sırası takas → warp yönü ters; kodu değiştirmeden canlı düzeltme, server restart);
+  (2) **`TAKIP_CMC_MAX_KAYDIRMA=0.25`** — tek tikte CMC kutuyu en fazla %25·W kaydırır, aşılırsa
+  o track o tik CMC'siz predict eder (yanlış-işaret + büyük yaw kutuyu ekrandan fırlatmasın;
+  meşru hızlı yaw ~%6·W/tik → 4x marj); `takip.py:_KalmanKutu.warp_merkez(H, max_kaydirma)`.
+- **CANLI DOĞRULAMA PROSEDÜRÜ:** `set AVCI_DEBUG_PENCERE=1` ile dedektör penceresini aç, görev
+  sırasında bir YAW manevrası yap: CMC doğru işaretteyse coast (kesikli) kutu dönüşte hedefin
+  ÜSTÜNDE kalır; hedeften ters yöne kayıyorsa `TAKIP_CMC_SIGN=-1`. Kesin: `arac/cmc_isaret_testi.py`
+  veya `arac/attitude_dogrula.py` (uçuşlu, truth-tabanlı sweep — Blokör B'yi kapatır).
+- Test: `test_takip.py` `test_cmc_clamp_asiri_warp_atlar` + mevcut CMC testleri (17/17).
+
 ## PERVANE YANLIŞ-POZİTİF MASKESİ (2026-07-07 — clutter değil, kendi aracımız)
 Avcının KENDİ pervanesi arada bir "uçak" olarak algılanıyor (dedektör sınıf-agnostik
 en-yüksek-conf seçer → bir karede pervane hedefi bastırabilir). Pervane kadrajda SABIT
