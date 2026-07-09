@@ -326,7 +326,7 @@
     <section class="col">
       <h2>Görev Kontrol</h2>
       <div class="body">
-        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (İnovasyonlu J)</button>
+        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (GNSS Filtresi)</button>
         <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
@@ -369,7 +369,7 @@
           </div>
         </div>
 
-        <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>İnovasyonlu J</b> filtresiyle hedefe gider.
+        <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>GNSS Filtresi</b> ile hedefe gider.
         İstediğin an <b>Gerçek GPS</b>'e basıp <b>canlı geçiş</b> yapabilirsin.<br>
         🎯 <b>Gerçek GPS</b>: filtreyi atlar, doğrudan gerçek konuma gidip vurur (yalnızca sim/debug).<br>
         Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).<br>
@@ -1387,7 +1387,7 @@
       // Bağlantı bir an aksasa bile son bilinen değerleri göstermeye devam et.
       // (SDK son değeri tutar; 2.5 sn içinde bağlıysak "bağlı" kabul ederiz.)
       setConn((Date.now()-lastOk) < 2500 ? "ok" : "wait");
-      const KAD = {v2:"İnovasyonlu J", gercek:"Gerçek GPS"};
+      const KAD = {v2:"GNSS Filtresi", gercek:"Gerçek GPS"};
       const kad = KAD[t.kaynak] || "";
       $("gorevDurum").innerHTML = t.manuel_aktif
         ? '🎮 MANUEL MOD — klavye kontrol'

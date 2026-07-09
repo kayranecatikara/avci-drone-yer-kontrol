@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sdk import drone_sdk as drone
 from guidance.ana_kontrol import AvciKontrol, Cfg
-from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
+from fusion.gnss_filtre import GNSSFiltre as JFiltre  # 2026-07-09: YENI GNSS filtresi (sapma olcumu de bununla)
 import numpy as np
 
 # Ekran yakalama icin
@@ -61,7 +61,10 @@ CAM_MAX_WIDTH = 960   # FPV JPEG akisini bu genislige olcekle (bant genisligi; d
 CAM_JPEG_QUALITY = 60
 UI_CONF_MIN = 0.25    # dedektor predict esigi: zayif tespit arayuzde TURUNCU gorunur;
                       # gudum/kilit yalnizca conf>=Cfg.VIS_CONF_MIN gorur (dedektor_dongusu kapisi)
-POZ_HER_N = 5         # poz inference'i her N dedektor turunda bir (gozlemci; GPU dedektore kalsin)
+POZ_HER_N = 12        # poz inference'i her N dedektor turunda bir (gozlemci; GPU dedektore kalsin).
+                      # 2026-07-09: 5->12. Pose ~200ms/tik GPU'yu bbox'tan caliyordu (canli DET
+                      # 176ms, FPS ~6). Pose SADECE gozlemci/lead (vurusu surmuyor) -> seyreklestir
+                      # -> bbox'a daha cok GPU/kare kalir -> tespit FPS artar. Poz telemetrisi hala akar.
                       # 3->5 (8 Tem perf: pose ~180ms FP32, gudumde kullanilmiyor -> seyreltip
                       # best.pt'ye GPU birak; ongoru acilirsa geri dusurulur)
 # FP16 (half) inference: RTX 4060 (Ada) ~2x hizlanma, dogruluk kaybi ihmal edilebilir.
@@ -748,6 +751,11 @@ _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock 
 # mesafe medyan ~%8, yaw medyan ~6 der; 15 m+ guvenilmez -> terminal faz araci.
 POSE_MODEL_PATH = getattr(Cfg, "VIS_POSE_MODEL_PATH",
                           os.path.join(PROJ_ROOT, "models", "talon_pose.pt"))
+# POSE TAMAMEN KAPALI (2026-07-09 kullanici istegi): sadece detection (bbox) kalsin.
+# Pose gozlemci/lead idi (vurusu surmuyordu) ve ~200ms/tik GPU'yu bbox'tan caliyordu.
+# False -> pose modeli HIC yuklenmez, hic kosmaz; roll-lead/poz telemetrisi zarif kapali
+# (poz_dedektor=None kalir, tum tuketiciler None'i zaten yonetir). True + dosya varsa geri acar.
+POSE_AKTIF = False
 poz_dedektor = None        # PozDedektor | None (lazy; ilk gorev tikinde denenir)
 poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
 _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
@@ -918,6 +926,52 @@ def _perf_ozet(p95_kaynak):
     return round(ort, 1), round(p95, 1)
 
 
+# ----------------------------------------------------------
+#  TESHIS: CANLI KARE KAYIT (AVCI_KARE_KAYIT=1) — "yakin ama algilamiyor" kok neden
+#  Hedef truth'a gore YAKINken (< KARE_KAYIT_MESAFE_M) dedektorun ISLEDIGI TAM kareyi
+#  + tespit sonucunu veri/kacan_kareler/ altina yazar. Dosya adi: kategori (KACAN/TESPIT)
+#  + gercek mesafe + max conf + CANLI COZUNURLUK (WxH). Offline'da o kareler modele
+#  verilip "model mi kor (kare net ama kutu yok) yoksa canli-kare mi bozuk (dusuk coz/
+#  yanlis pencere/HUD)" KESIN ayrilir. Gudume ETKISIZ (salt gozlem; kapaliyken sifir maliyet).
+# ----------------------------------------------------------
+KARE_KAYIT = os.environ.get("AVCI_KARE_KAYIT", "0").strip() == "1"
+KARE_KAYIT_MESAFE_M = 25.0
+_kare_kayit = {"kacan_t": 0.0, "tespit_t": 0.0, "sayac": 0}
+
+
+def _kare_kayit_dene(bgr, dets):
+    """Yakin hedefte dedektorun gordugu kareyi kaydet (KACAN + karsilastirma TESPIT).
+    Kategori basi ~2.5/sn throttle, toplam 400 kare tavani. Truth yoksa sessizce atlar."""
+    if cv2 is None or _kare_kayit["sayac"] >= 400:
+        return
+    try:
+        truth = drone.get_debug_truth()
+        if not truth.get("available"):
+            return
+        ad = truth["drone"]["position"]; tg = truth["target"]["position"]
+        d_m = (((ad[0]-tg[0])**2 + (ad[1]-tg[1])**2 + (ad[2]-tg[2])**2) ** 0.5) * CM_TO_M
+    except Exception:
+        return
+    if d_m > KARE_KAYIT_MESAFE_M:
+        return
+    kategori = "TESPIT" if dets else "KACAN"
+    anahtar = "tespit_t" if dets else "kacan_t"
+    now = time.perf_counter()
+    if now - _kare_kayit[anahtar] < 0.4:
+        return
+    _kare_kayit[anahtar] = now
+    max_conf = float(dets[0]["conf"]) if dets else 0.0
+    try:
+        klas = os.path.join(VERI_DIR, "kacan_kareler")
+        os.makedirs(klas, exist_ok=True)
+        fn = "%s_%04.1fm_conf%.2f_%dx%d_%s.jpg" % (
+            kategori, d_m, max_conf, bgr.shape[1], bgr.shape[0], time.strftime("%H%M%S"))
+        cv2.imwrite(os.path.join(klas, fn), bgr)
+        _kare_kayit["sayac"] += 1
+    except Exception:
+        pass
+
+
 def dedektor_dongusu():
     global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
@@ -940,10 +994,12 @@ def dedektor_dongusu():
             time.sleep(0.05)
             continue
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
-            # imgsz=1280: yeni model (v3 pose, 5 Tem) 1280'de egitildi — 640'ta uzak/kucuk
-            # hedef kacar. Sadece BBOX ciktisi kullaniliyor (pose keypoint'leri simdilik yok).
+            # imgsz=640 (2026-07-09): aktif model best(3) yolo11s 640'ta EGITILDI -> native 640
+            # EN HIZLI (960/1280'e gore ~2x hizli) -> canli FPS artar -> GPU paylasiminda daha cok
+            # kare islenir (asil darbogaz FPS). Canli test: 640'ta zor karelerde 4/9 (960 modeli 3/9),
+            # kolay 60/60. Model 1280/960 egitimliyse geri o degeri yap (uzak hedef recall'i icin).
             dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
-                                     imgsz=1280, half=FP16_AKTIF)
+                                     imgsz=640, half=FP16_AKTIF)
             if dedektor.hazir:
                 print("[GORSEL] best.pt yuklendi (device=%s, half=%s). Siniflar: %s"
                       % (dedektor.device, dedektor.half, dedektor.names))
@@ -951,7 +1007,10 @@ def dedektor_dongusu():
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
             # POZ modeli (ILAVE gozlemci) — best.pt ile AYNI anda, bir kez denenir.
-            if os.path.exists(POSE_MODEL_PATH):
+            # POSE_AKTIF=False -> pose sistemden TAMAMEN cikarildi (sadece detection).
+            if not POSE_AKTIF:
+                print("[POZ] KAPALI (POSE_AKTIF=False) -> yalnizca detection (bbox). GPU bbox'a kalir.")
+            elif os.path.exists(POSE_MODEL_PATH):
                 # conf=0.35: 0.20'de eski model bos gokyuzune "talon" diyordu (canli
                 # test, 4 Tem) -> overlay'e cop iskelet ciziliyordu; canlida yanlis-alarm
                 # maliyeti yuksek. imgsz=960: pose modeli 960'ta EGITILDI (POSE_REHBERI);
@@ -1004,6 +1063,9 @@ def dedektor_dongusu():
                 _perf_det.append((time.perf_counter() - _t_inf) * 1000.0)
         except Exception:
             bgr, dets = None, []
+        # TESHIS: yakin hedefte dedektorun gordugu kareyi kaydet (AVCI_KARE_KAYIT=1).
+        if KARE_KAYIT and bgr is not None:
+            _kare_kayit_dene(bgr, dets)
         # BYTETRACK + GYRO-CMC: kutulari ZAMANSAL bagla — tek-kare parazit CONFIRMED
         # olamadan olur, kisa tespit deliginde iz coast'la surer (tespit_mi=False),
         # kendi donusumuzun kutu kaydirmasi homografiyle telafi edilir (hizli yaw'da
@@ -1038,7 +1100,8 @@ def dedektor_dongusu():
                 att = None
             dt_takip = (simdi - onceki_takip_t) if onceki_takip_t is not None else 0.05
             onceki_att, onceki_takip_t = att, simdi
-            det = takipci.guncelle(dets, dt_takip, H_cmc, cmc_cap)
+            # HybridSort kareyi ISTER (frame=bgr); dt/H_cmc/cmc_cap adaptorde yok sayilir.
+            det = takipci.guncelle(dets, dt_takip, H_cmc, cmc_cap, frame=bgr)
             if det is not None:
                 det.setdefault("t", simdi)            # coast ciktisi: tahmin ani = simdi
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
@@ -1457,7 +1520,7 @@ class Handler(BaseHTTPRequestHandler):
                     _perf_log_f = None
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
-                _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
+                _ad = {"v2": "GNSS Filtresi", "gercek": "GERCEK GPS"}[kaynak]
                 msg = "GOREV BASLATILDI - kaynak: %s%s" % (
                     _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
                 olay_ekle("iyi", "GOREV BASLADI — kaynak: %s" % _ad)

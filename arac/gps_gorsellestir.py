@@ -26,7 +26,7 @@ from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
-from fusion.inovasyonlu_j_v2 import GNSSDuzeltici
+from fusion.gnss_filtre import GNSSFiltre as GNSSDuzeltici
 
 VERI = os.path.join(ROOT, "veri")               # calisma ciktilari (json/png)
 with open(os.path.join(VERI, "gps_kayit.json"), "r", encoding="utf-8") as f:

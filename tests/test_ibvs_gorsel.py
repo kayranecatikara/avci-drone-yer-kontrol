@@ -204,7 +204,8 @@ def test_boyut_uzakta_tavan():
 
 def test_boyut_hedefte_dur():
     """boyut == BOYUT_HEDEF -> ileri istek 0 (istasyon tut; hata sifir)."""
-    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_BOYUT_HEDEF=0.08)
+    # IBVS_K_BOYUT=20: boyut-regulasyon (kilit-tut) OZELLIGINI test eder (default artik 0=vurus modu)
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_BOYUT_HEDEF=0.08, IBVS_K_BOYUT=20.0)
     g = AvciIBVS()
     _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.08, hp=0.04), p)
     assert abs(pitch) < 1e-9, "hedef boyutta pitch=0 bekleniyordu: %.4f" % pitch
@@ -214,7 +215,7 @@ def test_boyut_hedefte_dur():
 def test_boyut_fazla_yakin_geri_tavanli():
     """boyut >> hedef -> GERI itki (kacis), tavani GERI_MAX; kenarda/yuksekte bile
     AYNI geri (kisma/alcal GERI'yi FRENLEMEZ — kacis manevrasi); GERI_MAX=0 -> geri yok."""
-    p = _CfgVar(IBVS_DIKEY_NISAN=0.0)
+    p = _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_K_BOYUT=20.0)   # regulasyon acik (default 0=vurus modu)
     g = AvciIBVS()
     _, pitch, _, _ = g.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.30, hp=0.15), p)
     assert abs(pitch - (-Cfg.PITCH_SIGN * Cfg.IBVS_GERI_MAX)) < 1e-6, \
@@ -226,7 +227,7 @@ def test_boyut_fazla_yakin_geri_tavanli():
     # geri kapatilabilir
     g3 = AvciIBVS()
     _, pitch3, _, _ = g3.hesapla(_det(cxn=0.5, cyn=0.5, wp=0.30, hp=0.15),
-                                 _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_GERI_MAX=0.0))
+                                 _CfgVar(IBVS_DIKEY_NISAN=0.0, IBVS_GERI_MAX=0.0, IBVS_K_BOYUT=20.0))
     assert pitch3 == 0.0, "GERI_MAX=0 -> asla geri: %.3f" % pitch3
 
 

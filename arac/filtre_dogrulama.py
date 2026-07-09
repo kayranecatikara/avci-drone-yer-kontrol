@@ -50,7 +50,7 @@ TAU_ADIM = 0.05      # tarama adimi (s)
 
 
 def olc(sure_s, csv_yolu, drone_baglanti=None):
-    from fusion.inovasyonlu_j_v2 import GNSSDuzeltici
+    from fusion.gnss_filtre import GNSSFiltre as GNSSDuzeltici
 
     # TEK TCP OTURUMU: cagiran bagli bir drone modulu verirse onu kullan
     # (kosu_yonetici turlarinda baglan/kop dongusu yok). Verilmezse kendi acar/kapatir.

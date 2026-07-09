@@ -11,6 +11,9 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from detection.algi_hatti import AlgiHatti, AlgiCiktisi
 
+# HybridSort (yeni tracker) GERCEK kare ister (ECC-CMC icin) -> "x" yerine gercek dizi.
+_IMG = np.zeros((1080, 1920, 3), dtype=np.uint8)
+
 
 class SahteDedektor:
     """tespit_hepsi(frame) -> onceden kurulmus kutu listesi (frame yok sayilir)."""
@@ -44,7 +47,7 @@ def test_kilit_ve_snapshot():
     t = 0.0
     for i in range(5):
         ded.kutular = [_det(500 + i, 400)]
-        c = ah.adim(frame="x", attitude=(0, 0, 0), t=t)
+        c = ah.adim(frame=_IMG, attitude=(0, 0, 0), t=t)
         t += 0.02
     assert c.hedef is not None and c.hedef["track_durumu"] == "CONFIRMED"
     # son_cikti AYNI snapshot'i vermeli (thread-guvenli okuma)
@@ -61,29 +64,30 @@ def test_turev_algi_timestampi():
     for i in range(9):
         cx += 10.0                            # her frame +10px (Kalman hiz ogrenir)
         ded.kutular = [_det(cx, 300)]
-        c = ah.adim("x", (0, 0, 0), t); t += 0.02
+        c = ah.adim(_IMG, (0, 0, 0), t); t += 0.02
         if i >= 6:                            # kilit + hiz oturduktan sonra
             assert abs(c.lam_dot) > 1e-6, "hareket -> sifir olmayan lam_dot"
             assert c.hedef["tespit_mi"] is True
     # Vc: hedef buyurken (yaklasirken) pozitif — konum sabit, bbox buyusun
     for i in range(4):
         ded.kutular = [_det(cx, 300, w=60 + i * 12, h=45 + i * 9)]
-        c = ah.adim("x", (0, 0, 0), t); t += 0.02
+        c = ah.adim(_IMG, (0, 0, 0), t); t += 0.02
     assert c.Vc > 0, "bbox buyurken Vc pozitif (yaklasma vekili)"
 
 
-def test_coast_turev_resetlenir():
-    # coast'ta (tespit_mi False) turev uretilmez -> lam_dot/Vc = 0
+def test_tespit_yok_hedef_none():
+    # HybridSort BOS tespitte track dondurmez (eski ByteTrack coast'i YOK) -> hedef None,
+    # turev sifir (delik yonetimi ana_kontrol KOPRU'sunde). Sistem cokmez.
     ded = SahteDedektor()
     ah = AlgiHatti(dedektor=ded)
     t = 0.0
     for i in range(6):
         ded.kutular = [_det(500 + i * 20, 400)]
-        ah.adim("x", (0, 0, 0), t); t += 0.02
-    ded.kutular = []                              # tespit yok -> coast
-    c = ah.adim("x", (0, 0, 0), t)
-    assert c.hedef is not None and c.hedef["tespit_mi"] is False
-    assert c.lam_dot == 0.0 and c.Vc == 0.0       # coast turev URETMEZ
+        ah.adim(_IMG, (0, 0, 0), t); t += 0.02
+    ded.kutular = []                              # tespit yok -> HybridSort track yok
+    c = ah.adim(_IMG, (0, 0, 0), t)
+    assert c.hedef is None                        # coast ciktisi yok (yeni tracker)
+    assert c.lam_dot == 0.0 and c.Vc == 0.0       # hedef yok -> turev uretilmez
 
 
 def test_cmc_beslemesi_cokmez():
@@ -95,7 +99,7 @@ def test_cmc_beslemesi_cokmez():
     tid = None
     for i in range(10):
         ded.kutular = [_det(960, 400)]
-        c = ah.adim("x", (0.0, 0.0, yaw), t)
+        c = ah.adim(_IMG, (0.0, 0.0, yaw), t)
         yaw += 1.0; t += 0.02
         if c.hedef and c.hedef["track_durumu"] == "CONFIRMED":
             tid = tid or c.hedef["track_id"]

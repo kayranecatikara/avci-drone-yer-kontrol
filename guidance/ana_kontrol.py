@@ -42,7 +42,7 @@ import os
 import time
 from collections import deque
 import numpy as np
-from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as V2Filtre   # v2: tek uretim filtresi
+from fusion.gnss_filtre import GNSSFiltre as V2Filtre   # 2026-07-09: YENI GNSS filtresi (eski inovasyonlu_j_v2 KALDIRILDI)
 from guidance.ibvs_gorsel import AvciIBVS                       # gorsel: merkez->bbox cizgisi (basit IBVS)
 
 # --- UCUS LOGU: dosya dizini + sabit kolon sirasi (arac/analiz_ucus.py isimle okur) ---
@@ -279,14 +279,23 @@ class Cfg:
     # DEGER: 7 Tem log analizi — 60 kesin yanlis-poz (gercek hedef 126m uzak/kadraj disi
     # iken conf~0.48 tespit) SAG-ALT'ta kumelendi (ex~0.75-1.0, ey~0.25). Canli FPV'de
     # dogrula/rafine et (arayuz maskeyi kirmizi tarama ile cizer; vis_cx/vis_ey loglanir).
-    PROP_MASKE = [(0.80, 0.55, 1.0, 0.95)]   # sag-alt kose (on-sag pervane)
+    PROP_MASKE = []   # KAPALI (2026-07-09 kullanici istegi): pervane maskesi kaldirildi.
+                      # Bos liste = hic maskeleme yok (tespit_hepsi 'if maske' ile atlar).
+                      # Gerekce: kaçirmalarin yalniz %2'si maskedeydi (ana faktor degil) ama
+                      # hedef sag-alt koseye girerse onu da eliyordu -> kaldirmak tespiti
+                      # kotulestirmez. Pervane FP riski artik tracker onay şartiyla emilir.
+                      # Geri istersen: [(0.80, 0.55, 1.0, 0.95)]  (sag-alt kose, on-sag pervane).
     VIS_CONF_MIN     = 0.15     # kilit/komut icin asgari guven. 0.45->0.15 (8 Tem ucus_1
                                 # segment kiyasi: tespit %22-33 -> %50-64; yanlis-poz ana
                                 # kumesi PROP_MASKE ile zaten eleniyor). Cok yanlis tespit
                                 # gorursen slider'dan yukselt.
     VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
-    VIS_LOST_TO_GPS_S = 0.0     # kayipta GPS'e donmeden once hover suresi (yalniz OTO).
+    VIS_LOST_TO_GPS_S = 0.8     # kayipta GPS'e donmeden once hover suresi (yalniz OTO).
+                                # 2026-07-09: 0.0->0.8 (VURUS MODU). Bulut/gunes/bulanik arka planda
+                                # tespit KISA delikler aciyor; 0'da her delikte GPS'e savrulup hucumu
+                                # bozuyordu. 0.8 sn hover + VIS_KOPRU_S kopru => hucum delikte SURER,
+                                # gercek tespit donunce devam. Uzun kayipta yine GPS'e doner.
                                # 0 = ANINDA GPS'e don (hover fazi yok; kullanici istegi
                                # 2026-07-08 — ara bekleme kafa karistiriyordu). Dedektor
                                # titremesi (tek-kare atlama) zaten VIS_STALE_S ile koprulenir;
@@ -330,7 +339,9 @@ class Cfg:
     # kameradan turetilmis veri (son bbox + bbox hizi) -> gorsel-faz GPS yasagina uygun.
     # DURUSTLUK: kopru tespiti KILIT SAYACINA SAYILMAZ (vis_gordu=0, vis_kopru=1
     # loglanir); yalniz GORSEL_GUDUM fazinda uygulanir (OTO kilit sayacini sisirmez).
-    VIS_KOPRU_S      = 1.2      # kopru suresi (s); 0 = kapali ⚙
+    VIS_KOPRU_S      = 2.0      # kopru suresi (s); 0 = kapali ⚙ (2026-07-09: 1.2->2.0 VURUS MODU —
+                                # bulut/gunes arka planinda tespit delikleri uzun; kopru bbox'i
+                                # goruntu-hiziyla 2 sn ILERI tasir -> hucum delik boyunca hedefe surer.
     VIS_KOPRU_V_EMA  = 0.5      # goruntu-hizi EMA katsayisi (yeni olcum agirligi)
     # --- BASIT IBVS (2026-07-07): goruntu merkezi -> bbox merkezi cizgisi ---
     # TEK gorsel yasa (guidance/ibvs_gorsel.py): cizginin YATAY bileseni yaw'a,
@@ -365,9 +376,12 @@ class Cfg:
                                 # kilit esigi %6'da salinip dolmuyordu; hedefi 0.12 yapmak
                                 # dengeyi ~%8.5'e cikarir -> istek uzun doygun kalir, drone
                                 # yapabildigi EN YAKINA gider, boyut esigi guvenli gecer).
-    IBVS_K_BOYUT     = 20.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
-                                # 15->20 (denge boyutunu HEDEF'e yaklastirir: boyut_eq =
-                                # HEDEF - ileri_eq/K; K buyuk -> daha kararli ve yuksek boyut).
+    IBVS_K_BOYUT     = 0.0      # boyut hatasi -> ileri itki kazanci (0=KAPALI/HUCUM=vurus) ⚙
+                                # 2026-07-09 VURUS MODU (rapor teslimi): 20->0. K_BOYUT=20 KILIT-TUT
+                                # idi (hedefe yaklasip DURUYORDU, vurmuyordu). 0 = regulasyon KAPALI ->
+                                # sabit ileri itki (IBVS_ILERI tavani) -> drone hedefe KAPANIR -> <3m
+                                # (VURUS_ESIK_M) = VURUS. Kilit isteri gostermek istersen slider'dan
+                                # 20 yap (5 sn kilit), sonra 0'a cek (hucum/vurus).
     IBVS_GERI_MAX    = 0.15     # fazla yakinken geri itki tavani (0=asla geri gitme) ⚙
     IBVS_MERKEZ_FREN = 1.4      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
                                 # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙

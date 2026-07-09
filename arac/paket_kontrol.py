@@ -94,7 +94,7 @@ ZORUNLU_ICERIK = [
     ("input (sim I/O)",        ["sdk/drone_sdk.py"]),
     ("hedef tespit",           ["detection/algi_hatti.py", "detection/gorsel_tespit.py"]),
     ("tracking",               ["detection/takip.py"]),
-    ("sensor fuzyonu/filtre",  ["fusion/inovasyonlu_j_v2.py"]),
+    ("sensor fuzyonu/filtre",  ["fusion/gnss_filtre.py"]),
     ("guduum ve karar",        ["guidance/ana_kontrol.py"]),
     ("ana calistirma",         ["main.py"]),
     ("config",                 ["config.py"]),

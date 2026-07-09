@@ -5,9 +5,19 @@ Bu projenin asıl amacı **Simülasyon Uçuş Kanıt Videosu** aşamasından ge�
 Tüm mimari ve kod kararları, şartnamedeki görev akışını ve video isterlerini
 EKSİKSİZ karşılayacak şekilde alınır.
 
+## ⭐ GNSS FİLTRESİ DEĞİŞTİ (2026-07-09): `fusion/gnss_filtre.py` (GNSSFiltre)
+Eski İnovasyonlu J (`inovasyonlu_j_v2.py`, CT-EKF) **komple KALDIRILDI** (kullanıcı isteği,
+"yeni filtrem çok daha iyi"). Yeni filtre: spike-temizleme (x/y/z ayrı, hız+konum tutarlılık
+kapıları) + son-N nokta lineer hız kestirimi + gecikme-telafili lead (güven faktörlü). Arayüz
+AYNI (`guncelle(x,y,z)`→temiz konum, `durum_gudum()`→{pos,vel}; eski `durum_guduum` alias'lı).
+Bağlı: `ana_kontrol._hedef_temizle` (GPS fazı) + `server` sapma ölçümü + dev araçları. Açıklanabilir
+(kural 8): her adım basit ve gerekçeli. NOT: `gps_takip.py` (GPSTakip standalone kontrolcü)
+kullanıcı kararıyla ENTEGRE EDİLMEDİ — mevcut GPS bloğu (handoff+standoff+look-up+overshoot-fix)
+korundu; GPSTakip'te bunlar yoktu, olduğu gibi swap görevi bozardı.
+
 ## ÇALIŞMA İLKELERİ (değişmez)
-- **Sadece üzerinde çalıştığımız, açıklayabildiğimiz şeyi kullan: İnovasyonlu J**
-  (`inovasyonlu_j_v2.py`, CT-EKF GNSS düzeltici). IMM-EKF veya bakmadığımız yabancı
+- **Sadece üzerinde çalıştığımız, açıklayabildiğimiz şeyi kullan.** GNSS filtresi artık
+  `fusion/gnss_filtre.py` (yukarı bak). IMM-EKF veya bakmadığımız yabancı
   modüller entegre EDİLMEZ. (Yarışma kuralı 8: her bileşeni açıklayabilmeliyiz.)
 - **Düzgün/açıklanabilir parçaları entegre et, saçma/overfit parçaları etme.**
   Senaryoya aşırı-uydurulmuş sabitler (örn. "lock 5.2 sn", death_plunge) kullanılmaz.
@@ -418,7 +428,20 @@ KOŞULSUZ çağrılır (`ana_kontrol.py`'de güdüm-dışı küçük metod; ayn�
 üste seçilse bile log dosyası döner → her görev ayrı ucus_N klasörü alır).
 Test: `tests/test_tune_rapor.py` (20/20, sentetik uçuş+tune logu).
 
-## ⭐ BYTETRACK + GYRO-CMC CANLI HATTA BAĞLANDI (2026-07-09)
+## ⭐ TRACKER DEĞİŞTİ → HybridSort (boxmot) (2026-07-09, kullanıcı kararı)
+**GÜNCEL: `detection/takip.py` artık el-yazımı ByteTrack DEĞİL, boxmot HybridSort ADAPTÖRÜ.**
+Kullanıcı "risk yok, direkt al" dedi → eski ByteTrack+gyro-CMC KALDIRILDI, yerine boxmot
+`HybridSort` (with_reid=False, ECC-CMC; kullanıcının hybridsort_tracker.py TRACKER_PARAMS'ı).
+Adaptör eski `Takipci`/`TakipCfg` ARAYÜZÜNÜ korur (guncelle/sifirla/trackler/cfg.CONF_DUSUK)
+ki server + algi_hatti değişmesin. FARK: (1) HybridSort kareyi İSTER → `guncelle(..., frame=bgr)`
+(server + algi_hatti geçirir); (2) coast ÇIKTISI YOK (boş tespit→None; delik yönetimi ana_kontrol
+KÖPRÜ'de); (3) gyro-CMC (H_cmc) YOK SAYILIR (HybridSort kendi ECC-CMC'si, ~3.5ms/kare). boxmot
+requirements'ta. Testler: test_takip smoke 5/5, test_algi_hatti 5/5 (gerçek kare + no-coast).
+NOT (kural 8): HybridSort YABANCI/karmaşık modül — CLAUDE.md ÇALIŞMA İLKELERİ "yabancı modül
+entegre edilmez" der; kullanıcı riski bilerek onayladı. Geri dönmek gerekirse git geçmişinde
+eski ByteTrack (`takip.py`) durur. Aşağısı ESKİ ByteTrack bağlama notu (artık geçersiz, tarihsel):
+
+## ⭐ BYTETRACK + GYRO-CMC CANLI HATTA BAĞLANDI (2026-07-09) [ESKİ — HybridSort'la değişti]
 `yarisma-pipeline` branch'inin tracking bağlaması main'e taşındı. Kütüphane katmanı
 (`detection/takip.py` ByteTrack, `detection/kamera_model.py` cmc_homografi,
 `detection/algi_hatti.py`) zaten PR#2 merge'üyle main'deydi ama **server'a bağlı değildi**
