@@ -297,6 +297,7 @@ TUNE_ALLOW = {
     "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
     "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)
     "IBVS_MERKEZ_FREN",  # sapma buyuyunce ileriyi kis (0=hep tam gaz)
+    "IBVS_HANDOFF_S",    # GPS->gorsel yumusak gecis rampasi (s); 0=kapali (uzunsa gecikir, kisaysa lunge)
     "IBVS_ALCAL_FREN",   # alcalma freni: hedef nisanin ALTINDAysa (fazla yuksek) ileriyi kis
     "IBVS_K_ROLL_LEAD",  # ongorulu yaw lead kazanci (pose hedef bank -> erken donus)
     "IBVS_SIGN_ROLL",    # ongoru YONU (roll->yaw isareti): FPV oku gercek donusle ters ise cevir

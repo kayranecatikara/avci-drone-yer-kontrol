@@ -25,6 +25,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from guidance.ana_kontrol import AvciKontrol, Cfg
 
+# Kilit/kopru testleri yumusak-gecis rampasini KAPALI test eder: bu testler kopru/kilit
+# davranisini dogrular, handoff rampasini DEGIL. Rampa acikken taze beyinde ilk gorsel tik
+# s=0 (ileri~0) olur; gercek ucusta kopru ~1sn rampa dolduktan SONRA olur. Rampa ayri
+# olarak test_ibvs_gorsel.test_handoff_* ile dogrulanir.
+Cfg.IBVS_HANDOFF_S = 0.0
+
 W, H = 1920.0, 1080.0
 
 

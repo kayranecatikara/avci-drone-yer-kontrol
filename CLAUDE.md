@@ -218,6 +218,37 @@ hedefin **roll/bank** açısı çıkarılıp, banklı uçağın alçak kanadı y
 - **DURUM:** işaret VERİYLE belirlendi (`SIGN_ROLL=−1`); ego-comp eklendi (`GAIN=+1`, banklı koşuda
   teyit). Kalan: `IBVS_K_ROLL_LEAD` canlı tune. Test: `tests/test_ibvs_gorsel.py` (13/13).
 
+## ⭐ YUMUŞAK GEÇİŞ / SOFT-HANDOFF — GPS→GÖRSEL SÜREKLİLİĞİ (2026-07-09)
+Kullanıcı: "GPS'ten görsel güdüme geçiş anında iki mimari uyumsuzluğu hedefi kadrajdan
+çıkarıyor, görsel temas kesiliyor." Kök neden ÜÇ mekanizma (kod keşfiyle doğrulandı):
+(1) **İleri lunge** — handoff mesafesinde (~40m) bbox küçük → `ileri_istek` `IBVS_ILERI`
+tavanına doyar + `yak=1` fren baypası → ilk tikten tam ileri pitch (+0.70) → gövde ~−37°
+öne yatar, gövdeye sabit kamera düşer, hedef kadraj ÜSTÜNDEN kaçar; (2) **Dikey nişan
+sıçraması** — GPS hedefi merkezde tutar (ey≈0), görsel yasa `ey_ref≈−0.108` "alttan vur"a
+ANİDEN kayar → ilk tik `thr≈−0.216` ani alçalış; (3) **Soğuk başlangıç** — ilk görsel tik
+ham komut, tek koruma `_send` MAX_DELTA=0.05 slew (yalnız hızı sınırlar, büyüklüğü değil).
+**Çözüm (kamera-only, GPS'e dokunmadan — kural yapısal korunur):** görsel faz başından
+`IBVS_HANDOFF_S`(1.0s ⚙) süren rampa faktörü `s:0→1` (`ibvs_gorsel.hesapla`); YALNIZ iki
+kanalı yumuşatır: **ileri-itki** (pozitif pitch terimi `*s`) ve **dikey-nişan** (`ey_ref_eff
+= s·ey_ref`, merkezden alttan-vur'a). **Yaw + dikey-ORTALAMA ilk tikten TAM güçte** (hedefi
+kadrajda tutan kanallar dokunulmaz). Zamanlayıcı = görsel faza giriş anı (faz durumu, GPS
+verisi DEĞİL); `IBVS_HANDOFF_S=0` → `s=1` hep → KAPALI (eski davranış bit-aynı; A/B).
+- **Mekanik:** `ibvs_gorsel.sifirla()` `_handoff_t=None`; `hesapla` ilk tikte `det["t"]` ile
+  damgalar, `s=clamp((t−_handoff_t)/HANDOFF_S,0,1)`. OTO handoff girişinde (`ana_kontrol.py`
+  `durum="GORSEL_GUDUM"`) + manuel switch (`set_vis_mode`) + GPS revert → hepsi `ibvs.sifirla()`
+  çağırdığından her yeni görsel faz taze rampa penceresi alır. `_send` slew ile birleşir
+  (GPS'in son frenlenmiş komutundan rampalı görsel komuta akış; stall yok).
+- **Telemetri:** `gudum.ibvs.handoff_s` (0=giriş,1=tamam), `ey_ref` artık EFEKTİF (FPV nişan
+  çizgisi rampa boyunca gerçek konumu gösterir), `ey_ref_hedef` tam hedef. Tune slider
+  `IBVS_HANDOFF_S` (0-2s; uzunsa yaklaşma gecikir, kısaysa lunge geri gelir).
+- **Sim doğrulama:** rampalı ilk tik thr=0/ileri=0 → 1sn'de tam (−0.216/+0.700); rampasız ilk
+  tik −0.216/+0.700 (eski lunge+alçalış). Testler: `test_ibvs_gorsel.py` 31/31 (3 yeni handoff
+  testi), `test_kilit_takip` 17/17. NOT: çekirdek-yasa test dosyaları rampayı KAPALI test eder
+  (`Cfg.IBVS_HANDOFF_S=0` modül başı); rampa `test_handoff_*` ile ayrı doğrulanır.
+- **CANLI DOĞRULAMA BEKLİYOR:** geçişte hedefin kadrajda kaldığı FPV'de gözlemlenmeli;
+  `IBVS_HANDOFF_S` 0.6-1.5s canlı tune. Kapsam kararı: hazırlık-kapısı + derin PD sönümleme
+  ERTELENDİ (kullanıcı "çekirdek yumuşak geçiş" seçti).
+
 ## ⭐ TILT-FARKINDA DİKEY NİŞAN — HIZ VEKTÖRÜ HEDEFE (2026-07-08)
 Kullanıcı: kamera +25° yukarı sabit; hedefi kadraj MERKEZİNDE tutmak = hız vektörünü hedefin
 ~25° ALTINA nişanlamak (kronik dikey undershoot / laggy tail-chase). **Tilt kesin 25° (teyit).**
