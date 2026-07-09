@@ -36,9 +36,19 @@ class TakipCfg:
     # --- BYTE conf esikleri ---
     CONF_YUKSEK = 0.5      # >= : birinci tur eslestirme + yeni track acabilir
     CONF_DUSUK  = 0.1      # >= (ve < YUKSEK) : yalniz ikinci tur (mevcut track'i surdur)
-    # --- Track yasam dongusu ---
-    MIN_HITS   = 5         # TENTATIVE->CONFIRMED ardisik eslesme (FSM "5 kare" kurali)
-    MAX_COAST  = 25        # olcumsuz tahminle surdurme tavani (tik; 50Hz'de ~0.5 sn)
+    # --- Track yasam dongusu (SANIYE cinsinden — dongu hizi DEGISKEN!) ---
+    # Canli dedektor dongusu GPU paylasimi yuzunden ~8 FPS kosar (perf_log, 9 Tem).
+    # Eski tik-tabanli esikler (MIN_HITS=5 ARDISIK + tek kacirmada TENTATIVE olum +
+    # MAX_COAST=25 tik) 50 Hz varsayimiyla yazilmisti; 8 FPS'te izler onaylanamadan
+    # oluyor (yakin-mesafe tespit orani %14-30 -> %0-1, 9 Tem ucus kiyasi) ve hayalet
+    # kutu ~3 sn suruklenip "rastgele yuruyen bbox" uretiyordu. Sure-tabanli esikler
+    # dongu hizindan bagimsiz ayni davranisi verir.
+    ONAY_MIN_HIT = 3       # TENTATIVE->CONFIRMED icin asgari OLCUM sayisi (ardisik SART DEGIL;
+                           # tek/cift-kare parazit yine CONFIRMED olamaz)
+    TENT_COAST_S = 0.30    # aday (TENTATIVE) iz olcumsuz en fazla bu kadar yasar
+                           # (tek kare kacirma affi; eskiden ILK kacirmada oluyordu)
+    COAST_S      = 0.60    # onayli iz olcumsuz (coast) en fazla bu kadar suruklenir
+                           # (VIS_STALE_S=0.5 ile uyumlu; gudumun kayip mantigi bozulmaz)
     IOU_ESIK   = 0.2       # eslesme icin asgari IoU (warp sonrasi)
     # --- Kalman gurultu ---
     STD_OLCUM_KONUM = 1.0  # px olcum gurultusu (cx,cy)
@@ -99,15 +109,23 @@ class _KalmanKutu:
         self.P = (np.eye(7) - K @ H) @ self.P
         self._son_alan = self.x[2]
 
-    def warp_merkez(self, H):
-        """gyro-CMC: merkez (cx,cy)'yi homografiyle tasi (eslestirme oncesi)."""
+    def warp_merkez(self, H, max_kaydirma=None):
+        """gyro-CMC: merkez (cx,cy)'yi homografiyle tasi (eslestirme oncesi).
+        max_kaydirma (px | None): warp merkezi bu kadar pikselden fazla oynatiyorsa
+        ATLA (yanlis-isaret CMC kutuyu ekrandan firlatip esleşmeyi kirmasin)."""
         if H is None:
             return
         p = np.array([self.x[0], self.x[1], 1.0])
         q = H @ p
-        if abs(q[2]) > 1e-9:
-            self.x[0] = q[0] / q[2]
-            self.x[1] = q[1] / q[2]
+        if abs(q[2]) <= 1e-9:
+            return
+        yeni_cx, yeni_cy = q[0] / q[2], q[1] / q[2]
+        if max_kaydirma is not None:
+            d = ((yeni_cx - self.x[0]) ** 2 + (yeni_cy - self.x[1]) ** 2) ** 0.5
+            if d > max_kaydirma:
+                return                     # implausible warp -> CMC'siz predict (emniyet)
+        self.x[0] = yeni_cx
+        self.x[1] = yeni_cy
 
     def bbox(self):
         return _z_to_bbox(self.x[0], self.x[1], self.x[2], self.x[3])
@@ -158,8 +176,10 @@ class Track:
         self.kf = _KalmanKutu((det["cx"], det["cy"], det["w"], det["h"]), cfg)
         self.durum = _TENTATIVE
         self.hits = 1                 # toplam eslesme
-        self.ardisik_hit = 1          # ardisik eslesme (TENTATIVE->CONFIRMED)
-        self.coast = 0                # ardisik olcumsuz tik
+        self.ardisik_hit = 1          # ardisik eslesme (istatistik; onay artik toplam hit'le)
+        self.coast = 0                # ardisik olcumsuz tik (istatistik)
+        self.coast_sure = 0.0         # ardisik olcumsuz SURE (s) — yasam dongusu bununla
+        self._dt_son = 0.0            # son tahmin() dt'si (eslesmedi() sure biriktirir)
         self.yas = 1                  # toplam tik
         self.conf = float(det.get("conf", 0.0))
         self.conf_toplam = self.conf
@@ -171,9 +191,10 @@ class Track:
     def ort_conf(self):
         return self.conf_toplam / max(self.conf_n, 1)
 
-    def tahmin(self, dt, H_cmc=None):
+    def tahmin(self, dt, H_cmc=None, cmc_max_kaydirma=None):
         self.kf.tahmin(dt)
-        self.kf.warp_merkez(H_cmc)     # gyro-CMC: eslestirme oncesi warp
+        self.kf.warp_merkez(H_cmc, cmc_max_kaydirma)   # gyro-CMC: eslestirme oncesi warp
+        self._dt_son = max(0.0, float(dt))
         self.yas += 1
         self.tespit_mi = False         # eslesirse guncelle()'de True olur
 
@@ -182,12 +203,15 @@ class Track:
         self.hits += 1
         self.ardisik_hit += 1
         self.coast = 0
+        self.coast_sure = 0.0
         self.conf = float(det.get("conf", 0.0))
         self.conf_toplam += self.conf
         self.conf_n += 1
         self.son_det = det
         self.tespit_mi = True
-        if self.durum == _TENTATIVE and self.ardisik_hit >= self.cfg.MIN_HITS:
+        # Onay: TOPLAM olcum sayisi (ardisik degil). Dusuk FPS'te dedektorun tek-kare
+        # delikleri onay sayacini sifirlamasin; parazit filtresi TENT_COAST_S'te.
+        if self.durum == _TENTATIVE and self.hits >= self.cfg.ONAY_MIN_HIT:
             self.durum = _CONFIRMED
         elif self.durum == _LOST:
             self.durum = _CONFIRMED    # yeniden yakalandi
@@ -195,12 +219,16 @@ class Track:
     def eslesmedi(self):
         self.ardisik_hit = 0
         self.coast += 1
+        self.coast_sure += self._dt_son
         self.tespit_mi = False
         if self.durum == _TENTATIVE:
-            self.durum = _REMOVED      # tek-kare parazit: dogrulanamadan ol
+            # aday iz kisa kacirmayi affeder (dusuk FPS'te tek kare = ~0.12 s);
+            # TENT_COAST_S icinde yeni olcum gelmezse parazit sayilir, olur.
+            if self.coast_sure > self.cfg.TENT_COAST_S:
+                self.durum = _REMOVED
         elif self.durum == _CONFIRMED:
             self.durum = _LOST
-        if self.coast > self.cfg.MAX_COAST:
+        if self.coast_sure > self.cfg.COAST_S:
             self.durum = _REMOVED
 
     def bbox(self):
@@ -216,10 +244,13 @@ class Track:
         kp = self.son_det.get("keypoints") if self.son_det else None
         if kp is not None and self.tespit_mi:
             d["keypoints"] = kp        # coast'ta keypoint tasima (bayat poz gitmesin)
-        # son OLCULEN tespitin W/H'sini (goruntu boyutu) tasi
+        # son OLCULEN tespitin W/H'sini (goruntu boyutu) + sinif indeksini tasi
         if self.son_det:
             d["W"] = self.son_det.get("W")
             d["H"] = self.son_det.get("H")
+            d["cls"] = self.son_det.get("cls", -1)
+            if self.tespit_mi and "t" in self.son_det:
+                d["t"] = self.son_det["t"]   # olcum tiki: kare zamani (UI yas telafisi)
         return d
 
 
@@ -231,13 +262,14 @@ class Takipci:
         self.cfg = cfg or TakipCfg()
         self.trackler = []
 
-    def guncelle(self, tespitler, dt, H_cmc=None):
+    def guncelle(self, tespitler, dt, H_cmc=None, cmc_max_kaydirma=None):
         """tespitler: [{cx,cy,w,h,conf,W,H,keypoints?}], dt: sn, H_cmc: 3x3 | None.
+        cmc_max_kaydirma: CMC warp tavani (px | None) — yanlis-isaret emniyeti.
         -> en iyi CONFIRMED track ciktisi | None. Tum track'ler self.trackler'da."""
         cfg = self.cfg
         # 1) PREDICT + gyro-CMC warp
         for t in self.trackler:
-            t.tahmin(dt, H_cmc)
+            t.tahmin(dt, H_cmc, cmc_max_kaydirma)
 
         yuksek = [d for d in tespitler if float(d.get("conf", 0)) >= cfg.CONF_YUKSEK]
         dusuk = [d for d in tespitler
@@ -295,12 +327,14 @@ class Takipci:
         return [t for t in self.trackler if t.durum in (_CONFIRMED, _LOST)]
 
     def en_iyi_track(self):
-        """FSM'e sunulacak tek track: CONFIRMED'lar arasinda en uzun yasayan
-        (esitlikte en yuksek ort conf). LOST da dahildir (coast suruyor)."""
+        """FSM'e sunulacak tek track. ONCE bu tik OLCUM almis (tespit_mi=True) izler:
+        coast'taki hayalet, hedefin ustunde OLCULEN taze izi asla bastiramaz (9 Tem
+        canli regresyon dersi: eski max(hits) siralamasi suruklenen LOST izi secip
+        gercek tespiti gizliyordu). Esitlikte en uzun yasayan / en yuksek ort conf."""
         adaylar = self.confirmed_trackler()
         if not adaylar:
             return None
-        return max(adaylar, key=lambda t: (t.hits, t.ort_conf))
+        return max(adaylar, key=lambda t: (t.tespit_mi, t.hits, t.ort_conf))
 
     def en_iyi_cikti(self):
         t = self.en_iyi_track()

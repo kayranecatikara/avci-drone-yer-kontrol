@@ -432,7 +432,9 @@ def olay_ekle(sv, mesaj):
 
 
 # --- Izleyici durumu: YALNIZ kontrol thread'i yazar (tek-yazar); build_telemetry beyin_lock ile okur ---
-_takip = {"id": None, "sonraki": 1, "yeniden": 0, "aktif": False, "kayip_t": None}
+# id: GERCEK ByteTrack track_id (beyin.son_tespit tasir); tracker yoksa sentetik sayac (sonraki).
+# ilk: bu gorevde ILK TESPIT ilan edildi mi (ILK/YENIDEN ayrimi ID degerine bagli degil).
+_takip = {"id": None, "sonraki": 1, "yeniden": 0, "aktif": False, "kayip_t": None, "ilk": False}
 _gorev = {"faz": "HAZIR", "t0": None, "vurus": False, "basari": False,
           "en_yakin_m": None, "vurus_t": None, "mesafe_kaynak": None}
 _izci = {"durum_prev": None, "handoff_prev": False, "kilit_ilan": False,
@@ -442,7 +444,7 @@ _izci = {"durum_prev": None, "handoff_prev": False, "kilit_ilan": False,
 
 def _gorev_sifirla(faz):
     """Yeni gorev baslarken izleyici latch'lerini sifirla (basari banner'i dahil)."""
-    _takip.update(id=None, sonraki=1, yeniden=0, aktif=False, kayip_t=None)
+    _takip.update(id=None, sonraki=1, yeniden=0, aktif=False, kayip_t=None, ilk=False)
     _gorev.update(faz=faz, t0=time.time(), vurus=False, basari=False,
                   en_yakin_m=None, vurus_t=None, mesafe_kaynak=None)
     _izci.update(durum_prev=None, handoff_prev=False, kilit_ilan=False,
@@ -486,24 +488,42 @@ def _gorev_izle():
     if not gorev_aktif:
         return   # gorev pasif: FSM/takip/vurus izlenmez (sadece kesinti yukarida)
 
-    # 2) TAKIP-ID makinesi (girdi: beyin.son_tespit_t tazeligi — gudumdeki tanimla ayni)
+    # 2) TAKIP-ID makinesi (girdi: beyin.son_tespit_t tazeligi — gudumdeki tanimla ayni).
+    #    ID kaynagi GERCEK ByteTrack track_id'si (beyin.son_tespit icinde tasinir);
+    #    alan yoksa (tracker devre disi) eski sentetik sayaca geri duser.
     stt = beyin.son_tespit_t
     taze = (stt is not None) and ((time.perf_counter() - stt) <= Cfg.VIS_STALE_S)
     if taze:
+        gid, conf = None, 0.0
+        try:
+            gid = beyin.son_tespit.get("track_id")
+            conf = float(beyin.son_tespit.get("conf", 0.0))
+        except Exception:
+            pass
         if _takip["id"] is None:                       # ACILIS
-            _takip["id"] = _takip["sonraki"]; _takip["sonraki"] += 1
-            _takip["kayip_t"] = None
+            _takip["id"] = gid if gid is not None else _takip["sonraki"]
             try:
-                conf = float(beyin.son_tespit.get("conf", 0.0))
+                _takip["sonraki"] = int(_takip["id"]) + 1   # sentetik sayac gercek ID'yi gecmesin
             except Exception:
-                conf = 0.0
-            if _takip["id"] == 1:
-                olay_ekle("iyi", "ILK TESPIT — ID:1 (talon, conf=%.2f)" % conf)
+                pass
+            _takip["kayip_t"] = None
+            if not _takip["ilk"]:
+                _takip["ilk"] = True
+                olay_ekle("iyi", "ILK TESPIT — ID:%s (talon, conf=%.2f)" % (_takip["id"], conf))
             else:
                 _takip["yeniden"] += 1
-                olay_ekle("iyi", "YENIDEN TESPIT — yeni ID:%d (conf=%.2f)" % (_takip["id"], conf))
+                olay_ekle("iyi", "YENIDEN TESPIT — yeni ID:%s (conf=%.2f)" % (_takip["id"], conf))
+        elif gid is not None and gid != _takip["id"]:  # taze ama IZ DEGISTI (ByteTrack yeni track acti)
+            _takip["id"] = gid
+            try:
+                _takip["sonraki"] = int(gid) + 1
+            except Exception:
+                pass
+            _takip["yeniden"] += 1
+            _takip["kayip_t"] = None
+            olay_ekle("iyi", "YENIDEN TESPIT — yeni ID:%s (conf=%.2f)" % (gid, conf))
         elif not _takip["aktif"]:                      # blip koprulendi
-            olay_ekle("iyi", "TAKIP SURUYOR — ID:%d korundu" % _takip["id"])
+            olay_ekle("iyi", "TAKIP SURUYOR — ID:%s korundu" % _takip["id"])
             _takip["kayip_t"] = None
         _takip["aktif"] = True
     else:
@@ -752,6 +772,11 @@ def _normalize_tespit(det):
         "w": det["w"] / W, "h": det["h"] / H,      # normalize bbox boyut [0..1]
         "conf": float(det.get("conf", 0.0)),
         "cls": cls, "sinif": sinif,                # hedef ID etiketi icin (overlay)
+        # ByteTrack alanlari (detection/takip.py): GERCEK iz kimligi + coast bayragi.
+        # tespit_mi=False -> bu tik OLCUM yok, kutu Kalman tahmini (UI kesikli cizer).
+        "track_id": det.get("track_id"),
+        "track_durumu": det.get("track_durumu"),
+        "tespit_mi": bool(det.get("tespit_mi", True)),
     }
 
 
@@ -894,13 +919,21 @@ def dedektor_dongusu():
     global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
     from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
+    from detection.takip import Takipci                  # ByteTrack: ID surekliligi + coast + FP filtresi
+    from detection import kamera_model                   # gyro-CMC homografisi (kendi donusumuz telafi)
+    takipci = Takipci()                                  # zamansal takip (guduma dokunmaz; secim katmani)
+    onceki_att = None                                    # onceki tur drone rotasyonu (CMC icin)
+    onceki_takip_t = None                                # onceki takip guncelleme ani (Kalman dt)
     poz_sayac = 0                                        # POZ_HER_N seyreklestirme sayaci
-    onceki_ui = None                                     # (cx, cy, t) — UI bbox hiz kestirimi icin
+    onceki_ui = None                                     # (cx, cy, t, track_id) — UI bbox hiz kestirimi icin
     _t_dongu = None                                      # onceki dongu damgasi (FPS)
     _t_konsol = 0.0                                      # son konsol ozeti zamani
     while True:
         # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
+            if takipci.trackler:                         # yeni gorev bayat track/ID ile baslamasin
+                takipci.sifirla()
+            onceki_att = onceki_takip_t = None
             time.sleep(0.05)
             continue
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
@@ -946,23 +979,70 @@ def dedektor_dongusu():
             # Predict esigi UI icin dusuk (UI_CONF_MIN): zayif tespitler arayuzde
             # turuncu cizilir. GUDUM yine yalnizca conf>=VIS_CONF_MIN gorur
             # (asagida det_beyin kapisi) -> beyin/kilit davranisi DEGISMEZ.
+            # BYTE ikinci turu icin taban CONF_DUSUK: dusuk-conf kutu YENI track
+            # ACAMAZ ama mevcut izi yasatir (zayif karede ID kopmaz). Tracker kapaliysa
+            # (TAKIP_AKTIF=False) eski esik davranisi (dusuk-conf kutulara gerek yok).
             # Slider VIS_CONF_MIN'i daha da dusururse predict onu izler (canli-tune).
-            dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN))
+            takip_aktif = bool(getattr(Cfg, "TAKIP_AKTIF", True))
+            if takip_aktif:
+                dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN), takipci.cfg.CONF_DUSUK)
+            else:
+                dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN))
             bgr, _fw, _fh = grab_frame_bgr()          # AGIR is: pencere karesi al (kilit DISINDA)
             # ultralytics ndarray'i BGR varsayar -> grab_frame_bgr ciktisi DOGRU renk.
-            # PERVANE MASKESI canli okunur (Cfg.PROP_MASKE) -> kendi pervanemiz elenir.
+            # PERVANE MASKESI canli okunur (Cfg.PROP_MASKE) -> kendi pervanemiz elenir
+            # (argmax degil TUM kutular: maskeli kutu takipciye hic girmez).
             # OLCUM: best.pt inference GERCEK suresi (synchronize sonrasi).
             _t_inf = time.perf_counter()
-            det = (dedektor.tespit_et(bgr, maske=getattr(Cfg, "PROP_MASKE", None))
-                   if bgr is not None else None)
+            dets = (dedektor.tespit_hepsi(bgr, maske=getattr(Cfg, "PROP_MASKE", None))
+                    if bgr is not None else [])
             if bgr is not None:
                 _cuda_senkron()
                 _perf_det.append((time.perf_counter() - _t_inf) * 1000.0)
         except Exception:
-            bgr, det = None, None
+            bgr, dets = None, []
+        # BYTETRACK + GYRO-CMC: kutulari ZAMANSAL bagla — tek-kare parazit CONFIRMED
+        # olamadan olur, kisa tespit deliginde iz coast'la surer (tespit_mi=False),
+        # kendi donusumuzun kutu kaydirmasi homografiyle telafi edilir (hizli yaw'da
+        # ID kopmaz). det = en iyi CONFIRMED track | None (sozlesme argmax'la uyumlu).
+        # TAKIP_AKTIF=False -> tracker atlanir, ham argmax (dets[0]) dogrudan gecer
+        # (ByteTrack oncesi davranis; canli sorunda hizli geri-donus anahtari).
+        det = None
+        if bgr is not None and not takip_aktif:
+            if takipci.trackler:
+                takipci.sifirla()                     # kapaliyken bayat iz birikmesin
+            det = dets[0] if dets else None           # tespit_hepsi conf-azalan -> [0] = argmax
+        elif bgr is not None:
+            simdi = time.perf_counter()
+            H_cmc = None
+            cmc_cap = None
+            try:
+                att = drone.get_drone_rotation()      # (roll,pitch,yaw) derece
+                # gyro-CMC: kendi donusumuzun kutu kaymasini ONCEDEN telafi et.
+                # ISARET: sim attitude konvansiyonu dogrulanmadi (Blokor B) -> TAKIP_CMC_SIGN
+                # ile canli cevrilebilir (-1: att sirasi takas -> warp yonu ters). EMNIYET:
+                # TAKIP_CMC_MAX_KAYDIRMA orani px tavana cevrilir (yanlis-isaret + buyuk yaw
+                # kutuyu ekrandan firlatmasin; asilirsa o track o tik CMC'siz predict eder).
+                if onceki_att is not None and getattr(Cfg, "TAKIP_CMC_AKTIF", False):
+                    a1, a2 = onceki_att, att
+                    if float(getattr(Cfg, "TAKIP_CMC_SIGN", 1.0)) < 0:
+                        a1, a2 = a2, a1               # warp yonunu tersine cevir
+                    H_cmc = kamera_model.cmc_homografi(bgr.shape[1], bgr.shape[0], a1, a2)
+                    frac = float(getattr(Cfg, "TAKIP_CMC_MAX_KAYDIRMA", 0.0) or 0.0)
+                    if frac > 0:
+                        cmc_cap = frac * bgr.shape[1]  # kare genisligi orani -> px
+            except Exception:
+                att = None
+            dt_takip = (simdi - onceki_takip_t) if onceki_takip_t is not None else 0.05
+            onceki_att, onceki_takip_t = att, simdi
+            det = takipci.guncelle(dets, dt_takip, H_cmc, cmc_cap)
+            if det is not None:
+                det.setdefault("t", simdi)            # coast ciktisi: tahmin ani = simdi
         # GUDUM KAPISI: zayif (yalnizca-UI) tespit beyne GITMEZ -> kilit sayaci,
         # takip rozeti, gorsel guduum eski predict-esigi davranisiyla BIREBIR ayni.
-        det_beyin = (det if det is not None
+        # Coast (tespit_mi=False) da beyne GITMEZ: gorsel fazin kendi koprusu
+        # (ana_kontrol olu-hesap) delikleri yonetir; cift olu-hesap olmasin.
+        det_beyin = (det if det is not None and det.get("tespit_mi", True)
                      and float(det.get("conf", 0.0)) >= float(Cfg.VIS_CONF_MIN) else None)
         # POZ kestirimi: AYNI kare uzerinde ILAVE inference + PnP (kilit DISINDA).
         # SEYREK kosar: best.pt hedef gormusken her POZ_HER_N turda bir. Gozlemci-only
@@ -973,7 +1053,8 @@ def dedektor_dongusu():
         poz_sayac += 1
         if (poz_dedektor is not None and poz_dedektor.hazir
                 and poz_cozucu is not None and bgr is not None
-                and det is not None and poz_sayac % POZ_HER_N == 0):
+                and det is not None and det.get("tespit_mi", True)   # coast karesinde poz kosma
+                and poz_sayac % POZ_HER_N == 0):
             poz_kostu = True
             try:
                 _t_poz = time.perf_counter()
@@ -998,11 +1079,13 @@ def dedektor_dongusu():
         if ui_det is not None and det is not None:
             t_det = float(det.get("t", time.perf_counter()))
             ui_det["t_det"] = t_det
-            if onceki_ui is not None and 0.0 < (t_det - onceki_ui[2]) < 0.5:
+            # ayni track_id sarti: ID degistiyse (yeni iz) onceki konumdan hiz turetme
+            if (onceki_ui is not None and onceki_ui[3] == ui_det.get("track_id")
+                    and 0.0 < (t_det - onceki_ui[2]) < 0.5):
                 dt_ui = t_det - onceki_ui[2]
                 ui_det["vx"] = (ui_det["cx"] - onceki_ui[0]) / dt_ui
                 ui_det["vy"] = (ui_det["cy"] - onceki_ui[1]) / dt_ui
-            onceki_ui = (ui_det["cx"], ui_det["cy"], t_det)
+            onceki_ui = (ui_det["cx"], ui_det["cy"], t_det, ui_det.get("track_id"))
         with beyin_lock:                              # sonucu ANLIK yaz (kilit ICINDE)
             beyin.set_gorsel_tespit(det_beyin)
             if poz_kostu and poz_ui is not None:      # TAZE poz -> beyne (ongorulu yaw lead besler)
@@ -1320,6 +1403,8 @@ class Handler(BaseHTTPRequestHandler):
                 poz = dict(_son_poz_ui) if _son_poz_ui is not None else None
             if det is not None and "t_det" in det:
                 det["yas_s"] = round(max(0.0, time.perf_counter() - det.pop("t_det")), 3)
+            if det is not None and det.get("id") is None:
+                det["id"] = det.get("track_id")       # hizli kanal ID etiketi (ByteTrack)
             if poz is not None and "t_poz" in poz:
                 # iskelet yas telafisi: poz seyrek (POZ_HER_N) -> bbox'tan da bayat;
                 # istemci kp'leri bbox hiziyla yas kadar ILERI kaydirir.

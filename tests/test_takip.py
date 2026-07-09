@@ -31,17 +31,32 @@ def test_iou_ve_kalman_donusum():
 
 
 def test_confirmed_min_hits():
-    # 5 ardisik tespit -> CONFIRMED (mevcut FSM "5 kare" kurali)
+    # ONAY_MIN_HIT olcumde CONFIRMED (toplam; ardisik SART DEGIL — 9 Tem canli dersi:
+    # ~8 FPS dongude dedektor delikleri ardisik sayaci hep sifirlayip izi oldururdu)
     tp = tk.Takipci()
     cx = 500.0
-    for i in range(4):
+    n = tk.TakipCfg.ONAY_MIN_HIT
+    for i in range(n - 1):
         out = tp.guncelle([_det(cx + i * 2, 400)], 0.02)
         assert out is None, i               # TENTATIVE: FSM'e sunulmaz
-    out = tp.guncelle([_det(cx + 8, 400)], 0.02)   # 5. eslesme
+    out = tp.guncelle([_det(cx + 2 * n, 400)], 0.02)   # n. olcum
     assert out is not None
     assert out["track_durumu"] == "CONFIRMED"
     assert out["tespit_mi"] is True
     assert "track_id" in out and "bbox" in out
+
+
+def test_delikli_tespit_yine_onaylanir():
+    # CANLI SENARYO (8 FPS, dt=0.12): olcumler arasinda tek-kare delik olsa da
+    # iz olmez (TENT_COAST_S affi) ve toplam hit ONAY_MIN_HIT'e ulasinca onaylanir.
+    tp = tk.Takipci()
+    out = None
+    for i in range(6):                       # var-yok-var-yok-var-yok
+        dets = [_det(500 + i * 3, 400)] if i % 2 == 0 else []
+        out = tp.guncelle(dets, 0.12)
+    # son tik delik oldugundan iz LOST'ta olabilir; onemli olan ONAYLANMIS olmasi
+    assert tp.en_iyi_track() is not None, \
+        "delikli ama tekrarlanan tespit onaylanmali (eski kod burada izi olduruyordu)"
 
 
 def test_parazit_id_sabit():
@@ -59,14 +74,14 @@ def test_parazit_id_sabit():
 
 
 def test_sahte_pozitif_confirmed_olamaz():
-    # tek-kare parazit (ardisik olmayan): CONFIRMED'e ulasamaz, cabuk oler
+    # tek/cift-kare parazit: ONAY_MIN_HIT olcume ulasamadan TENT_COAST_S dolar, oler.
+    # (dt=0.12 = canli ~8 FPS; parazit 2 kare gorunur, sonra kaybolur)
     tp = tk.Takipci()
-    for i in range(10):
-        det = [_det(500, 400, conf=0.9)] if i % 3 == 0 else []   # 3 tikte 1 gorunur
-        tp.guncelle(det, 0.02)
-    # ardisik eslesme hic 5'e ulasmaz -> hic CONFIRMED yok
+    for i in range(8):
+        det = [_det(500, 400, conf=0.9)] if i < 2 else []
+        tp.guncelle(det, 0.12)
     assert tp.en_iyi_track() is None
-    assert all(t.durum != "CONFIRMED" for t in tp.trackler)
+    assert len(tp.trackler) == 0, "parazit izi TENT_COAST_S sonunda temizlenmeli"
 
 
 def test_dusuk_conf_yeni_track_acamaz():
@@ -83,7 +98,7 @@ def test_coast_ve_tespit_mi():
     for i in range(6):
         tp.guncelle([_det(500 + i, 400)], 0.02)
     tid = tp.en_iyi_track().id
-    # 3 tik olcumsuz (coast, MAX_COAST=25 altinda)
+    # 3 tik olcumsuz (coast; 3*0.02s = COAST_S altinda)
     for _ in range(3):
         out = tp.guncelle([], 0.02)
         assert out is not None and out["track_id"] == tid   # ID surer (coast)
@@ -95,13 +110,32 @@ def test_coast_ve_tespit_mi():
 
 
 def test_coast_asimi_removed():
+    # olcumsuz sure COAST_S'i asinca iz REMOVED (sure-tabanli: dongu hizi ne olursa
+    # olsun hayalet kutu en fazla COAST_S saniye yasar — 9 Tem canli dersi)
     tp = tk.Takipci()
     for i in range(6):
         tp.guncelle([_det(500, 400)], 0.02)
-    for _ in range(tk.TakipCfg.MAX_COAST + 2):
-        tp.guncelle([], 0.02)
+    dt = 0.12                                        # canli ~8 FPS
+    for _ in range(int(tk.TakipCfg.COAST_S / dt) + 2):
+        tp.guncelle([], dt)
     assert tp.en_iyi_track() is None
     assert len(tp.trackler) == 0        # REMOVED temizlendi
+
+
+def test_olculen_iz_hayaleti_bastirir():
+    # Iki CONFIRMED iz: eski/uzun-yasayan iz coast'a dustu (hayalet), yeni iz BU TIK
+    # olculdu -> cikti OLCULEN izi vermeli (eski max(hits) hayaleti secip gercek
+    # tespiti gizliyordu; 9 Tem canli regresyonun 3. kok nedeni).
+    tp = tk.Takipci()
+    for i in range(10):                              # eski iz: 10 hit
+        tp.guncelle([_det(500, 400)], 0.02)
+    # eski iz kayboldu, baska yerde yeni hedef cikti; ayni anda ikisi de var
+    out = None
+    for i in range(tk.TakipCfg.ONAY_MIN_HIT):        # yeni iz onaylanana kadar
+        out = tp.guncelle([_det(1200, 300)], 0.02)   # eski iz coast'ta (LOST)
+    assert out is not None
+    assert abs(out["cx"] - 1200) < 60, "olculen taze iz secilmeli, coast'taki hayalet degil"
+    assert out["tespit_mi"] is True
 
 
 def test_en_iyi_track_secimi():
@@ -198,6 +232,39 @@ def test_cmc_track_warp_azaltir_kaymayi():
         yaw = yaw_yeni
     assert np.mean(kaymalar_cmc) < 0.5 * np.mean(kaymalar_ham), \
         (np.mean(kaymalar_cmc), np.mean(kaymalar_ham))
+
+
+def test_cmc_clamp_asiri_warp_atlar():
+    # Yanlis-isaret emniyeti: kutuyu ekran genisliginin yarisi kadar firlatan bir
+    # homografi max_kaydirma tavanini asar -> warp ATLANIR (merkez oldugu yerde kalir).
+    W, H = 1920, 1080
+    kf = tk._KalmanKutu((W / 2.0, H / 2.0, 40 * 30, 40.0 / 30.0), tk.TakipCfg())
+    cx0, cy0 = kf.x[0], kf.x[1]
+    # +600 px oteleyen homografi (dogrudan translation)
+    Hbig = np.array([[1.0, 0.0, 600.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    kf.warp_merkez(Hbig, max_kaydirma=0.25 * W)   # 600 > 480 -> atla
+    assert abs(kf.x[0] - cx0) < 1e-6 and abs(kf.x[1] - cy0) < 1e-6, "asiri warp atlanmali"
+    # kucuk warp (100 px < 480) uygulanir
+    Hsmall = np.array([[1.0, 0.0, 100.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]])
+    kf.warp_merkez(Hsmall, max_kaydirma=0.25 * W)
+    assert abs(kf.x[0] - (cx0 + 100)) < 1e-6, "mesru warp uygulanmali"
+
+
+def test_cikti_t_ve_cls_tasima():
+    # cikti() olcum tikinde son_det'in t/cls'ini tasir (server UI yas-telafisi +
+    # sinif etiketi bunlara dayanir); coast tikinde t TASINMAZ (bayat zaman
+    # damgasiyla asiri ileri-cizim olmasin — server 'simdi' atar).
+    tp = tk.Takipci()
+    out = None
+    for i in range(6):
+        out = tp.guncelle([_det(500 + i, 400, t=100.0 + i * 0.05, cls=0)], 0.02)
+    assert out is not None
+    assert out["cls"] == 0
+    assert abs(out["t"] - (100.0 + 5 * 0.05)) < 1e-9
+    assert out["tespit_mi"] is True
+    out = tp.guncelle([], 0.02)                     # olcum yok -> coast
+    assert out is not None and out["tespit_mi"] is False
+    assert "t" not in out
 
 
 if __name__ == "__main__":
