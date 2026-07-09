@@ -17,6 +17,13 @@ pygetwindow; platform_system == "Windows"
 ultralytics
 opencv-python
 
+# --- (OPSIYONEL) TensorRT motor optimizasyonu: models/*.pt -> models/*.engine ---
+# RTX Tensor cekirdegine ozel FP16 motor. YOKSA sistem .pt ile calisir (zorunlu degil).
+# Kurulum:  pip install tensorrt
+# Uretim :  python araclar/tensorrt_export.py   (BU makinede; motor tasinabilir degil)
+# Kapatma :  set AVCI_TRT=0  (.pt'ye don / A-B kiyasi). .engine repoya girmez (.gitignore).
+tensorrt; platform_system == "Windows"
+
 # --- Tune raporu: "Degerleri Yazdir" -> veri/tune_rapor_*.xlsx (web/tune_rapor.py) ---
 # Yoksa sistem zarif bozulur: Excel raporu yazilamaz, arayuz sebebini soyler.
 openpyxl

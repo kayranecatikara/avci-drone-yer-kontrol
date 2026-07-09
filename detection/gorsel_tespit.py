@@ -13,7 +13,30 @@ ultralytics + torch (CUDA wheel) eklenmeli; model models/best.pt'de durur.
 
 Renk notu: ultralytics numpy diziyi BGR varsayar; web.server.grab_frame_bgr() BGR
 ndarray dondurdugunden dogrudan gecmek DOGRU renktir (PIL RGB de kabul edilir).
+
+TENSORRT (2026-07-10): ayni koklu bir `.engine` (RTX Tensor cekirdegine ozel, FP16
+gomulu TensorRT motoru) `.pt` yaninda VARSA ve `AVCI_TRT!=0` ise ONCE o yuklenir;
+agirlik/mantik AYNI, yalniz inference backend hizlanir. Motor yuklenemezse (surum/
+donanim uyumsuz, bozuk) SESSIZCE `.pt`'ye duser -> tespit KAYBOLMAZ. Motoru uretmek:
+`python araclar/tensorrt_export.py` (BU makinede; motor tasinabilir degildir).
 """
+
+import os as _os
+
+
+def _motor_adaylari(model_path):
+    """Yuklenecek model dosyalarini ONCELIK sirasiyla don (ilk basariyla yuklenene kadar
+    denenir). `.engine` (TensorRT motoru) ayni koklu `.pt` yaninda VARSA ve AVCI_TRT!=0 ise
+    ONCE denenir; her durumda `.pt` listenin SONUNDADIR -> motor bozuk/uyumsuzsa sistem
+    tespiti KAYBETMEZ (kural: mevcut calisan sistemi bozma)."""
+    adaylar = []
+    trt_ac = _os.environ.get("AVCI_TRT", "1").strip() != "0"
+    if trt_ac and model_path.lower().endswith(".pt"):
+        motor = model_path[:-3] + ".engine"
+        if _os.path.exists(motor):
+            adaylar.append(motor)
+    adaylar.append(model_path)                          # her zaman .pt (zarif fallback)
+    return adaylar
 
 
 class HedefDedektor:
@@ -30,6 +53,8 @@ class HedefDedektor:
         self.hata = None
         self.task = None            # 'detect' | 'pose' (yukleme sonrasi)
         self.kpt_shape = None       # pose ise (n, dim); PnP [6,3] bekler
+        self.is_engine = False      # yuklenen dosya TensorRT motoru (.engine) mi?
+        self.model_yol = None       # gercekte yuklenen dosya (.engine | .pt)
         try:
             from ultralytics import YOLO
             if self.device is None:                       # cihaz otomatik: cuda varsa kullan
@@ -42,9 +67,32 @@ class HedefDedektor:
             # anlamsiz/yavas -> otomatik kapali. Cagiran acikca half=True/False verebilir.
             if self.half is None:
                 self.half = (self.device == "cuda")
-            self.model = YOLO(model_path)
-            self.names = dict(getattr(self.model, "names", {}) or {})
-            self.task = getattr(self.model, "task", None)
+            # MOTOR ONCE, .pt fallback: adaylari sirayla dene, ilk yuklenen kazanir
+            # (motor bozuksa .pt'ye zarif duser -> tespit kaybolmaz). Motorda task/names
+            # metadata'si guvenilir gelmez -> ultralytics'in onerdigi gibi task="detect"
+            # ACIKCA verilir (best.pt = detect); .pt'de task modelden dogru okunur.
+            son_hata = None
+            for _yol in _motor_adaylari(model_path):
+                try:
+                    _is_eng = _yol.lower().endswith(".engine")
+                    self.model = YOLO(_yol, task="detect") if _is_eng else YOLO(_yol)
+                    self.model_yol = _yol
+                    self.is_engine = _is_eng
+                    break
+                except Exception as _e:
+                    son_hata = _e                         # bir sonraki adayi (or. .pt) dene
+                    self.model = None
+            if self.model is None:
+                raise son_hata if son_hata else RuntimeError("model yuklenemedi")
+            if self.is_engine:
+                self.half = True                          # motora FP16 export'ta gomulu
+                self.task = "detect"                      # yukleme argumaniyla verildi
+            else:
+                self.task = getattr(self.model, "task", None)
+            try:                                          # motorda .names backend yuklemeyi tetikler
+                self.names = dict(getattr(self.model, "names", {}) or {})
+            except Exception:
+                self.names = {}                           # metadata gelmezse UI etiketi bos (kritik degil)
             if self.task == "pose":
                 ks = getattr(getattr(self.model, "model", None), "kpt_shape", None)
                 self.kpt_shape = tuple(ks) if ks is not None else None
@@ -55,6 +103,18 @@ class HedefDedektor:
             self.hata = repr(e)                           # neden yuklenemedi (log icin)
 
     def _warmup(self):
+        # MOTOR (.engine): precision BUILD aninda gomulu -> predict'e half/quantize
+        # GECMEZ (arg'lar motorda anlamsiz); tek plain warmup yeter.
+        if self.is_engine:
+            self._fp16_kwargs = {}
+            try:
+                import numpy as np
+                bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
+                self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
+                                   device=self.device, verbose=False)
+            except Exception:
+                pass
+            return
         # FP16 API SECIMI + isitma: yeni ultralytics 'quantize="fp16"' (uyarisiz),
         # eski surumde bu arg YOK -> TypeError -> 'half=True'ya dus (fonksiyonel).
         # Secilen arg self._fp16_kwargs'a yazilir, tum predict'lerde kullanilir.

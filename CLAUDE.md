@@ -141,6 +141,36 @@ dinamik — yeni ultralytics uyarısız, eski `half`'e düşer; `AVCI_FP16=0` il
 **`POZ_HER_N` 3→5** (pose gözlemci/güdümde yok — 180 ms contention spike'ı seyrekleşir,
 best.pt'ye temiz GPU kalır). best.pt imgsz=1280 KALIR (640'ta çöker). Doğruluk (uzak/küçük
 hedef recall) ayrı iş: eğitim/veri (ekip). Perf ölçüm altyapısı: `AVCI_FP16` env + FPV göstergesi.
+**TENSORRT MOTORU (2026-07-10, kullanıcı isteği — OPSİYONEL/ZARARSIZ):** kullanıcı `.pt`→
+`.engine` (RTX Tensor çekirdeği, FP16 gömülü) optimizasyonu istedi. Yukarıdaki bulgu HÂLÂ
+geçerli — darboğaz oyunun GPU paylaşımı, TensorRT bunu TAM çözmez; ama düz PyTorch FP16'dan
+farklı olarak kernel-fusion ile izole inference'i kısaltıp GPU işgal penceresini daraltarak
+çekişmeyi BİR MİKTAR azaltabilir (net kazanç canlı ölçülmeli; gerçek çözüm yine oyun grafik
+yükünü düşürmek). Uygulama OPT-IN + zarif: `araclar/tensorrt_export.py` motorları üretir
+(imgsz SABİT: best=1280, pose=960 — server predict'iyle birebir; FP16 export'ta gömülü);
+`detection/gorsel_tespit._motor_adaylari` + poz emsali `.pt` yanında `.engine` VARSA önce onu
+yükler, **motor bozuk/uyumsuzsa `.pt`'ye zarif düşer → tespit KAYBOLMAZ** (mevcut sistem
+bozulmaz). Ağırlık/mantık DEĞİŞMEZ, yalnız backend. Anahtar: `AVCI_TRT=0` → `.pt` (A/B).
+`.engine` donanıma özel/taşınamaz → `.gitignore`'da, teslim .zip'ine KONMAZ (kaynak `.pt`).
+Kural 8: tümüyle açıklanabilir ("motor varsa yükle, aynı ağırlık"). Server logu backend'i yazar
+([TensorRT(.engine)] / [.pt]). `tensorrt` requirements'ta opsiyonel (yoksa `.pt` çalışır).
+**ÖLÇÜM SONUCU (RTX 4050 Laptop, izole boş-kare A/B):** DETECT `.pt`-FP16 **11.9 ms** vs
+motor **14.1 ms** (motor BİRAZ YAVAŞ); POSE `.pt` **14.3 ms** vs motor **13.0 ms** (motor biraz
+hızlı). → **kayda değer kazanç YOK** — üstteki bulguyu (model compute-bound değil) DOĞRULAR.
+Motorlar üretildi + entegre + auto-yükleniyor ama fayda ~0; canlı oyun-çekişmesinde ölçmek
+(FPV perf göstergesi) isteğe bağlı. **KEEP/DROP kullanıcıya:** kalsın istenirse dursun, hız
+için gerekmez → `AVCI_TRT=0` ile `.pt`.
+**⛔ KRİTİK TUZAK — EXPORT TORCH'U CPU'YA KIRIYOR:** `tensorrt_export.py` çalıştırınca
+ultralytics "AutoUpdate" `nvidia-modelopt`'u (INT8, bize gereksiz) kurar; o `torch>=2.8`
+istediğinden pip torch'u PyPI'dan **`+cpu` wheel'ine yükseltir → CUDA GİDER** (tüm tespit
+hattı CPU'ya düşer, `torch.cuda.is_available()=False`, "Torch not compiled with CUDA"). Bu
+oturumda 2 kez oldu. **Kalıcı önlem:** `tensorrt_export.py` artık `YOLO_AUTOINSTALL=false`
+set eder (AutoUpdate kapalı) → export bağımlılıkları BİR KEZ elle kurulur (`pip install onnx
+onnxruntime-gpu onnxslim tensorrt-cu12`). **CUDA torch sabiti:** `pip install torch==2.5.1
+torchvision==0.20.1 --index-url .../cu121`; export SONRASI `python -c "import torch;
+print(torch.cuda.is_available())"` → True doğrula. **TensorRT paket seçimi:** sürücü CUDA
+12.7 → `tensorrt-cu12` (CUDA-12); `tensorrt`/`tensorrt-cu13` yanlış (CUDA-13 ister, hata 35).
+`.onnx` ara çıktıları da `.gitignore`'da (runtime'da gereksiz, export'ta silinir).
 
 ## ⭐ BÜYÜK SIFIRLAMA — BASİT IBVS (2026-07-07 v7, kullanıcı kararı)
 Kullanıcı: "bu IBVS işine çok değişik şeyler eklemişsin (PN'i yönelime entegre etmiştik),

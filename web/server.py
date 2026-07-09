@@ -945,8 +945,9 @@ def dedektor_dongusu():
             dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
                                      imgsz=1280, half=FP16_AKTIF)
             if dedektor.hazir:
-                print("[GORSEL] best.pt yuklendi (device=%s, half=%s). Siniflar: %s"
-                      % (dedektor.device, dedektor.half, dedektor.names))
+                _bk = "TensorRT(.engine)" if getattr(dedektor, "is_engine", False) else ".pt"
+                print("[GORSEL] best yuklendi [%s] (device=%s, half=%s). Siniflar: %s"
+                      % (_bk, dedektor.device, dedektor.half, dedektor.names))
             else:
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
@@ -964,9 +965,10 @@ def dedektor_dongusu():
                         from pose.poz_cozucu import PozCozucu, EGITIM_SIRASI
                         poz_cozucu = PozCozucu(conf_esik=0.5, ema_alpha=0.4)
                         _poz_sira = list(EGITIM_SIRASI)
-                        print("[POZ] talon_pose.pt yuklendi (device=%s, half=%s, imgsz=%d) -> PnP poz "
+                        _bkp = "TensorRT(.engine)" if getattr(poz_dedektor, "is_engine", False) else ".pt"
+                        print("[POZ] talon_pose yuklendi [%s] (device=%s, half=%s, imgsz=%d) -> PnP poz "
                               "kestirimi AKTIF (gozlemci; gudume girmez)."
-                              % (poz_dedektor.device, poz_dedektor.half, poz_dedektor.imgsz))
+                              % (_bkp, poz_dedektor.device, poz_dedektor.half, poz_dedektor.imgsz))
                     except Exception as e:
                         poz_dedektor.hazir = False
                         print("[POZ] PnP cozucu yuklenemedi (%r) -> poz kapali." % e)

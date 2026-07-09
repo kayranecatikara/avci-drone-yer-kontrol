@@ -9,6 +9,15 @@ models/bestpose.pt
 # models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
 talon_yolo11m_pose_2_best.pt
 
+# --- TensorRT motorlari (araclar/tensorrt_export.py uretir) ---
+# .engine DONANIMA + TensorRT surumune OZEL, tasinabilir DEGIL: her makinede
+# yeniden uretilir, teslim .zip'ine KONMAZ (kaynak = .pt). Repoya da girmez.
+models/*.engine
+*.engine
+# export ara ciktisi (.pt -> .onnx -> .engine); runtime'da gereksiz
+models/*.onnx
+*.onnx
+
 # --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
 veri/
 kiyas_log.csv

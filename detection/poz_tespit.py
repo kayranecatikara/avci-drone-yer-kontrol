@@ -14,7 +14,26 @@ NOT — keypoint SIRASI: model ciktisi EGITIM sirasindadir (pose/sira_bul.py ile
 deneysel bulundu): [burun, sol_kanat, sag_kanat, kuyruk_arka, sol_kuyruk,
 sag_kuyruk]. talon_keypoints.json REFERANS sirasina cevirme poz_cozucu
 (EGITIM_SIRASI) ve server._normalize_poz'da yapilir — burada HAM sira doner.
+
+TENSORRT (2026-07-10): gorsel_tespit ile ayni desen — `.engine` (FP16 gomulu TensorRT
+motoru) `.pt` yaninda VARSA ve AVCI_TRT!=0 ise ONCE yuklenir, yuklenemezse `.pt`'ye
+zarif duser. Motoru uretmek: `python araclar/tensorrt_export.py`.
 """
+
+import os as _os
+
+
+def _motor_adaylari(model_path):
+    """`.engine` (TensorRT) ayni koklu `.pt` yaninda VARSA ve AVCI_TRT!=0 ise ONCE,
+    her durumda `.pt` SONDA (zarif fallback). gorsel_tespit._motor_adaylari emsali."""
+    adaylar = []
+    trt_ac = _os.environ.get("AVCI_TRT", "1").strip() != "0"
+    if trt_ac and model_path.lower().endswith(".pt"):
+        motor = model_path[:-3] + ".engine"
+        if _os.path.exists(motor):
+            adaylar.append(motor)
+    adaylar.append(model_path)
+    return adaylar
 
 
 class PozDedektor:
@@ -28,6 +47,8 @@ class PozDedektor:
         self.half = half                 # FP16 (None -> cuda'da otomatik AC; cpu'da kapali)
         self._fp16_kwargs = {}           # predict FP16 arg'i (API'ye gore quantize/half)
         self.hata = None
+        self.is_engine = False           # yuklenen dosya TensorRT motoru (.engine) mi?
+        self.model_yol = None            # gercekte yuklenen dosya (.engine | .pt)
         try:
             from ultralytics import YOLO
             if self.device is None:
@@ -38,9 +59,26 @@ class PozDedektor:
                     self.device = "cpu"
             if self.half is None:
                 self.half = (self.device == "cuda")
-            self.model = YOLO(model_path)
-            if getattr(self.model, "task", None) != "pose":
+            # Motorda task metadata'si guvenilir gelmez -> task="pose" ACIKCA verilir
+            # (ultralytics onerisi); .pt'de task modelden okunur, mismatch'te reddedilir.
+            son_hata = None
+            for _yol in _motor_adaylari(model_path):
+                try:
+                    _is_eng = _yol.lower().endswith(".engine")
+                    self.model = YOLO(_yol, task="pose") if _is_eng else YOLO(_yol)
+                    self.model_yol = _yol
+                    self.is_engine = _is_eng
+                    break
+                except Exception as _e:
+                    son_hata = _e
+                    self.model = None
+            if self.model is None:
+                raise son_hata if son_hata else RuntimeError("model yuklenemedi")
+            # .pt'de task modelden gelir (yanlissa reddet); motorda argumanla "pose" garanti.
+            if not self.is_engine and getattr(self.model, "task", None) != "pose":
                 raise ValueError("model 'pose' degil: %r" % getattr(self.model, "task", None))
+            if self.is_engine:
+                self.half = True                          # motora FP16 export'ta gomulu
             self.hazir = True
             self._warmup()
         except Exception as e:
@@ -48,6 +86,17 @@ class PozDedektor:
             self.hata = repr(e)
 
     def _warmup(self):
+        # MOTOR (.engine): FP16 gomulu -> predict'e half/quantize gecmez; tek plain warmup.
+        if self.is_engine:
+            self._fp16_kwargs = {}
+            try:
+                import numpy as np
+                bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
+                self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
+                                   device=self.device, verbose=False)
+            except Exception:
+                pass
+            return
         # FP16 API secimi + isitma (gorsel_tespit ile ayni desen): yeni ultralytics
         # 'quantize="fp16"' (uyarisiz), eski surumde TypeError -> 'half=True'ya dus.
         try:
