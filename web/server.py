@@ -907,9 +907,24 @@ def dedektor_dongusu():
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
             # imgsz=1280: yeni model (v3 pose, 5 Tem) 1280'de egitildi — 640'ta uzak/kucuk
             # hedef kacar. Sadece BBOX ciktisi kullaniliyor (pose keypoint'leri simdilik yok).
-            dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN, imgsz=1280)
+            # TENSORRT (9 Tem teshis kapanisi): models/best.engine VARSA once o denenir —
+            # ayni model GPU'ya derlenmis hali (sim'le GPU kapismasinda inference
+            # suresini kisaltir; kanit: TESHIS_CANLI_INFERENCE.md bench tablosu).
+            # Engine MAKINEYE OZELDIR (gitignore'lu; araclar/teshis_trt_export.py uretir).
+            # Yuklenemezse best.pt'ye ZARIF dusulur — davranis eskisiyle ayni kalir.
+            _engine_yol = os.path.splitext(Cfg.VIS_MODEL_PATH)[0] + ".engine"
+            if os.path.exists(_engine_yol):
+                dedektor = HedefDedektor(_engine_yol, conf=Cfg.VIS_CONF_MIN, imgsz=1280)
+                if dedektor.hazir:
+                    print("[GORSEL] TensorRT engine yuklendi: %s" % os.path.basename(_engine_yol))
+                else:
+                    print("[GORSEL] engine yuklenemedi (%s) -> best.pt'ye dusuluyor."
+                          % dedektor.hata)
+                    dedektor = None
+            if dedektor is None:
+                dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN, imgsz=1280)
             if dedektor.hazir:
-                print("[GORSEL] best.pt yuklendi (device=%s). Siniflar: %s"
+                print("[GORSEL] dedektor hazir (device=%s). Siniflar: %s"
                       % (dedektor.device, dedektor.names))
             else:
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."

@@ -77,9 +77,22 @@ Model TEK sefer + warmup ile yükleniyor; `verbose=False`; çizim tarayıcı can
    bağlanmasına izin veriyordu → 8 Tem doğrulamasında 3 "hayalet" arayüz üst üste
    birikti (yeni kod hiç devreye girmedi). Artık ikinci örnek `[HATA] 8000 portu
    açılamadı` deyip çıkar — bat'taki "TEK arayüz" uyarısının teknik karşılığı.
-4. Uygulanmayanlar (ölçüm gerekçesiyle): `half=True` (kazanç yok, deprecated),
-   `max_det=1` (etkisiz), dxcam'e geçiş (WGC zaten latest-frame + occlusion-proof,
-   yaş ~22 ms sağlıklı), 640-crop (contention çözülmeden gerekçe yok).
+4. **TensorRT engine** (`models/best.engine`, 9 Tem): best.pt → GPU'ya derlenmiş
+   FP16 engine. server.py görev başlangıcında engine VARSA otomatik yükler, yoksa
+   .pt'ye zarif düşer (`Cfg.VIS_MODEL_PATH` yanındaki `.engine`). Engine MAKİNEYE
+   ÖZELDİR → gitignore'lu; başka makinede `pip install tensorrt` + `python
+   araclar\teshis_trt_export.py` (~8-10 dk, tek sefer) ile yeniden üretilir.
+   **Doğrulama (`teshis_engine_kiyas.py`, aynı 100 canlı karede engine vs .pt):**
+   det@.45 birebir aynı (%23=%23), conf farkı −0.021, kutu merkezi kayması medyan
+   **0.6 px** → FP16 tespiti BOZMUYOR. Hız (sim kapalı, tek kare 200-iter):
+   engine 17.6 ms ort / **max 32.6** vs .pt 18.9 ms / max 58.4 → engine kuyruğu
+   (p95/max) yarıya indiriyor; asıl kazanç contention altında ölçülecek (aşağıda).
+   Kare 1280×1280 kullanıldı (server'ın imgsz=1280 scalar sözleşmesiyle uyumlu;
+   rect 736×1280 daha hızlı ama sabit-şekil çakışmasıyla canlıda çöküyor — export
+   scriptindeki UYARI).
+5. Uygulanmayanlar (ölçüm gerekçesiyle): `half=True` .pt'de (kazanç yok, deprecated;
+   FP16 kazancı zaten engine'de), `max_det=1` (etkisiz), dxcam'e geçiş (WGC zaten
+   latest-frame + occlusion-proof, yaş ~22 ms sağlıklı), 640-crop (engine yeterse gereksiz).
 
 ## Yan bulgular
 - `models/talon_pose.pt` diskte YOK (24f1769'da silinmiş) → poz gözlemcisi sessizce
@@ -91,20 +104,31 @@ Model TEK sefer + warmup ile yükleniyor; `verbose=False`; çizim tarayıcı can
 
 ## BEFORE / AFTER
 
-| metrik (sim açık, canlı görev) | BEFORE (8 Tem, ölçüldü) | AFTER (yeniden test bekliyor) | hedef |
-|---|---|---|---|
-| infer p50 | 60-118 ms | ? | — |
-| uçtan-uca yaş ort / p95 | 104 / 176 ms | ? | < 50 ms ort, büyümüyor |
-| dedektör FPS | 10.8 ort | ? | ≥ 30 → *not: 15 Hz tavan bilinçli; hedefin FPS bacağı "kare yakalama+oyun" için geçerli* |
-| tespit doğruluğu | video ±%5 içinde ✅ | (değişmemeli) | ±%5 |
+Bench (sim KAPALI, tek kare 200-iter) — düzeltmelerin kendi başına etkisi:
+| model | ort ms | p95 | max | not |
+|---|---|---|---|---|
+| best.pt (BEFORE) | 18.9 | 22.3 | 58.4 | kuyruklu |
+| best.engine (AFTER) | 17.6 | 22.3 | **32.6** | FP16, kuyruk yarıya |
 
-**Yeniden test (5 dk):** Oyunu aç (60 FPS sınırıyla açılacak) → arayüzü aç → OTO
-görev ≥30 sn → konsol `[TESHIS]` satırlarını gönder (veya CSV'yi ben okurum).
-Yeterli gelmezse sıradaki kademe: TensorRT export (`yolo export model=models/best.pt
-format=engine half=True imgsz=1280`) — beklenen ~2× inference kazancı.
+Canlı görev (sim AÇIK) — asıl ölçüm, KULLANICI UÇUŞU BEKLİYOR:
+| metrik (sim açık, canlı görev) | BEFORE (8 Tem, ölçüldü) | AFTER (engine + FPS sınırı) | hedef |
+|---|---|---|---|
+| infer p50 | 60-118 ms | ölçülecek | — |
+| uçtan-uca yaş ort / p95 | 104 / 176 ms | ölçülecek | < 50 ms ort, büyümüyor |
+| dedektör FPS | 10.8 ort | ölçülecek | ≥ 30 (FPS bacağı kare+oyun; 15 Hz tavan bilinçli) |
+| tespit doğruluğu | video ±%5 içinde ✅ | engine ±%5 (doğrulandı) | ±%5 |
+
+**Son doğrulama (5 dk):** Oyunu aç (60 FPS sınırlı) → **arayüzü BİR kez** aç
+(konsolda `[GORSEL] TensorRT engine yuklendi` satırını gör) → OTO görev ≥30 sn →
+`[TESHIS]` satırlarını gönder (CSV'yi ben de okurum). Engine + FPS sınırı yetmezse
+sıradaki kademe: 640 crop (LOCKED) — ama önce bunun sayısını görelim.
 
 ## Değişen dosyalar
 - `web/server.py` — teşhis kronometreleri + `/api/teshis` + **DEDEKTOR_HEDEF_HZ tavanı**
+  + `allow_reuse_address=False` + **engine otomatik yükleme** (yoksa .pt zarif düşüş)
 - `detection/pencere_yakala.py` — kare varış zaman damgası
-- `araclar/teshis_ab_test.py`, `araclar/teshis_gpu_bench.py` — YENİ ölçüm araçları
+- `araclar/teshis_ab_test.py`, `teshis_gpu_bench.py`, `teshis_engine_kiyas.py`,
+  `teshis_trt_export.py` — YENİ ölçüm/export araçları
+- `requirements.txt` — opsiyonel tensorrt notu; `.gitignore` — engine/onnx/vid.mp4
 - `GameUserSettings.ini` (repo dışı, yedekli) — FrameRateLimit 0→60
+- `models/best.engine` (gitignore'lu, makineye özel) — TensorRT FP16 engine

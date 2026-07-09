@@ -38,3 +38,7 @@ omer_filtre.py.py
 
 # teshis referans videosu (36 MB; kullanici test icin koydu, repoya girmez)
 araclar/vid.mp4
+
+# TensorRT engine/onnx: makineye ozel uretilir (araclar/teshis_trt_export.py), repoya girmez
+models/*.engine
+models/*.onnx

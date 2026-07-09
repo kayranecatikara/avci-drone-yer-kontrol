@@ -25,3 +25,10 @@ opencv-python
 # (web/server.py: PENCERE_YAKALA_AKTIF bayragi; o durumda oyun ONDE tutulmali).
 windows-capture; platform_system == "Windows"
 psutil; platform_system == "Windows"
+
+# --- (OPSIYONEL) TensorRT: canli inference hizlandirma (9 Tem teshis kapanisi) ---
+# models/best.engine uretimi icin gerekir: once `pip install tensorrt` (~2 GB),
+# sonra `python araclar\teshis_trt_export.py`. Engine MAKINEYE OZELDIR (gitignore) —
+# yarisma/baska makinede script yeniden kosulur. KURULU DEGILSE sistem best.pt ile
+# aynen calisir (server.py zarif dusus) — bu yuzden bilerek yorumda, zorunlu degil:
+# tensorrt
