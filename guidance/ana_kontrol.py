@@ -257,7 +257,7 @@ class Cfg:
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
     # True: ~2Hz konsola [Z] satiri basar. drone_z vs hedef irtifasi (filtre & GERCEK),
     # ez, thr, hiz, pitch. Sorun cozulunce False yap.
-    DEBUG_Z = True
+    DEBUG_Z = False
 
     # --- UCUS LOGU (davranis teshisi) ---
     # True iken adim() HER kontrol-tikini (~50 Hz) zengin bir CSV'ye yazar
@@ -279,11 +279,33 @@ class Cfg:
     # DEGER: 7 Tem log analizi — 60 kesin yanlis-poz (gercek hedef 126m uzak/kadraj disi
     # iken conf~0.48 tespit) SAG-ALT'ta kumelendi (ex~0.75-1.0, ey~0.25). Canli FPV'de
     # dogrula/rafine et (arayuz maskeyi kirmizi tarama ile cizer; vis_cx/vis_ey loglanir).
-    PROP_MASKE = [(0.80, 0.55, 1.0, 0.95)]   # sag-alt kose (on-sag pervane)
+    # 2. kutu: oyun HUD metni ("ARMED / TRIGGER: NOT READY") yanlis "talon" olarak
+    # algilaniyordu (conf~0.76; T ve Y harfleri tetikliyor). Kadraj MERKEZINDE (ufuk
+    # altinda) SABIT konumda -> maskele. KOORDINAT TAM KAREDEN OLCULDU (9 Tem ekran
+    # goruntusu): ARMED x0.44-0.55/y0.51-0.55 + TRIGGER:NOT READY x0.34-0.67/y0.58-0.63.
+    # NOT: bu bant kadraj MERKEZI -> ufuk ALTINDA kalan hedefi de eleyebilir; kamera
+    # +25 tilt hedefi ufuk USTUNDE (gokyuzu) tuttugundan pratikte guvenli. FPV kirmizi
+    # overlay'e bakip daralt/genislet.
+    PROP_MASKE = [(0.80, 0.55, 1.0, 0.95),   # sag-alt kose (on-sag pervane)
+                  (0.31, 0.49, 0.70, 0.65)]  # merkez HUD metni (ARMED/TRIGGER:NOT READY)
     VIS_CONF_MIN     = 0.15     # kilit/komut icin asgari guven. 0.45->0.15 (8 Tem ucus_1
                                 # segment kiyasi: tespit %22-33 -> %50-64; yanlis-poz ana
                                 # kumesi PROP_MASKE ile zaten eleniyor). Cok yanlis tespit
                                 # gorursen slider'dan yukselt.
+    # --- SAHI (Slicing Aided Hyper Inference) — uzak/kucuk hedef recall (2026-07-09) ---
+    # Kareyi ortusen dilimlere bol, HER dilimde best.pt kosur, kutulari tam-kare
+    # koordina tasi + NMS ile birlestir. Uzak hedef dilim icinde buyuk oran kaplar
+    # -> dedektor korlugu (15-40 m) azalir. SADECE best.pt (detect); pose modeline
+    # UYGULANMAZ (keypoint dilim-merge yok). Bizim temiz impl (gorsel_tespit._sahi_ham),
+    # sahi paketi GEREKMEZ; kural 8 aciklanabilir. MALIYET: N dilim -> N x inference;
+    # GPU oyunla paylasimli -> SAHI_KOSUL_CONF ile yakin hedefte dilimleme atlanir.
+    SAHI_AKTIF       = True     # False -> tek tam-kare predict (eski davranis, bit-ayni)
+    SAHI_DILIM_PX    = 640      # dilim kenari (px); best.pt imgsz'ine yakin
+    SAHI_ORTUSME     = 0.2      # komsu dilim ortusme orani (kenardaki hedef bolunmesin)
+    SAHI_TAM_KARE    = True     # dilimlere EK tam-kare predict (yakin/buyuk hedef kesilmesin)
+    SAHI_NMS_IOU     = 0.5      # dilim+tam-kare kutu birlestirme IoU esigi
+    SAHI_KOSUL_CONF  = 0.5      # tam-karede conf>=bu kutu VARSA dilimleme ATLA (perf).
+                                # 0 = HER kare dilimlenir (en yuksek recall, en yavas)
     VIS_N_LOCK       = 5        # ardisik gecerli-tespit -> GORSEL_GUDUM (yanlis-poz bastir)
     VIS_STALE_S      = 0.5      # tespit bu sureden eskiyse yok say (kayip mantigi devreye girer)
     VIS_LOST_TO_GPS_S = 0.0     # kayipta GPS'e donmeden once hover suresi (yalniz OTO).
@@ -1092,7 +1114,6 @@ class AvciKontrol:
         if (not revert_izin) or lost_s <= float(Cfg.VIS_LOST_TO_GPS_S):
             return 0.0, 0.0, 0.0, 0.0            # hover: ararken bekle (manuel GORSEL'de HEP)
         # UZUN kayip (yalnizca OTO) -> GPS guduumune GERI DON (yeniden yaklas, yeniden kilitle)
-        print("[GORSEL] Hedef %.1fs kayip -> GPS guduumune GERI DONULDU (yeniden yaklas)." % lost_s)
         self.durum = "ARAMA"
         self._vis_pos_count = 0
         self._vis_lost_count = 0
@@ -1184,8 +1205,6 @@ class AvciKontrol:
                     # aninda tam-lunge/dikey-sicrama yerine ileri-itki+nisan 0'dan acilir.
                     self.ibvs.sifirla()
                     if not self._vis_ilan:
-                        print("[GORSEL] Yakinlik + gorsel kilit saglandi -> GPS YAKLASMAYI BIRAKTI, "
-                              "yonelim/saldiri yalnizca KAMERA verisiyle.")
                         self._vis_ilan = True
 
         if self.durum == "GORSEL_GUDUM":
@@ -1362,7 +1381,6 @@ class AvciKontrol:
                       f"{self.durum} corr=[{corr}]")
 
         if self.handoff and not self.handoff_announced:
-            print(f"[HANDOFF] tespit menzilinde (mesafe<{Cfg.HANDOFF_RANGE:.0f}cm). Gorus devralabilir.")
             self.handoff_announced = True
 
         self._send(thr_raw, pitch_raw, roll_raw, yaw_raw)

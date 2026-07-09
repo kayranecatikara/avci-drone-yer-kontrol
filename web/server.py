@@ -431,7 +431,6 @@ def olay_ekle(sv, mesaj):
     with olay_lock:
         _olay_id += 1
         _olaylar.append({"id": _olay_id, "t": time.time(), "sv": sv, "m": mesaj})
-    print("[OLAY] %s" % mesaj)         # konsol kaydi da videoyla tutarli kalsin
 
 
 # --- Izleyici durumu: YALNIZ kontrol thread'i yazar (tek-yazar); build_telemetry beyin_lock ile okur ---
@@ -827,6 +826,10 @@ def _normalize_poz(pdet, poz, yaw_pitch):
 # ----------------------------------------------------------
 DEBUG_PENCERE = os.environ.get("AVCI_DEBUG_PENCERE", "0").strip() == "1"
 _DEBUG_PENCERE_W = 960          # gosterim genisligi px (oran korunur)
+# OLCUM MODU (maske koordinati bulmak icin): set AVCI_OLC_TESPIT=1 -> her tespitin
+# normalize kutusunu (x0,y0,x1,y1) formatinda basar (dogrudan PROP_MASKE'ye yapistir).
+# MASKESIZ okur ki maskelenmis HUD/pervane kutulari da gorunsun. Kapaliyken sifir maliyet.
+OLC_TESPIT = os.environ.get("AVCI_OLC_TESPIT", "0").strip() == "1"
 
 
 def _debug_pencere_goster(bgr, det, det_gecti, poz):
@@ -942,11 +945,19 @@ def dedektor_dongusu():
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
             # imgsz=1280: yeni model (v3 pose, 5 Tem) 1280'de egitildi — 640'ta uzak/kucuk
             # hedef kacar. Sadece BBOX ciktisi kullaniliyor (pose keypoint'leri simdilik yok).
+            # SAHI (Cfg.SAHI_*): SADECE best.pt (detect) -> uzak/kucuk hedef recall.
+            # Pose dedektorune (PozDedektor) UYGULANMAZ (keypoint dilim-merge yok).
             dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
-                                     imgsz=1280, half=FP16_AKTIF)
+                                     imgsz=1280, half=FP16_AKTIF,
+                                     sahi=bool(getattr(Cfg, "SAHI_AKTIF", False)),
+                                     sahi_dilim=getattr(Cfg, "SAHI_DILIM_PX", 640),
+                                     sahi_ortusme=getattr(Cfg, "SAHI_ORTUSME", 0.2),
+                                     sahi_tam_kare=getattr(Cfg, "SAHI_TAM_KARE", True),
+                                     sahi_nms_iou=getattr(Cfg, "SAHI_NMS_IOU", 0.5),
+                                     sahi_kosul_conf=getattr(Cfg, "SAHI_KOSUL_CONF", 0.5))
             if dedektor.hazir:
-                print("[GORSEL] best.pt yuklendi (device=%s, half=%s). Siniflar: %s"
-                      % (dedektor.device, dedektor.half, dedektor.names))
+                print("[GORSEL] best.pt yuklendi (device=%s, half=%s, sahi=%s). Siniflar: %s"
+                      % (dedektor.device, dedektor.half, dedektor.sahi, dedektor.names))
             else:
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
@@ -1002,6 +1013,14 @@ def dedektor_dongusu():
             if bgr is not None:
                 _cuda_senkron()
                 _perf_det.append((time.perf_counter() - _t_inf) * 1000.0)
+            # OLCUM MODU: maskesiz TUM kutulari normalize (x0,y0,x1,y1) bas -> mask koordinati.
+            if OLC_TESPIT and bgr is not None:
+                _oh, _ow = bgr.shape[:2]
+                for _d in dedektor.tespit_hepsi(bgr, maske=None):
+                    _x0 = (_d["cx"] - _d["w"] / 2) / _ow; _y0 = (_d["cy"] - _d["h"] / 2) / _oh
+                    _x1 = (_d["cx"] + _d["w"] / 2) / _ow; _y1 = (_d["cy"] + _d["h"] / 2) / _oh
+                    print("[OLC] kutu=(%.3f, %.3f, %.3f, %.3f) conf=%.2f"
+                          % (_x0, _y0, _x1, _y1, _d["conf"]))
         except Exception:
             bgr, dets = None, []
         # BYTETRACK + GYRO-CMC: kutulari ZAMANSAL bagla — tek-kare parazit CONFIRMED
@@ -1128,9 +1147,6 @@ def dedektor_dongusu():
                 _t_konsol = _now
                 _perf_log_yaz(_perf["det_ms"], _perf["det_p95"], _perf["poz_ms"],
                               _perf["fps"], _perf["gpu"])
-                print("[PERF] DET %s ms (p95 %s) | POZ %s ms | dongu %s FPS | %s"
-                      % (_perf["det_ms"], _perf["det_p95"], _perf["poz_ms"],
-                         _perf["fps"], _perf["gpu"]))
         else:
             time.sleep(0.05)                          # oyun karesi henuz yok -> CPU'yu bosalt
         # kare varsa inference kendi hizinda pace'lenir (GPU ~30-60 FPS); ekstra sleep YOK
