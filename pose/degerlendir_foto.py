@@ -85,10 +85,11 @@ def main():
     ap.add_argument("--sayi", type=int, default=0, help="islenecek kare (0=hepsi)")
     ap.add_argument("--gorsel", type=int, default=36, help="isaretlenecek ornek kare sayisi")
     ap.add_argument("--conf", type=float, default=0.20, help="tespit conf esigi")
+    ap.add_argument("--model", default=MODEL_YOL, help="poz modeli yolu (kiyas icin override)")
     args = ap.parse_args()
 
     from ultralytics import YOLO
-    model = YOLO(MODEL_YOL)
+    model = YOLO(args.model)
     pc = PozCozucu(conf_esik=0.5, ema_alpha=0.0)    # kare-bagimsiz olcum: EMA/tasima yok
 
     jler = sorted(glob.glob(os.path.join(DATASET, "*.json")))
@@ -99,7 +100,7 @@ def main():
     gorsel_idx = set(np.linspace(0, len(jler) - 1, min(args.gorsel, len(jler)))
                      .round().astype(int).tolist()) if args.gorsel else set()
 
-    print("[EVAL] %d kare | model=%s" % (len(jler), os.path.basename(MODEL_YOL)))
+    print("[EVAL] %d kare | model=%s" % (len(jler), os.path.basename(args.model)))
     print("[EVAL] UYARI: kareler egitim dagilimindan -> sonuc IYIMSER ust sinir.\n")
 
     kayitlar = []            # (gt_m, pred_m, yaw_err, rms, n_kp)

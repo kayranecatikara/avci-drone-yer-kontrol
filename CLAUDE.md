@@ -110,6 +110,26 @@ Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280
 Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
 (640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
 
+## ⭐ YENİ MODELLER ENTEGRE — enson_bbox + ensonpose (2026-07-09)
+Kullanıcının en son eğittiği iki model sisteme alındı: `enson_bbox.pt`→`models/best.pt`
+(20 MB), `ensonpose.pt`→`models/talon_pose.pt` (21 MB). Eskiler `models/best_eski_20260709.pt`
++ `talon_pose_eski_20260709.pt` olarak yedeklendi. **Keypoint sırası AYNI** (`sira_bul.py` ile
+doğrulandı: pred[0..5]=burun/solK/sagK/kuyArka/solKuy/sagKuy → `EGITIM_SIRASI=[0,1,2,5,3,4]`
+değişmedi; yeni modelde eskideki "kararsız pred[4]" uyarısı YOK, oylar daha temiz). Drop-in
+uyumlu (task/sınıf/kpt_shape aynı); PnP şeması (`talon_pose.yaml` berat_json) geçerli.
+**KIYAS (379 kare pose dataset, GT'li; NOT: eski modellerin eğitim dağılımı → eskiye HAFİF
+avantajlı, yine de yeni bbox kazandı):**
+- **BBOX (yeni daha İYİ, güdüm ana girdisi):** tespit% ~berabere (89.2 vs 90.2), güven ort
+  **0.852→0.908**, IoU medyan **0.729→0.773** (IoU>0.5 %80→**%88**) → kutu hedefe daha oturaklı.
+- **POSE (karışık, robustluk net artı):** PnP çözüm **%66→%80** (tespit-yok 28→12, red 100→62 —
+  zor/uzak kareleri daha çok yakalıyor); çözülen karede ortalama hassasiyet biraz düşük (mesafe
+  MAE 2.02→2.81 m, yaw 15.3→22.0° — ama medyanlar yakın: 0.60→0.75 m, 2.7→3.2°; ortalama, yeni
+  modelin eskinin hiç çözemediği zor kareleri de denemesinden şişiyor). Pose gözlemci/lead
+  girdisi olduğundan +%14 çözüm oranı (kaybetmeme) net değerli.
+- Araç: `pose/degerlendir_foto.py --model <yol>` (kıyas için --model eklendi);
+  `scratchpad/bbox_kiyas.py` (tespit/güven/IoU). **CANLI DOĞRULAMA BEKLİYOR** (dataset iyimser;
+  gerçek kalite uçuşta). Kötüleşirse yedekten geri dönülür.
+
 ## ⭐ DİKEY MERKEZLEME ÇÖKÜŞÜ — EGO-PITCH TELAFİSİ AŞIRIYDI (2026-07-09)
 Kullanıcı: "model tracking'i kaybetmese bile araç ortalayamıyor, hedef hemen kameradan
 çıkıyor." VERİ (ucus_log_000321, YALNIZ gerçek-tespit tikleri): **yatay iyi** (|ex| ort 0.16,
