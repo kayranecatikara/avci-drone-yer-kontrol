@@ -307,6 +307,8 @@ TUNE_ALLOW = {
     "VIS_CONF_MIN",      # tespit guven esigi
     "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
     "VIS_KOPRU_S",       # goruntu-duzlemi kopru (olu-hesap) suresi; 0 = kapali
+    "VZ_MAX",            # GPS-yaklasma DIKEY hiz TAVANI (cm/s) — cascade overshoot sinirlayici
+    "KV_Z",              # GPS-yaklasma DIKEY ic-dongu hiz-izleme kazanci (cascade)
 }
 
 # ----------------------------------------------------------
