@@ -261,12 +261,15 @@ def test_kopru_hiz_yoksa_ve_fazdisi_kapali():
 
 
 def test_kopru_boyut_donuk():
-    """Koprude w/h DONUK -> boyut istegi son gercek olcumde kalir; ileri surer, thr=0."""
+    """Koprude w/h DONUK -> boyut istegi son gercek olcumde kalir; UZAK hedefte
+    (boyut<hedef; gercekci kopru ~15-40 m'de olur, bbox kucuk) ileri surer, thr=0."""
     b = _kopru_beyin(Cfg.VIS_STALE_S + 0.3)
+    # UZAK hedef: boyut 0.04 < IBVS_BOYUT_HEDEF (0.065) -> regulator ileri ister.
+    b.son_tespit = _det(cxn=0.5, cyn=0.5, wp=0.04, hp=0.03, t=b.son_tespit_t)
     d = b._gorsel_tespit_oku()
     assert d is not None and d.get("kopru")
     r = b._gorsel_guduum(d, 0.0)
-    assert b.ibvs_tlm.get("boyut") == 0.08, "koprude boyut donuk kalmali: %s" % b.ibvs_tlm.get("boyut")
+    assert b.ibvs_tlm.get("boyut") == 0.04, "koprude boyut donuk kalmali: %s" % b.ibvs_tlm.get("boyut")
     assert r[1] > 0, "boyut<hedef -> koprude ileri surmeli (yatay takip): %s" % (r,)
     assert r[0] == 0.0, "koprude dikey-tut (thr=0)"
 

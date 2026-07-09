@@ -341,15 +341,21 @@ class Cfg:
     # arka plan / alttan yaklasma) — ekstra dikey geometri kodu GEREKMEZ.
     IBVS_K_YAW       = 0.8      # yatay kazanc: yaw = SIGN*K*ex (clamp +-YAW_MAX) ⚙
     IBVS_SIGN_YAW    = +1.0     # ex>0 (hedef SAGDA) -> burnu SAGA cevir; ters tepki gorursen -1
-    IBVS_K_DIKEY     = 2.0      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
-                                # 8 Tem ucus (222830): kullanici 2.25 kullandi; 2.0'a cektim
-                                # (2.25 salinim/asiri tepki riski). Dikey hata buyukse thr zaten
-                                # doygun (clamp) — K'yi asiri buyutmek merkezlemeyi iyilestirmez.
+    IBVS_K_DIKEY     = 3.0      # dikey kazanc: thr = SIGN*K*(-ey) (clamp THR_DN..THR_UP) ⚙
+                                # 9 Tem ucus_2 (202044) VERI: 2.0->3.0 dikey merkezlemeyi
+                                # iyilestirdi (|ey| 0.342->0.214, merkezde kalma %5.9->27.6,
+                                # r 0.517->0.301). Dikey duzeltme daha erken/sert basliyor ->
+                                # hedef kadraj tepesinden kacmadan yakalaniyor. (Eski not: 2.25
+                                # salinim riski demistik; VERI 3.0'da salinim GORMEDI, kalici.)
     IBVS_SIGN_DIKEY  = +1.0     # hedef YUKARIDA (ey<0) -> TIRMAN (thr>0; GPS faziyla ayni kanon).
                                 # SIM'de dikey TERS tepki gorursen -1 yap (tek isaret, tek yer).
-    IBVS_ILERI       = 0.70     # ileri itki TAVANI (0..1; boyut yasasi bunu asamaz) ⚙
-                                # 8 Tem ucus: kullanici 0.65 kullandi; 0.70'e (hedef ~18 m/s
-                                # kaciyor, daha yakina sokulmak icin agresif yaklasma tavani).
+    IBVS_ILERI       = 0.55     # ileri itki TAVANI (0..1; boyut yasasi bunu asamaz) ⚙
+                                # 9 Tem ucus_2 (202044) VERI: 0.70->0.55. Tam ileri itki
+                                # govdeyi burun-asagi yatirip kamerayi dusuruyor -> hedef
+                                # goruntude yukari firlayip kadraj tepesinden kaciyordu
+                                # (ego-pitch dersi). Kismasi merkezlemeyi ~2 kat iyilestirdi
+                                # (r 0.517->0.301). Faz 2 = KILIT (vurus degil) -> yaklasmayi
+                                # biraz yavaslatmak kabul; kapanma yine de arttu (0.31->0.5).
     # --- KILIT-TUT / BOYUT REGULASYONU (2026-07-08, Faz 2 sartname 6.1.2/6.1.4) ---
     # VURUS degil MESAFE TUTMA: bbox eksen orani (max(w/W,h/H) — kilit sayaci metriğiyle
     # AYNI olcu) HEDEF'e P-yasayla surulur:
@@ -360,18 +366,22 @@ class Cfg:
     # K_BOYUT=0 -> regulasyon KAPALI = eski sabit-ileri yasa (canli A/B + kacis kapisi).
     # Girdi yalniz bbox pikselleri -> gorsel-faz GPS yasagina uygun. Terminal vurus AYRI
     # faz olarak sonra (kilit_ok sonrasi karar; o zaman NISAN/ILERI ayri banda gecer).
-    IBVS_BOYUT_HEDEF = 0.12     # bbox eksen orani hedefi (>= VIS_LOCK_PCT 0.06 + marj) ⚙
-                                # 0.09->0.12 (8 Tem ucus 222830: 8-9 m'de bile bbox ~%6.6,
-                                # kilit esigi %6'da salinip dolmuyordu; hedefi 0.12 yapmak
-                                # dengeyi ~%8.5'e cikarir -> istek uzun doygun kalir, drone
-                                # yapabildigi EN YAKINA gider, boyut esigi guvenli gecer).
+    IBVS_BOYUT_HEDEF = 0.065    # bbox eksen orani hedefi (kilit-tut cruise dengesi) ⚙
+                                # 0.12->0.065 (9 Tem ucus_8 221440 VERI: 0.12 hedefi regulatoru
+                                # hep TAVANDA tutup ~3 m'ye ram ediyordu -> overshoot + merkez
+                                # kaybi. 0.065 ~6 m'nin bbox'una denk -> drone ~6 m'de KENDILIGINDEN
+                                # dengelenir (min mesafe 7.55->5.87 m); bbox 5.5 kilit esigini
+                                # gecerken hedefi kadrajda tutmaya sans kalir. Kalici varsayilan
+                                # da bu -> restart'ta eski ram davranisina donmez.
     IBVS_K_BOYUT     = 20.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
                                 # 15->20 (denge boyutunu HEDEF'e yaklastirir: boyut_eq =
                                 # HEDEF - ileri_eq/K; K buyuk -> daha kararli ve yuksek boyut).
     IBVS_GERI_MAX    = 0.15     # fazla yakinken geri itki tavani (0=asla geri gitme) ⚙
-    IBVS_MERKEZ_FREN = 1.4      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
+    IBVS_MERKEZ_FREN = 2.0      # sapma buyudukce ileri kis: pitch *= max(0, 1 - FREN*r).
                                 # 0 = hep tam gaz; buyuk deger = once ortala sonra ilerle ⚙
-                                # 1.0->1.4 (8 Tem ucus_2: fren artisi sonrasi episodlar oturakli).
+                                # 1.4->2.0 (9 Tem ucus_2 202044 VERI: IBVS_ILERI dususuyle
+                                # birlikte hedef merkezde degilken ileriyi daha cok kesip
+                                # ORTALAMAYA oncelik verdi -> |ex| 0.293->0.117).
     # --- DIKEY NISAN (tilt-farkinda; hiz vektorunu hedefe kilitle) ---
     # Kamera +TILT derece YUKARI sabit. Hedefi kadraj MERKEZINDE tutmak = hiz vektorunu
     # hedefin ~TILT altina nisanlamak (kronik dikey undershoot). Hedefi hiz vektorunun
@@ -458,9 +468,12 @@ class Cfg:
     # kaniti icin sayilir: kirmizi kilit dortgeni + 5/10 sn pencere + ANGAJMAN cipi.
     # Kilit tanimi (her tik): hedef MERKEZI Hedef Vurus Alani (AV) icinde VE bbox
     # ekranin EN AZ BIR ekseninde >= VIS_LOCK_PCT. Kesintili kilit sayilir.
-    VIS_LOCK_PCT     = 0.06     # bbox eksen orani esigi. Sartname kurali >=0.05 ama
-                                # tam sinirda calisan algoritma hakem incelemesinde
-                                # "hatali kilit paketi" sayilabilir -> tavsiye edilen 0.06
+    VIS_LOCK_PCT     = 0.055    # bbox eksen orani esigi. Sartname kurali >=0.05; piksel
+                                # gurultusunde 5'in ALTINA saplanmamak icin ust marj koruruz.
+                                # 0.06->0.055 (9 Tem ucus_8 221440 VERI: %6 + merkezde ~0 tik
+                                # -> hedef %6'yi gectiginde merkez disina kaciyor; %5 + merkezde
+                                # 45 tik. 5.5 = kurali (5) korurken kilidi MUMKUN kilan orta
+                                # nokta; 5.0'a inmedik ki gurultuyle esigin altina dusmesin).
     VIS_AV_X         = 0.25     # AV yatay kenar payi (sartname sabiti: %25-%75 bandi)
     VIS_AV_Y         = 0.10     # AV dikey kenar payi (sartname sabiti: %10-%90 bandi)
     VIS_WIN_S        = 10.0     # degerlendirme penceresi (sartname sabiti)
