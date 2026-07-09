@@ -747,6 +747,10 @@ _son_tespit_ui = None      # UI/telemetri icin son NORMALIZE tespit (beyin_lock 
 # mesafe medyan ~%8, yaw medyan ~6 der; 15 m+ guvenilmez -> terminal faz araci.
 POSE_MODEL_PATH = getattr(Cfg, "VIS_POSE_MODEL_PATH",
                           os.path.join(PROJ_ROOT, "models", "talon_pose.pt"))
+# POSE TAMAMEN KAPALI (2026-07-10 kullanici istegi): sadece detection (bbox) kalsin.
+# Pose gozlemci/lead idi ve ~200ms/tik GPU'yu bbox'tan caliyordu. False -> pose modeli
+# HIC yuklenmez, hic kosmaz; roll-lead/poz telemetrisi zarif kapali (poz_dedektor=None).
+POSE_AKTIF = False
 poz_dedektor = None        # PozDedektor | None (lazy; ilk gorev tikinde denenir)
 poz_cozucu = None          # pose.poz_cozucu.PozCozucu (PnP + EMA)
 _poz_sira = None           # model kpt sirasi -> talon_keypoints.json REF sirasi
@@ -943,12 +947,12 @@ def dedektor_dongusu():
             time.sleep(0.05)
             continue
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
-            # imgsz=1280: yeni model (v3 pose, 5 Tem) 1280'de egitildi — 640'ta uzak/kucuk
-            # hedef kacar. Sadece BBOX ciktisi kullaniliyor (pose keypoint'leri simdilik yok).
-            # SAHI (Cfg.SAHI_*): SADECE best.pt (detect) -> uzak/kucuk hedef recall.
-            # Pose dedektorune (PozDedektor) UYGULANMAZ (keypoint dilim-merge yok).
+            # imgsz=640 (2026-07-10): aktif model best3 (yolo11s) 640'ta EGITILDI -> native 640
+            # EN HIZLI (izole 10.7ms/~93FPS; asil darbogaz GPU paylasimi). SAHI (Cfg.SAHI_*):
+            # SADECE best.pt (detect) -> uzak/kucuk hedef recall (dilim=640 ile tutarli).
+            # Pose dedektorune UYGULANMAZ. Model 1280 egitimliyse geri 1280 (uzak recall).
             dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
-                                     imgsz=1280, half=FP16_AKTIF,
+                                     imgsz=640, half=FP16_AKTIF,
                                      sahi=bool(getattr(Cfg, "SAHI_AKTIF", False)),
                                      sahi_dilim=getattr(Cfg, "SAHI_DILIM_PX", 640),
                                      sahi_ortusme=getattr(Cfg, "SAHI_ORTUSME", 0.2),
@@ -962,7 +966,10 @@ def dedektor_dongusu():
                 print("[GORSEL] Dedektor YUKLENEMEDI (%s) -> sistem GPS ile devam eder."
                       % dedektor.hata)
             # POZ modeli (ILAVE gozlemci) — best.pt ile AYNI anda, bir kez denenir.
-            if os.path.exists(POSE_MODEL_PATH):
+            # POSE_AKTIF=False -> pose sistemden TAMAMEN cikarildi (sadece detection).
+            if not POSE_AKTIF:
+                print("[POZ] KAPALI (POSE_AKTIF=False) -> yalnizca detection (bbox). GPU bbox'a kalir.")
+            elif os.path.exists(POSE_MODEL_PATH):
                 # conf=0.35: 0.20'de eski model bos gokyuzune "talon" diyordu (canli
                 # test, 4 Tem) -> overlay'e cop iskelet ciziliyordu; canlida yanlis-alarm
                 # maliyeti yuksek. imgsz=960: pose modeli 960'ta EGITILDI (POSE_REHBERI);
