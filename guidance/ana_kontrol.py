@@ -195,14 +195,33 @@ class Cfg:
     # --- PD GAINS (hata cm cinsinden) — DEGISTIRME ---
     KP_H = 0.00025              # yatay konum -> komut
     KD_H = 0.00060             # yatay turev -> sonumleme (modest; filtre zaten lead'liyor)
-    KP_Z = 0.00040             # irtifa -> throttle
-    KD_Z = 0.00100
-    KI_Z = 0.00020             # YENI dikey INTEGRAL: ileri-ucus tasimasi yuzunden P-only
-                               # hedefin ~14 m USTUNDE dengeleniyordu (kalici hata). I terimi
-                               # bu yanliligi zamanla toplayip kapatir -> drone hedef irtifasina
-                               # oturur (sim: 14 m -> ~0). Anti-windup icin band+clamp asagida.
-    INT_Z_BAND = 2500.0        # cm; integrali SADECE |ez|<25 m iken biriktir (tirmanista windup yok)
-    INT_Z_MAX  = 5000.0        # cm; integral clamp (KI_Z*INT_Z_MAX = 1.0 -> tavani asmaz)
+    # --- DIKEY: KADEMELI (CASCADE) HIZ KONTROLU (2026-07-09 v2 — anti-overshoot+salinim) ---
+    # ESKI P+I+D+damping dikey law SALINIYORDU: drone hedefin ~10-15 m USTUNE firlayip sonra
+    # ~20 m DALIYORDU (gercek-GPS log 172038/171620). VERI kok nedeni verdi:
+    # corr(vz,throttle)=+0.7 (throttle vz'yi KONTROL EDIYOR) AMA ort thr=-0.45 iken ort vz=+80
+    # (climb) -> guclu TIRMANMA-BIAS'i (ileri-ucus tasimasi + oyun dikey fizigi). Saf konum
+    # P/D bu bias etrafinda salindi; saf hiz-damping (eski KV_Z<=0.001) bastiramadi.
+    # YENI: konum -> HEDEF hiz (VZ_MAX tavanli, mesafeyle orantili) -> throttle o hizi izler.
+    #   Setpoint'e yaklasinca hedef hiz 0'a iner (trapez profil) => MOMENTUM ASMASI YAPISAL YOK.
+    #   Integral tirmanma-bias'in DC'sini kapatir. Girdi yalniz kendi irtifa/hiz -> kural OK.
+    VZ_MAX    = 350.0          # cm/s; izin verilen tirmanma/alcalma hiz TAVANI (asil overshoot
+                              #   sinirlayici) [SLIDER]. Cok yavas cikiyorsa ARTIR; overshoot
+                              #   donuyorsa DUSUR. Decel bolgesi genisligi = VZ_MAX/KP_Z_POS.
+    KP_Z_POS  = 1.5           # konum hatasi ez(cm) -> hedef dikey hiz (cm/s). 1.5 -> son ~2.3 m'de
+                              #   (VZ_MAX/KP_Z_POS) hedef hiz 0'a rampalanir (yumusak durus).
+    KV_Z      = 0.00220       # IC DONGU hiz-izleme kazanci: hiz hatasi (cm/s) -> throttle [SLIDER].
+                              #   (Eski "damping" rolu; artik vz_err=vz_hedef-vz uzerinden calisir.)
+                              #   Alcalma/tirmanma tepkisi zayifsa ARTIR; titriyorsa DUSUR.
+    KI_Z_VEL  = 0.00150       # hiz hatasi INTEGRALI -> throttle: kalici climb-bias'i (thr=0'da bile
+                              #   tirmanma) kapatir -> drone hedef irtifasinda oturur, surekli yukselmez.
+    INT_Z_AUTH= 0.60          # integral throttle YETKI tavani (+-; anti-windup, salinim sigortasi)
+    INT_Z_BAND = 2500.0       # cm; integrali SADECE |ez|<25 m iken biriktir (buyuk manevrada windup yok)
+    INT_Z_MAX  = 8000.0       # integral state clamp (yetki INT_Z_AUTH ile ayrica sinirli)
+    # NOT: eski KP_Z/KD_Z/KI_Z dikeyde ARTIK KULLANILMIYOR (cascade devraldi). Yatay PD (KP_H/KD_H)
+    # ve derive (de[0..1]) aynen yasar. Eski degerler tarih/geri-donus icin altta korunur.
+    KP_Z = 0.00040            # (DEPRECATED-dikey) eski konum->throttle P
+    KD_Z = 0.00100            # (DEPRECATED-dikey) eski turev
+    KI_Z = 0.00020            # (DEPRECATED-dikey) eski konum integrali
     KP_YAW = 1.3               # yaw hatasi (rad) -> yaw komutu (sim-tune 2026-07-03: 1.0->1.3, burun hizli)
 
     # --- KOMUT TAVANLARI ---
@@ -474,6 +493,10 @@ class AvciKontrol:
         self._own_pxy = None            # onceki kendi yatay konum (cm)
         self._own_tv = None             # onceki olcum zamani
         self._own_v = np.zeros(2)       # kendi yatay hiz (cm/s, dunya)
+        # kendi DIKEY hiz (drone_z sonlu-fark, EMA) - dikey overshoot sonumleme (anti-firlama)
+        self._own_z = None              # onceki kendi irtifa (cm)
+        self._own_zt = None             # onceki olcum zamani (dikey)
+        self._own_vz = 0.0              # kendi dikey hiz (cm/s, +yukari)
         # GERCEK modda hedef hizi (truth konum sonlu-fark) - carpisma-rotasi icin
         self._gt_prev_p = None          # onceki truth hedef konum (cm)
         self._gt_prev_t = None
@@ -538,6 +561,9 @@ class AvciKontrol:
         self._own_pxy = None            # kendi yatay hiz kestirimini taze baslat
         self._own_tv = None
         self._own_v = np.zeros(2)
+        self._own_z = None              # kendi dikey hiz kestirimini de taze basla
+        self._own_zt = None
+        self._own_vz = 0.0
         self.none_count = 0
         self.last_est = None
         self.handoff = False
@@ -660,6 +686,22 @@ class AvciKontrol:
         elif dt >= 0.5:                                # bayat -> resetle
             self._own_pxy = pxy.copy(); self._own_tv = t
         return self._own_v
+
+    def _own_dikey_hiz(self, z, t):
+        # Kendi DIKEY hizimiz (cm/s, +yukari) — drone_z sonlu-fark + EMA (yatay _own_hiz
+        # emsali). Dikey overshoot sonumleme (-KV_Z*vz) icin; adim() basinda HER tik
+        # cagrilir -> her yolda taze kalir (bayat dt >= 0.5 s ise kestirim resetlenir).
+        if self._own_z is None or self._own_zt is None:
+            self._own_z = z; self._own_zt = t
+            return self._own_vz
+        dt = t - self._own_zt
+        if 1e-3 < dt < 0.5:
+            raw = (z - self._own_z) / dt
+            self._own_vz = 0.7 * self._own_vz + 0.3 * raw
+            self._own_z = z; self._own_zt = t
+        elif dt >= 0.5:                                # bayat -> resetle
+            self._own_z = z; self._own_zt = t
+        return self._own_vz
 
     # ----------------------------------------------------------------
     #  GERCEK modda hedef hizi (cm/s, 3B): truth konum sonlu-fark + EMA.
@@ -1044,6 +1086,7 @@ class AvciKontrol:
         drone_yaw = math.radians(yaw_m) if Cfg.ROT_IN_DEGREES else yaw_m
         t = time.perf_counter()
         v_own = self._own_hiz(drone_pos[:2], t)                 # kendi yatay hiz (cm/s, dunya)
+        vz = self._own_dikey_hiz(float(drone_pos[2]), t)        # kendi dikey hiz (cm/s; overshoot sonumleme)
 
         # 1) J ile bozuk hedefi temizle (self._fresh: yeni kestirim geldi mi?)
         self._hedef_temizle()
@@ -1218,17 +1261,29 @@ class AvciKontrol:
             pitch_raw *= alc_oncelik
             roll_raw  *= alc_oncelik
 
-        # 8) irtifa (PID) — Z_SIGN ile dikey yon. P: KP_Z*ez, I: kalici acigi kapatir
-        #    (ileri-ucus tasimasina karsi ~14 m ustte dengelenmeyi onler), D: KD_Z*de[2].
-        #    KP_Z/KD_Z DEGISMEZ; THR_DN=-1.0 tam inme yetkisi.
-        #    Anti-windup: integrali sadece hedefe MAKUL yakinken (|ez|<band) biriktir ve
-        #    clamp'le; uzaktayken (tirmanis) sifirla ki windup olmasin.
+        # 8) irtifa — KADEMELI (CASCADE) HIZ KONTROLU (2026-07-09 v2; anti-overshoot+salinim).
+        #    ESKI P+I+D+damping law SALINIYORDU: hedefin ~10-15 m ustune firlayip sonra ~20 m
+        #    daliyordu (gercek-GPS log 172038/171620). VERI kok nedeni verdi: corr(vz,thr)=+0.7
+        #    (throttle vz'yi kontrol EDIYOR) AMA ort thr=-0.45 iken ort vz=+80 (climb) -> guclu
+        #    tirmanma-BIAS'i (ileri-ucus tasimasi + oyun fizigi); saf konum P/D bias etrafinda
+        #    salinima giriyordu, saf hiz-damping (KV_Z<=0.001) bastiramadi.
+        #    COZUM (standart, aciklanabilir):
+        #      DIS DONGU: konum hatasi -> HEDEF dikey hiz, VZ_MAX'a clamp -> momentum SINIRLI,
+        #                 setpoint'e yaklasinca hedef hiz 0'a iner (trapez) => OVERSHOOT YOK.
+        #      IC DONGU : throttle olculen vz'yi hedef hiza surer (P: KV_Z). Bias'i otomatik
+        #                 yener (hangi throttle gerekiyorsa onu bulur).
+        #      INTEGRAL : kalici hiz hatasini (climb-bias DC'si) kapatir; yetki INT_Z_AUTH'la sinirli.
+        #    Girdi yalniz kendi irtifa/hiz -> GPS-yaklasma fazi, kural OK. (de[2]/KP_Z/KD_Z/KI_Z
+        #    artik dikeyde KULLANILMIYOR; de[0..1] yatay pitch/roll KD'sinde yasar.)
+        vz_hedef = clamp(Cfg.KP_Z_POS * ez, -Cfg.VZ_MAX, Cfg.VZ_MAX)   # dis dongu: hedef vz (cm/s)
+        vz_err = vz_hedef - vz                                          # ic dongu: hiz hatasi (cm/s)
+        # Anti-windup: hiz hatasi integralini SADECE hedefe makul yakinken (|ez|<band) biriktir.
         if abs(ez) < Cfg.INT_Z_BAND:
-            self._ez_int = clamp(self._ez_int + ez * Cfg.DT, -Cfg.INT_Z_MAX, Cfg.INT_Z_MAX)
+            self._ez_int = clamp(self._ez_int + vz_err * Cfg.DT, -Cfg.INT_Z_MAX, Cfg.INT_Z_MAX)
         else:
             self._ez_int = 0.0
-        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KP_Z * ez + Cfg.KI_Z * self._ez_int + Cfg.KD_Z * de[2]),
-                        Cfg.THR_DN, Cfg.THR_UP)
+        i_term = clamp(Cfg.KI_Z_VEL * self._ez_int, -Cfg.INT_Z_AUTH, Cfg.INT_Z_AUTH)
+        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KV_Z * vz_err + i_term), Cfg.THR_DN, Cfg.THR_UP)
 
         # 9) yaw: nazikce burnu hedefe cevir (handoff'ta kamera ortalansin)
         bearing = math.atan2(ey, ex)
@@ -1255,8 +1310,8 @@ class AvciKontrol:
                 raw_s   = f"{raw_z:8.0f}" if raw_z is not None else "    NA  "
                 corr = ",".join(self.drone.get_active_corruption()) or "-"
                 print(f"[Z] dz={drone_pos[2]:8.0f} zref={z_ref:8.0f} ztrue={ztrue_s} "
-                      f"zlead={float(est[2]):8.0f} rawz={raw_s} ez={ez:+7.0f} dez={de[2]:+7.0f} "
-                      f"thr={thr_raw:+.2f} spd={spd:6.0f} pit={pitch_raw:+.2f} dh={d_h:7.0f} "
+                      f"rawz={raw_s} ez={ez:+7.0f} vz={vz:+6.0f} vzhed={vz_hedef:+6.0f} "
+                      f"thr={thr_raw:+.2f} i={i_term:+.2f} spd={spd:6.0f} pit={pitch_raw:+.2f} dh={d_h:7.0f} "
                       f"{self.durum} corr=[{corr}]")
 
         if self.handoff and not self.handoff_announced:

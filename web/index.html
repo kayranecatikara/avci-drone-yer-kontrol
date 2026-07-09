@@ -724,6 +724,10 @@
       ["VIS_LOST_TO_GPS_S","Kayıpta bekleme (s)   (0=kayıpta ANINDA GPS'e dön; titreme koruması VIS_STALE_S'te ayrı)",0,5.0,0.25],
       ["VIS_KOPRU_S","★ Kayıp köprüsü / ölü-hesap (s)   (dedektör deliğinde bbox son hızıyla sanal sürülür; kilit SAYMAZ; 0=kapalı)",0,2.5,0.1],
     ]],
+    ["GPS YAKLAŞMA · DİKEY (cascade hız kontrolü)", [
+      ["VZ_MAX","★★★ Dikey hız TAVANI (cm/s)   (asıl anti-overshoot: tırmanma/alçalma hızını sınırlar → momentum ile hedefin üstüne FIRLAYAMAZ. Hâlâ üstüne çıkıyorsa DÜŞÜR; irtifaya çok yavaş ulaşıyorsa ARTIR)",100,800,10],
+      ["KV_Z","★★ Dikey hız-izleme kazancı   (throttle ölçülen hızı hedefe ne sertlikte sürsün; alçalma/tırmanma tepkisi zayıfsa ARTIR, dikey titreme varsa DÜŞÜR)",0.0005,0.0060,0.0001],
+    ]],
   ];
   let tuneAcik=false;
   // Ondalik basamak sayisini ADIM'dan tureti (0.1->1, 0.05->2, 0.005->3, 0.00005->5, 1/2->0).
