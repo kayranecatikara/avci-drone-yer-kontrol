@@ -160,7 +160,10 @@ class Cfg:
     # hedef HEP ONDE (FOV'da) kalir; gorsel faz devralana kadar gorsel temas korunur
     # (nose_off ~180 flip'leri biter). KISA lead (APPROACH_LEAD_S), 2sn tam lead'in
     # manevrada nisan noktasini savurup drone'u hedefin KARSISINA atmasini onler.
-    APPROACH_STANDOFF = 500.0   # cm (5 m) KOMUT; EFEKTIF takip mesafesi bunun USTUNDE cikar:
+    APPROACH_STANDOFF = 200.0   # cm KOMUT. [TEST 9 Tem: 500(5m)->200(2m), standoff kismen kaldirildi;
+                               # kullanici "daha cok yaklas" denemesi -> GPS efektif ~10m'den ~4m'ye.
+                               # BEKLENTI: overshoot/graze-by artabilir (u4 graze-by dersi); kotuyse 500'e DON.]
+                               # EFEKTIF takip mesafesi KOMUT'un USTUNDE cikar:
                                # hareketli hedefi kovalarken PD gecikmesi (pursuit lag) fazladan
                                # mesafe ekler -> komut ~2x'i efektif olur. Sim gozlemi: komut 10m ->
                                # efektif ~20m; efektifi ~10m'ye indirmek icin komut 5m'ye cekildi.
@@ -330,7 +333,12 @@ class Cfg:
     # kameradan turetilmis veri (son bbox + bbox hizi) -> gorsel-faz GPS yasagina uygun.
     # DURUSTLUK: kopru tespiti KILIT SAYACINA SAYILMAZ (vis_gordu=0, vis_kopru=1
     # loglanir); yalniz GORSEL_GUDUM fazinda uygulanir (OTO kilit sayacini sisirmez).
-    VIS_KOPRU_S      = 1.2      # kopru suresi (s); 0 = kapali ⚙
+    VIS_KOPRU_S      = 0.6      # kopru suresi (s); 0 = kapali ⚙
+                                # 1.2->0.6 (9 Tem ucus_11 vs ucus_12 VERI: manevra yapan hedefi
+                                # 1.2 sn duz-tahmin etmek "bayat konuma gudum"e yol aciyordu
+                                # (kadrajdan kaciriyordu). 0.6: KOPRU tik %53->%33, gercek tespit
+                                # %47->%67, en uzun kesintisiz takip 70->155 tik. Kisa kopru
+                                # delikleri hala kopruler ama bayat-tahmin suresini yariya iner.)
     VIS_KOPRU_V_EMA  = 0.5      # goruntu-hizi EMA katsayisi (yeni olcum agirligi)
     # --- BASIT IBVS (2026-07-07): goruntu merkezi -> bbox merkezi cizgisi ---
     # TEK gorsel yasa (guidance/ibvs_gorsel.py): cizginin YATAY bileseni yaw'a,
@@ -366,13 +374,14 @@ class Cfg:
     # K_BOYUT=0 -> regulasyon KAPALI = eski sabit-ileri yasa (canli A/B + kacis kapisi).
     # Girdi yalniz bbox pikselleri -> gorsel-faz GPS yasagina uygun. Terminal vurus AYRI
     # faz olarak sonra (kilit_ok sonrasi karar; o zaman NISAN/ILERI ayri banda gecer).
-    IBVS_BOYUT_HEDEF = 0.065    # bbox eksen orani hedefi (kilit-tut cruise dengesi) ⚙
-                                # 0.12->0.065 (9 Tem ucus_8 221440 VERI: 0.12 hedefi regulatoru
-                                # hep TAVANDA tutup ~3 m'ye ram ediyordu -> overshoot + merkez
-                                # kaybi. 0.065 ~6 m'nin bbox'una denk -> drone ~6 m'de KENDILIGINDEN
-                                # dengelenir (min mesafe 7.55->5.87 m); bbox 5.5 kilit esigini
-                                # gecerken hedefi kadrajda tutmaya sans kalir. Kalici varsayilan
-                                # da bu -> restart'ta eski ram davranisina donmez.
+    IBVS_BOYUT_HEDEF = 0.05     # bbox eksen orani hedefi (kilit-tut cruise dengesi) ⚙
+                                # 0.065->0.05 (9 Tem ucus_9/10 VERI: ~6 m'ye ram etmek tespiti
+                                # COKERTIYOR — 4-8 m'de tespit %30-38 vs 25-40 m'de %91; yakinda
+                                # hedef kadrajdan kaciyor. Ayrica hedef KUCUK: 7.5 m'de bile bbox
+                                # yalniz ~%3.3 (kilit boyut esigi zaten dedektor-sinirli, yaklasarak
+                                # cozulmuyor). Bu yuzden "en cok yaklas"tan vazgecip EN IYI GORDUGU
+                                # ~8-10 m'de dengede tut -> kesintisiz takip uzasin. Kilit boyut
+                                # kapisi ayri is (model yakin-mesafe iyilestirmesi).
     IBVS_K_BOYUT     = 20.0     # boyut hatasi -> ileri itki kazanci (0=KAPALI/eski yasa) ⚙
                                 # 15->20 (denge boyutunu HEDEF'e yaklastirir: boyut_eq =
                                 # HEDEF - ileri_eq/K; K buyuk -> daha kararli ve yuksek boyut).
