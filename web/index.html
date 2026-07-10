@@ -53,19 +53,6 @@
     box-shadow:inset 0 0 0 1px var(--accent)}
   .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
 
-  /* ---- Güdüm pipeline switch (test: OTO / GPS / GÖRSEL) ---- */
-  .gudum-switch{margin:2px 0 10px}
-  .gudum-switch .gs-label{font-size:10px;letter-spacing:1px;color:var(--muted);
-    text-transform:uppercase;margin-bottom:5px}
-  .gudum-switch .gs-btns{display:flex;gap:6px}
-  .gs-btn{flex:1;padding:8px 4px;background:var(--panel);color:var(--muted);
-    border:1px solid var(--border);border-radius:6px;font-size:12px;font-weight:600;
-    cursor:pointer;transition:.12s}
-  .gs-btn:hover{border-color:var(--accent);color:var(--text)}
-  .gs-btn.active{background:#13202b;border-color:var(--accent);color:var(--accent);
-    box-shadow:inset 0 0 0 1px var(--accent)}
-  .gs-btn.gorsel.active{background:#211b10;border-color:var(--warn);color:var(--warn);
-    box-shadow:inset 0 0 0 1px var(--warn)}
 
   /* ---- Orta panel: görüntü ---- */
   #view{flex:1;display:flex;align-items:center;justify-content:center;
@@ -284,15 +271,6 @@
         <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (GNSS Filtre)</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
 
-        <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
-        <div class="gudum-switch">
-          <div class="gs-label">🔀 Güdüm Pipeline (test)</div>
-          <div class="gs-btns">
-            <button id="gm_OTO" class="gs-btn active" onclick="visMode('OTO')">OTO</button>
-            <button id="gm_GPS" class="gs-btn" onclick="visMode('GPS')">GPS</button>
-            <button id="gm_GORSEL" class="gs-btn gorsel" onclick="visMode('GORSEL')">GÖRSEL</button>
-          </div>
-        </div>
 
         <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>GNSS Filtre</b> ile hedefe gider.<br>
         Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).</p>
@@ -490,19 +468,6 @@
     }catch(e){ $("leftStatus").textContent = "Komut gönderilemedi (sunucu kapalı?)"; }
   }
 
-  // GÜDÜM PIPELINE SWITCH (test): OTO | GPS | GÖRSEL — hangi yol aktif olsun?
-  let visModeSecili = "OTO";
-  function visMode(m){
-    visModeSecili = m;                 // anında UI'ı yansıt (telemetri de doğrulayacak)
-    vurgulaVisMode(m);
-    fetch("/api/command",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({cmd:"vismode",mode:m})})
-      .then(r=>r.json()).then(d=>{ $("leftStatus").textContent = d.msg || ("Güdüm: "+m); })
-      .catch(()=>{ $("leftStatus").textContent = "Mod gönderilemedi (sunucu kapalı?)"; });
-  }
-  function vurgulaVisMode(m){
-    for(const k of ["OTO","GPS","GORSEL"]) $("gm_"+k).classList.toggle("active", k===m);
-  }
 
   // ---- Görev güdümü: GNSS filtresi ile uç ----
   function gorevBaslat(){ gonderKomut("start_filtre"); }
@@ -1052,7 +1017,6 @@
       olayGuncelle(t.olaylar, t.gorev);
       cizMinimap(t);
 
-      if(t.gorsel && t.gorsel.mod) vurgulaVisMode(t.gorsel.mod);  // switch'i gerçek moda eşitle
       drawOverlay(t);          // FPV overlay: bbox/merkez/ID/durum/faz/GPS+takip rozeti/banner
     }catch(e){
       setConn("bad"); dash();
