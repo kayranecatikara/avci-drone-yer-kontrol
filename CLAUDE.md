@@ -1,14 +1,91 @@
 # Avcı Drone — Proje Notları (CLAUDE.md)
 
+## ⭐⭐ GPS YIĞINI KOMPLE DEĞİŞTİ — İnovasyonlu J SÖKÜLDÜ (2026-07-10, kullanıcı kararı)
+Kullanıcı: *"İnovasyonlu J adı dahil her şeyi değiştirdik; GPS'i filtreleyen ve GPS üzerinden
+güdüm yapan iki yeni kod var, öncekileri komple sil, arayüzden de İnovJ'yi kaldır."* YAPILDI:
+- **`fusion/inovasyonlu_j_v2.py` SİLİNDİ** (CT-EKF). Yerine **`fusion/gnss_filtre.py` (GNSSFiltre)**:
+  eksen-bazlı spike temizleme (pencereli lineer-eğim tahmini; sapan ölçüm tahminle değiştirilir,
+  `z/x/y_spike_temizle`) + eğimden hız kestirimi + **güven-ağırlıklı gecikme telafisi**
+  (`guncelle` lead'li konum döner; `durum_gudum()` lead'siz {pos,vel}). Bozulma-toleransları
+  metre cinsinden dahili sabitler (MAX_HEDEF_HIZ, COOLDOWN_*, GAP_DT).
+- **GPS-yaklaşma güdümü `guidance/gps_takip.py`'ye (GPSTakip + GPSCfg) taşındı:** kalkış (AGL),
+  GNSS temizleme çağrısı, kesintide ölü-hesap (DR ≤ `DR_MAX_S=30 sn`), yatay PD + dikey PID,
+  alçalma önceliği, **eksen-bazlı rate-limit** (`MAX_DELTA_THR/PITCH/ROLL/YAW`), yaw. Tüm GPS
+  sabitleri (kazanç/tavan/işaret) artık **GPSCfg**'de — `ana_kontrol.Cfg`'de DEĞİL.
+- **`AvciKontrol` ince yönlendirici oldu:** GPS fazında `self.gps.adim()`'e DEVREDER; `son_temiz/
+  son_xy_anlik/son_hiz/prev` artık `gps_takip`'e PROXY (property). Kendi işi: FSM (görsel-devir
+  handoff), görsel faz (basit IBVS), kilit sayacı, uçuş logu. "Gerçek GPS" test modu =
+  `_GercekGPSTakip` alt sınıfı (yalnız `_hedef_temizle` override; kontrol yasası aynı).
+- **Görsel fazda filtre SICAK tutulur** (`gps._hedef_temizle` her tik) ama çıktısı komuta GİRMEZ
+  → ani GPS dönüşünde DR sayacı sahte "uzun kesinti" görmez. **GPS yasağı yapısal korunur**
+  (IBVS imzasında konum/hız yok). Uygulanan komut TEK sözlükte (`gps.prev`) → GPS↔GÖRSEL
+  geçişlerinde rate-limit sürekliliği (sarsıntı yok).
+- **Arayüz/sunucu:** "İnovasyonlu J" → "GNSS Filtre" (buton/etiket/panel/kaynak adı); `start`/
+  `start_v2` → kaynak "filtre"; kıyas ölçümü GNSSFiltre; TUNE_ALLOW'dan VZ_MAX/KV_Z çıktı
+  (GPS tune artık GPSCfg'den). `beyin.j_hatalar`→`filtre_hatalar`; `none_count` kaldırıldı.
+- Testler: çekirdek 4 dosya + araçlar geçiyor (test_prop_maske 2/4 PRE-EXISTING, YOLO modeli
+  gerekli). Uçtan uca sahte-drone: kalkış→GPS yaklaşma→handoff→GORSEL→kayıpta GPS revert OK.
+- **CANLI DOĞRULAMA BEKLİYOR:** yeni GPS yığını gerçek sim uçuşunda görülmedi; ilk uçuşta GPS
+  yaklaşma davranışı (kalkış AGL, PD/PID işaretleri, DR) + handoff mesafesi doğrulanmalı.
+- ⚠️ Aşağıdaki ESKİ notlarda "İnovasyonlu J / inovasyonlu_j_v2 / CT-EKF / son_temiz 2sn lead /
+  R=100" geçen her yer BAYAT — GPS tarafı için `fusion/gnss_filtre.py` + `guidance/gps_takip.py`
+  esas. (Görsel faz, tracking, model notları geçerli.)
+
+## ⭐ YENİ DETECTION MODELİ yolo26n@1280 — CANLI A/B (2026-07-10)
+Kullanıcı yeni bbox modeli eğitti (`best (4).pt` = yolo26**n**@1280, 5.4 MB). **ÇEVRİMDIŞI
+BENCHMARK (229 GT'li kare `C:\talon_pose_data\dataset` + 9 zor `kacan_kareler`; araç
+`scratchpad/model_kiyas*.py`):** yeni model ana sette birebir @960 kıyasta **HAFİF GERİLEME** —
+recall %95.6→%93.9, güven 0.895→0.874, IoU medyan 0.779≈0.789 (kutu ~aynı). **HIZ KAZANCI YOK:**
+yolo26n@960 (21.1 ms) ≈ yolo26s@960 (21.7 ms) — nano'nun küçük ağı bu boyutlarda GPU'yu doyurmuyor;
+@1280 daha yavaş (26.9 ms). Tek pozitif: ZOR karelerde (eski modelin conf0 kaçırdıkları) yeni@960
+5/9 vs eski 2/9 ateşliyor (ama 9 kare, düşük conf ~0.5 — güvenilmez sinyal). Verdict: net iyileşme
+YOK. **A/B canlı test edildi (ucus_log 073115, yeni model+yeni güdüm): tespit %65 ≈ eski %67
+(nötr); zor-kare sinyali 9 karede doğrulanmadı.** → **2026-07-10 GERİ ALINDI:** kullanıcı kararıyla
+`models/best.pt` = yolo26s@960 (bilinen daha iyi model) restore edildi. Yeni model kullanıcının
+`best (4).pt` dosyasında duruyor; tekrar denemek istenirse `cp "best (4).pt" models/best.pt`.
+(`models/best_yolo26s960_20260710.pt` yedeği artık best.pt ile aynı — redundant, silinebilir.)
+
+## ⭐ KİLİT ÇÖZÜMÜ — STAND-OFF + YAKINLIK-ÖLÇEKLİ KAZANÇ (2026-07-10, VERİ)
+Kullanıcı: "bir sürü parametre var, ayarlayarak kilit sağlayamıyorum; çok yaklaşıp sürekli
+takip kopuyor." 4 uçuş logu analizi (062231 vb.) kök nedeni gösterdi: **takip aslında
+kopmuyor** (en uzun kesintisiz 221 tik ≈ 27 sn, görsel fazın %67-82'sinde gerçek tespit).
+Kilit dolmuyor (kilit_win_s MAX ~0.7 sn / isteri 5) çünkü **YAKINA girince (bbox≥%6) hedef
+kadraj KENARINA kaçıyor:** yakınken `|vis_ex|` medyan 0.11→**0.52** (p90 0.75), merkezleme
+kapısını geçen tik %26, `yaw_cmd` **0.60 TAVANINDA doyuyor ama yetişmiyor**. Segment tepe
+anlarında hedef yana (ex 0.58) / üste (ey −0.87) / alta (ey +0.61) kadrajdan çıkıyor. Fizik:
+hedefin görüntüdeki açısal hızı ~ v_yan/mesafe; yaklaşınca mesafe küçülür → sabit kazanç geride
+kalır (klasik yakın-mesafe kuyruk-takibi). Kullanıcı `IBVS_BOYUT_HEDEF=0.12` ile sistemi
+merkezleyemediği %12 bölgesine DALMAYA zorluyordu. **İKİ yapısal çözüm (ikisi de salt bbox
+verisi → GPS yasağına uygun):**
+- **(1) Stand-off stratejisi:** `IBVS_BOYUT_HEDEF 0.12→0.08` (kilit eşiği %6'nın üstünde AMA
+  merkezleyebildiğin mesafede DUR, dalma → gereken dönüş hızı ~%33 azalır). `IBVS_K_BOYUT
+  10→20` (0.08'e düşünce K=10 çok erken frenliyordu; K=20 ~%4.25'e kadar tam yaklaşma, sonra
+  4-8% bandında frenleyip stand-off'ta oturur: "uzaktan hızlı yaklaş, %8'de firmly dur").
+- **(2) Yakınlık-ölçekli kazanç (YENİ, `ibvs_gorsel.hesapla`):** `k_yakin = 1 + IBVS_YAKIN_KAZANC
+  * clamp(boyut_f/BOYUT_HEDEF, 0, 2)`; yaw VE dikey kazancı bununla çarpılır. Uzakta k=1
+  (yaklaşma kararlı, eski davranış); stand-off'ta 1+KAZANC; yakında 1+2·KAZANC tavanı. Hedef
+  yaklaştıkça artan açısal hıza kazanç otomatik uyar → kenara kaçma azalır. `IBVS_YAKIN_KAZANC=1.0`
+  (0=kapalı, slider). Sim: ex=0.4'te yaw uzak 0.54 → yakın 0.80 tavanına ERKEN dayanıyor.
+- **Destek ayarlar:** `IBVS_K_YAW 0.85→1.2` (yatay sıkılaştır), `YAW_MAX 0.60→0.80` (dönüş
+  yetkisi; 0.60'ta doyuyordu), `IBVS_MERKEZ_FREN 0.60→1.1` ("önce ortala SONRA yaklaş" —
+  kenardayken dalıp kaybetmeyi önler).
+- Telemetri `gudum.ibvs.k_yakin`; slider `IBVS_YAKIN_KAZANC` (0-3). Testler: `test_ibvs_gorsel`
+  27/27 (2 yeni yakınlık testi), `test_kilit_takip` 17/17 (köprü boyut testi 0.04'e uyarlandı).
+- **DÜRÜST NOT:** Slider+kod ile kilit **çok muhtemel** ama garanti değil — hedef %8 stand-off'ta
+  bile aracın dönüşünü aşacak kadar sert manevra yaparsa kinematik tavana çarpılır. **CANLI
+  DOĞRULAMA BEKLİYOR:** bir uçuş + kilit_win_s'nin 5 sn'ye yaklaşması. Canlı tune: yakınken hâlâ
+  kenara kaçıyorsa `IBVS_YAKIN_KAZANC`↑ veya `IBVS_BOYUT_HEDEF`↓; yakında salınım varsa ikisi↓.
+
 ## ASIL HEDEF
 Bu projenin asıl amacı **Simülasyon Uçuş Kanıt Videosu** aşamasından geçmektir.
 Tüm mimari ve kod kararları, şartnamedeki görev akışını ve video isterlerini
 EKSİKSİZ karşılayacak şekilde alınır.
 
 ## ÇALIŞMA İLKELERİ (değişmez)
-- **Sadece üzerinde çalıştığımız, açıklayabildiğimiz şeyi kullan: İnovasyonlu J**
-  (`inovasyonlu_j_v2.py`, CT-EKF GNSS düzeltici). IMM-EKF veya bakmadığımız yabancı
-  modüller entegre EDİLMEZ. (Yarışma kuralı 8: her bileşeni açıklayabilmeliyiz.)
+- **Sadece üzerinde çalıştığımız, açıklayabildiğimiz şeyi kullan: GNSS Filtre**
+  (`fusion/gnss_filtre.py`, eksen-bazlı spike temizleme + hız kestirimi) ve GPS güdümü
+  (`guidance/gps_takip.py`). Bakmadığımız yabancı modüller entegre EDİLMEZ. (Kural 8: her
+  bileşeni açıklayabilmeliyiz.)
 - **Düzgün/açıklanabilir parçaları entegre et, saçma/overfit parçaları etme.**
   Senaryoya aşırı-uydurulmuş sabitler (örn. "lock 5.2 sn", death_plunge) kullanılmaz.
 - **Hazır güdüm yazılımı doğrudan kullanılmaz** (kural 6). Kullandığımız her yöntem
@@ -18,7 +95,7 @@ EKSİKSİZ karşılayacak şekilde alınır.
 
 ## GPS GÜDÜMÜNÜN ROLÜ (net sınır)
 GPS güdümü **öldürücü faz değildir.** Görevi:
-1. Bozuk GNSS'i optimize et (İnovasyonlu J ile temizle + hedef hızını kestir).
+1. Bozuk GNSS'i optimize et (GNSS Filtre ile temizle + hedef hızını kestir).
 2. Araca yönel (öngörülü/lead yönelim — hedefin gideceği yere nişan al).
 3. Hedefle **kesintisiz, düzgün görsel temas** kur (kamera FOV'unda merkezde tut).
 4. Görsel güdüm fazına (YOLO/CV) temiz devret (ARAMA→KILIT). Terminal vuruş görsel fazın işi.
@@ -37,8 +114,9 @@ ASLA GPS/J tabanlı bir çözüm önerme; pose keypoint'i GÖRSEL veridir, serbe
 
 ## SİSTEM MİMARİSİ (modül → şartname teslim eşlemesi)
 - `drone_sdk.py`        → simülasyon I/O (input/telemetri); şartname "input.py" muadili.
-- `inovasyonlu_j_v2.py` → sensör füzyonu / filtreleme / tahmin (GNSS temizleme + hız kestirimi).
-- `ana_kontrol.py`      → güdüm ve karar mekanizması (öngörülü yönelim + ARAMA→KILIT FSM).
+- `fusion/gnss_filtre.py` → sensör füzyonu / filtreleme / tahmin (GNSS spike temizleme + hız kestirimi).
+- `guidance/gps_takip.py` → GPS-yaklaşma güdümü (kalkış/PD/PID/ölü-hesap; GPSCfg).
+- `ana_kontrol.py`      → karar mekanizması: FSM (ARAMA/KILIT↔GORSEL_GUDUM) + görsel faz devri.
 - `server.py`+`index.html` → görev arayüzü, telemetri, **10 video isterinin görünürlüğü**
   (aşağıdaki bölüm). Olay günlüğü + görev izleyici `server.py`'de; ID/faz/vuruş overlay'i
   index.html'de. GÜDÜM KODUNA DOKUNULMAZ (bkz. VİDEO ÇIKTILARI ARAYÜZÜ).

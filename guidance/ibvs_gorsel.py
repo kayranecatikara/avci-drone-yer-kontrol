@@ -86,6 +86,11 @@ class AvciIBVS:
         self.ey_f = 0.0              # EMA dikey sapma (-1 ust .. +1 alt)
         self.boyut_f = 0.0           # EMA bbox eksen orani max(w/W,h/H) — KILIT-TUT girdisi
         self._had = False            # ilk kare EMA'siz alinir
+        # KAPANMA-HIZI FRENI (TTC): bbox buyume hizi durumu
+        self._boyut_prev = 0.0       # onceki tik boyut_f (hiz icin)
+        self._t_prev = None          # onceki tik kare zamani (det["t"])
+        self._dboyut_ema = 0.0       # boyut hizi EMA (gurultu bastir)
+        self._dboyut_dt = 0.0        # anlik yumusatilmis boyut hizi (fraction/s)
         self.roll_f = 0.0            # EMA hedef bank (EGO-TELAFILI roll, rad; pose kanat uclarindan)
         self._roll_had = False       # ilk gecerli roll EMA'siz alinir
         self._roll_raw_deg = 0.0     # ANLIK ham goruntu-roll (ego-telafisiz, EMA'siz; teshis/A-B)
@@ -157,6 +162,19 @@ class AvciIBVS:
             self.ex_f, self.ey_f, self.boyut_f = ex, ey, boyut
             self._had = True
 
+        # KAPANMA-HIZI (TTC): bbox buyume hizi dboyut/dt (EMA'li — tespit gurultulu).
+        # bbox HIZLI buyuyorsa arac hedefe hizli kapaniyor/aracak -> asagida ileri FRENI.
+        t_now = det.get("t")
+        if self._t_prev is not None and t_now is not None:
+            dt_b = float(t_now) - self._t_prev
+            if 0.0 < dt_b < 1.0:
+                ham_hiz = (self.boyut_f - self._boyut_prev) / dt_b
+                self._dboyut_ema = 0.7 * self._dboyut_ema + 0.3 * ham_hiz
+                self._dboyut_dt = self._dboyut_ema
+        self._boyut_prev = self.boyut_f
+        if t_now is not None:
+            self._t_prev = float(t_now)
+
         # YUMUSAK GECIS (soft-handoff) RAMPASI — GPS->gorsel gecis surekliligi.
         # GPS ve gorsel yasa TAMAMEN farkli mimaride; gecis tikinde iki sey hedefi
         # kadrajdan atiyor: (1) uzakta ileri itki tavana doyup tam LUNGE veriyor ->
@@ -218,10 +236,20 @@ class AvciIBVS:
         # sonraki donusu oncele. Kapi dususe lead=0 -> saf IBVS. Sadece yaw kanalini etkiler.
         lead, roll_ok = self._roll_lead(poz, W, H, p, own_roll_rad=own_roll_rad)
 
+        # YAKINLIK-OLCEKLI KAZANC (2026-07-10 VERI: yakinken merkezleyememe kok nedeni):
+        # hedefin GORUNTUDEKI acisal hizi ~ v_yan/mesafe; yaklastikca (bbox buyudukce) ayni
+        # yan hiz cok daha hizli piksel kaymasi yapar -> SABIT kazanc geride kalir, hedef
+        # kadraj kenarina kacar (062231: YAKINken |ex| 0.52, yaw 0.60 tavanda doyuyor). Kazanci
+        # boyutla olcekle: k_yakin = 1 + YAKIN_KAZANC*clamp(boyut_f/BOYUT_HEDEF, 0, 2). Uzakta
+        # =1 (yaklasma kararli, eski davranis); stand-off'ta 1+KAZANC; yakinda 1+2*KAZANC tavan.
+        # Girdi yalniz bbox boyutu (kameradan) -> GPS yasagina uygun. 0 = KAPALI (sabit kazanc).
+        yk_ref = float(getattr(p, "IBVS_BOYUT_HEDEF", 0.08))
+        oran = clamp(self.boyut_f / yk_ref, 0.0, 2.0) if yk_ref > 1e-6 else 0.0
+        k_yakin = 1.0 + float(getattr(p, "IBVS_YAKIN_KAZANC", 0.0)) * oran
         # cizginin yatay bileseni (+ongoru lead) -> yaw, dikey sapmasi -> throttle (nisana sur)
-        yaw = clamp(float(p.IBVS_SIGN_YAW) * float(p.IBVS_K_YAW) * self.ex_f + lead,
+        yaw = clamp(float(p.IBVS_SIGN_YAW) * float(p.IBVS_K_YAW) * k_yakin * self.ex_f + lead,
                     -float(p.YAW_MAX), float(p.YAW_MAX))
-        thr = clamp(float(p.IBVS_SIGN_DIKEY) * float(p.IBVS_K_DIKEY) * (-eyy),
+        thr = clamp(float(p.IBVS_SIGN_DIKEY) * float(p.IBVS_K_DIKEY) * k_yakin * (-eyy),
                     float(p.THR_DN), float(p.THR_UP))
         # ileri itki: cizgi (nisandan sapma) buyudukce kisilir (once nisanla, sonra bas gitsin)
         kisma = clamp(1.0 - float(p.IBVS_MERKEZ_FREN) * r, 0.0, 1.0)
@@ -245,6 +273,14 @@ class AvciIBVS:
         geri = max(0.0, float(getattr(p, "IBVS_GERI_MAX", 0.0)))
         ileri_istek = (clamp(kb * (hedef_boyut - self.boyut_f), -geri, ileri_cap)
                        if kb > 0.0 else ileri_cap)
+        # KAPANMA-HIZI FRENI (TTC, 2026-07-10 kullanici istegi): bbox HIZLI buyuyorsa
+        # (hedefe hizli kapaniyor -> ASACAK/carpacak) ileri itkiyi ONCEDEN kis -> hedefi
+        # ASMADAN kilit bandina otur (P->PD; D = boyut hizi). YALNIZ buyurken (dboyut>0)
+        # frenler; hedef uzaklasirken (dboyut<0) dokunmaz. Tek knob: IBVS_FREN_HIZ.
+        fren_hiz = float(getattr(p, "IBVS_FREN_HIZ", 0.0))
+        if fren_hiz > 0.0:
+            ileri_istek = clamp(ileri_istek - fren_hiz * max(0.0, self._dboyut_dt),
+                                -geri, ileri_cap)
         # YAKLASMA-AGIRLIKLI FREN (2026-07-08, "gorsel fazda hizlanamiyor" teshisi):
         # merkez freni (kisma) + alcalma freni (alcal) CARPIMSAL bindiginde ileri itkiyi
         # ~10'da 1'e eziyordu (220830 logu: pitchC med 0.04 vs GPS 0.17; hedef 18 m/s
@@ -276,11 +312,15 @@ class AvciIBVS:
             "kisma": round(kisma, 3),         # ham merkez freni (1=tam gaz)
             "alcal": round(alcal, 3),         # ham alcalma freni (1=serbest; eyy>0'da kisar)
             "yak": round(yak, 3),             # yaklasma agirligi (1=uzak/frensiz, 0=hedefte/fren tam)
+            "k_yakin": round(k_yakin, 2),     # yakinlik-olcekli kazanc carpani (1=uzak, >1=yakinken sik)
             # KILIT-TUT: EMA'li bbox eksen orani + hedefi + regulator istegi
             # (istek tavanda = yaklasiyor, bantta = tutuyor, -geri'de = kacisiyor)
             "boyut": round(self.boyut_f, 4),
             "boyut_hedef": round(hedef_boyut, 3),
             "ileri_istek": round(ileri_istek, 3),
+            "dboyut_dt": round(self._dboyut_dt, 4),   # bbox buyume hizi (fraction/s; >0=yaklasiyor)
+            "ttc_s": (round(self.boyut_f / self._dboyut_dt, 1)   # ~carpisma/asma suresi (s); kapanma freni bunu izler
+                      if self._dboyut_dt > 1e-4 else None),
             "dikey": round(thr, 3), "ileri": round(pitch, 3), "yaw": round(yaw, 3),
             # ONGORU (pose kanat uclarindan hedef bank -> yaw lead)
             "roll_deg": round(math.degrees(self.roll_f), 1),  # hedef bank (EGO-TELAFILI, EMA'li)

@@ -1,20 +1,21 @@
 # 🛸 Avcı Drone — Simülasyon Test Ortamı (Yer Kontrol İstasyonu)
 
 TEKNOFEST **"Drones of War"** avcı drone projesinin yazılımı. Simülatörden gelen
-**bozuk hedef GNSS'ini** İnovasyonlu J (CT-EKF) ile temizler, **GPS güdümüyle** hedefe
-yaklaşır, görsel temas kurulunca **YOLO (best.pt) + DÜZ IBVS** ile yönelimi **yalnızca
-kameradan** üretir (yarışma kuralı) ve hepsini tarayıcı tabanlı bir arayüzden yönetir:
-canlı FPV (tarayıcı ekran/pencere paylaşımı), telemetri, canlı tune panelleri, güdüm
-pipeline anahtarı (OTO / GPS / GÖRSEL).
+**bozuk hedef GNSS'ini** GNSS Filtre (eksen-bazlı spike temizleme + hız kestirimi) ile
+temizler, **GPS güdümüyle** hedefe yaklaşır, görsel temas kurulunca **YOLO (best.pt) +
+DÜZ IBVS** ile yönelimi **yalnızca kameradan** üretir (yarışma kuralı) ve hepsini tarayıcı
+tabanlı bir arayüzden yönetir: canlı FPV (tarayıcı ekran/pencere paylaşımı), telemetri,
+canlı tune panelleri, güdüm pipeline anahtarı (OTO / GPS / GÖRSEL).
 
 ```
 Oyun (Unreal, TCP 127.0.0.1:12345)
    │ bozuk hedef GPS (cm, 5 Hz)              ┌──────────────────────────────┐
-   ▼                                          │  models/best.pt (YOLO, talon)│
-sdk/drone_sdk.py ──► web/server.py ◄── detection/ (pencere yakalama + tespit)
+   ▼                                          │ models/best.pt (YOLO26s,talon)│
+sdk/drone_sdk.py ──► web/server.py ◄── detection/ (pencere yakalama + tespit + takip)
                         │                                   ▲ oyun penceresi karesi
-                        ├─ fusion/inovasyonlu_j_v2.py  (GNSS temizleme + hız kestirimi)
-                        ├─ guidance/ana_kontrol.py     (GPS yaklaşma + GORSEL_GUDUM FSM)
+                        ├─ fusion/gnss_filtre.py       (GNSS spike temizleme + hız kestirimi)
+                        ├─ guidance/gps_takip.py       (GPS-yaklaşma güdümü: kalkış/PD/PID/DR)
+                        ├─ guidance/ana_kontrol.py     (FSM: ARAMA/KILIT ↔ GORSEL_GUDUM)
                         ├─ guidance/ibvs_gorsel.py     (merkez→bbox çizgisi → komut)
                         └─ web sunucusu ──► web/index.html (tarayıcı arayüzü, :8000)
 ```
@@ -90,9 +91,9 @@ Son komut `best.pt siniflari (model.names): {0: 'talon'}` yazmalı.
 ## 🖥️ Arayüz
 | Panel | İçerik |
 |-------|--------|
-| **Sol** | Görev Başlat (İnovasyonlu J) / Gerçek GPS (test) / Durdur / Manuel mod / **Tune (canlı ayar)** / **Güdüm Pipeline anahtarı: OTO · GPS · GÖRSEL** |
+| **Sol** | Görev Başlat (GNSS Filtre) / Gerçek GPS (test) / Durdur / Manuel mod / **Tune (canlı ayar)** / **Güdüm Pipeline anahtarı: OTO · GPS · GÖRSEL** |
 | **Orta** | FPV (Görüntüyü Bağla → oyun penceresi) + overlay: hedef bbox'ı, görüntü merkezi `+`, **turuncu REF çizgisi** (25° kamera tilt telafisi), ex/ey/conf, durum, **"GPS GÜDÜMÜ: KAPALI/AÇIK" rozeti** |
-| **Sağ** | Telemetri (avcı + hedef), İnovasyonlu J sapma ölçümü (ham vs filtre, gerçeğe hata), mesafeler |
+| **Sağ** | Telemetri (avcı + hedef), GNSS Filtre sapma ölçümü (ham vs filtre, gerçeğe hata), mesafeler |
 
 **Güdüm akışı:** ARAMA (GPS yaklaşma) → best.pt hedefi 5 ardışık karede görünce
 **GORSEL_GUDUM** (GPS yönelimi mimari olarak kesilir; yönelim yalnızca kamera) →
@@ -127,11 +128,12 @@ görüntü merkezine değil **turuncu REF çizgisine** oturtur. İlk uçuşta Tu
 ---
 
 ## 🏁 Kendi GPS filtreni test etmek istersen
-Üretim filtresi `fusion/inovasyonlu_j_v2.py` (İnovasyonlu J). `web/server.py` her ham
+Üretim filtresi `fusion/gnss_filtre.py` (GNSSFiltre). `web/server.py` her ham
 pakette filtreyi besleyip **gerçeğe hatayı** ölçer (`_kiyas_guncelle`) ve `veri/kiyas_log.csv`'ye
 yazar. Kendi filtren için aynı sözleşmeyi uygula — sınıfında cm cinsinden
-`guncelle(x, y, z) -> (tx, ty, tz) | None` olsun — ve `_kiyas_guncelle` içindeki J
-kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde ortalama/en kötü hata görünür.
+`guncelle(x, y, z) -> (tx, ty, tz) | None` + `durum_gudum() -> {"pos","vel"} | None` olsun —
+ve `_kiyas_guncelle` içindeki filtre kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde
+ortalama/en kötü hata görünür.
 
 ---
 
@@ -140,10 +142,12 @@ kalıbını kopyalayıp filtreni ekle; arayüz sağ panelinde ortalama/en kötü
 |-----|----------|
 | `main.py` | Giriş noktası — **tek başlatma komutu:** `python main.py` |
 | `sdk/drone_sdk.py` | Resmi yarışma SDK'sı (v2.2; TCP telemetri/kontrol) |
-| `fusion/inovasyonlu_j_v2.py` | GNSS temizleme + hedef hız kestirimi (CT-EKF) |
-| `guidance/ana_kontrol.py` | Güdüm beyni: GPS yaklaşma, GORSEL_GUDUM FSM, Cfg (tüm ayarlar) |
+| `fusion/gnss_filtre.py` | GNSS spike temizleme (eksen-bazlı) + hız kestirimi + gecikme telafisi |
+| `guidance/gps_takip.py` | GPS-yaklaşma güdümü: kalkış, GNSS temizleme çağrısı, kesinti ölü-hesabı, PD/PID, kendi GPSCfg |
+| `guidance/ana_kontrol.py` | Beyin: FSM (ARAMA/KILIT↔GORSEL_GUDUM), görsel faz devri, kilit sayacı, Cfg (görsel ayarlar) |
 | `guidance/ibvs_gorsel.py` | BASİT IBVS: görüntü merkezi→bbox merkezi çizgisi (açı+büyüklük) → throttle/pitch/roll/yaw |
-| `detection/gorsel_tespit.py` | YOLO best.pt sarmalayıcı (en yüksek conf bbox) |
+| `detection/gorsel_tespit.py` | YOLO best.pt sarmalayıcı (SAHI dilimleme; conf-azalan tespit listesi) |
+| `detection/takip.py` | boxmot HybridSort adaptörü (ID sürekliliği; tek-hedef seçimi) |
 | `detection/pencere_yakala.py` | Oyun penceresi içeriği yakalama (occlusion-proof FPV) |
 | `web/server.py` + `web/index.html` | Web sunucusu + tarayıcı arayüzü |
 | `models/best.pt` | Eğitilmiş YOLO modeli (sınıf: `talon`) — repoda hazır |
@@ -206,7 +210,7 @@ Adım adım ilerle; her adımın çıktısını kontrol et, hata olursa çözüp
 5) DOĞRULAMA (hepsi repo kökünden; herhangi biri hata verirse önce onu çöz)
    - python -c "import torch; print(torch.__version__, 'CUDA:', torch.cuda.is_available())"
      (GPU'lu kurulumda CUDA: True görmelisin.)
-   - python -m py_compile main.py web/server.py guidance/ana_kontrol.py guidance/ibvs_gorsel.py detection/gorsel_tespit.py detection/pencere_yakala.py fusion/inovasyonlu_j_v2.py sdk/drone_sdk.py
+   - python -m py_compile main.py web/server.py guidance/ana_kontrol.py guidance/gps_takip.py guidance/ibvs_gorsel.py detection/gorsel_tespit.py detection/pencere_yakala.py fusion/gnss_filtre.py sdk/drone_sdk.py
    - python -c "import sys; sys.path.insert(0,'.'); import web.server; print('IMPORT OK')"
    - python detection\gorsel_tespit.py
      Beklenen çıktı: best.pt siniflari (model.names): {0: 'talon'}

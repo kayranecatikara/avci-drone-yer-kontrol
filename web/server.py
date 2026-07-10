@@ -25,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from sdk import drone_sdk as drone
 from guidance.ana_kontrol import AvciKontrol, Cfg
-from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
+from fusion.gnss_filtre import GNSSFiltre   # TEK uretim GNSS filtresi (sapma olcumu de bununla)
 import numpy as np
 
 # Ekran yakalama icin
@@ -293,22 +293,23 @@ TUNE_ALLOW = {
     "IBVS_BOYUT_HEDEF",  # kilit-tut: bbox eksen orani hedefi (kilit esiginin ustunde tut)
     "IBVS_K_BOYUT",      # kilit-tut: boyut hatasi -> ileri kazanci (0=KAPALI/eski yasa)
     "IBVS_GERI_MAX",     # kilit-tut: fazla yakinken geri itki tavani (0=asla geri)
+    "IBVS_FREN_HIZ",     # kapanma-hizi freni (TTC): bbox hizli buyuyorse ileriyi kis (hedefi asma)
     "IBVS_K_YAW",        # yatay kazanc (cizginin yatay bileseni -> yaw)
     "IBVS_K_DIKEY",      # dikey kazanc (cizginin dikey bileseni -> throttle)
+    "IBVS_YAKIN_KAZANC", # yakinlik-olcekli kazanc: yakinken (buyuk bbox) yaw/dikey'i sikilastir (0=kapali)
     "IBVS_DIKEY_NISAN",  # dikey nisan (0=merkez/altta-kal, 1=hiz-vektoru hedefte; tilt-farkinda)
     "IBVS_MERKEZ_FREN",  # sapma buyuyunce ileriyi kis (0=hep tam gaz)
     "IBVS_HANDOFF_S",    # GPS->gorsel yumusak gecis rampasi (s); 0=kapali (uzunsa gecikir, kisaysa lunge)
     "IBVS_ALCAL_FREN",   # alcalma freni: hedef nisanin ALTINDAysa (fazla yuksek) ileriyi kis
-    "IBVS_K_ROLL_LEAD",  # ongorulu yaw lead kazanci (pose hedef bank -> erken donus)
-    "IBVS_SIGN_ROLL",    # ongoru YONU (roll->yaw isareti): FPV oku gercek donusle ters ise cevir
-    "IBVS_ROLL_CONF_MIN",# ongoru kapisi: iki kanat ucu icin asgari keypoint guveni
+    # (pose roll-lead sliderlari IBVS_K_ROLL_LEAD/SIGN_ROLL/ROLL_CONF_MIN 2026-07-10 SILINDI: pose kapali)
     "VIS_EMA",           # ex/ey yumusatma (titriyorsa dusur=daha yumusak... buyuk=daha tepkili)
     "YAW_MAX",           # yaw tavani (doygunluk)
     "VIS_CONF_MIN",      # tespit guven esigi
     "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
     "VIS_KOPRU_S",       # goruntu-duzlemi kopru (olu-hesap) suresi; 0 = kapali
-    "VZ_MAX",            # GPS-yaklasma DIKEY hiz TAVANI (cm/s) — cascade overshoot sinirlayici
-    "KV_Z",              # GPS-yaklasma DIKEY ic-dongu hiz-izleme kazanci (cascade)
+    # NOT: GPS-yaklasma sabitleri artik guidance/gps_takip.GPSCfg'dedir (2026-07-10
+    # devri) -> canli tune'da DEGIL; GPS davranisi orada duzenlenir. Buradaki tum
+    # anahtarlar GORSEL faz (Cfg) uzerine; getattr(Cfg,k) hepsini bulur.
 }
 
 # ----------------------------------------------------------
@@ -351,8 +352,7 @@ def tune_log_dongusu():
 # tam kayda gecirmek icin (isaretler + ongoru kapilari + kilit isteri esikleri).
 # hasattr ile okunur -> Cfg'den kalkan bir isim raporu KIRMAZ, sadece dusurulur.
 TUNE_SABIT_RAPOR = (
-    "IBVS_SIGN_YAW", "IBVS_SIGN_DIKEY", "IBVS_EGO_ROLL_GAIN", "IBVS_ROLL_EMA",
-    "IBVS_ASPECT_MIN", "IBVS_POZ_STALE_S", "IBVS_TILT_DEG", "IBVS_VFOV_HALF_DEG",
+    "IBVS_SIGN_YAW", "IBVS_SIGN_DIKEY", "IBVS_TILT_DEG", "IBVS_VFOV_HALF_DEG",
     "VIS_WIN_NEED_S", "VIS_LOCK_PCT", "VIS_STALE_S",
 )
 
@@ -373,16 +373,15 @@ MANUEL_TIMEOUT = 0.7         # sn: bu sureden uzun giris gelmezse HOVER'a gec
 # Telafi tarama testi tamamlandi -> en iyi telafi_sn=2.0 (Efe'nin orijinal ayari).
 
 # ----------------------------------------------------------
-#  SAPMA OLCUMU: tek uretim filtresi Inovasyonlu J, GERCEGE hatasi.
+#  SAPMA OLCUMU: tek uretim GNSS filtresi, GERCEGE hatasi.
 #  Ham taban cizgisiyle birlikte. Gudume DOKUNMAZ; sadece sim/debug olcum.
-#  (Eski v1 / v2.4 kiyas adaylari kaldirildi; tek filtre kaldi.)
 # ----------------------------------------------------------
-_kiyas_j = JFiltre()        # Inovasyonlu J: uretim filtresi (sapma olcumu)
+_kiyas_filtre = GNSSFiltre()   # uretim filtresi ornegi (yalniz sapma olcumu)
 _kiyas_idx = 0
 _kiyas_son_ham = None
 # Son ~80 olcumun penceresi (anlik performans; eski veriye takilmaz)
 _kiyas_ham_hata = deque(maxlen=80)
-_kiyas_j_hata = deque(maxlen=80)
+_kiyas_filtre_hata = deque(maxlen=80)
 
 # Olcum CSV log: her paket icin ham/J hatasi (m). Her baslangicta sifirlanir.
 _KIYAS_LOG = os.path.join(VERI_DIR, "kiyas_log.csv")
@@ -455,7 +454,7 @@ def _gorev_sifirla(faz):
 
 
 def _mesafe_olc():
-    """VURUS/BASARI icin DURUST mesafe (m): truth varsa gercek 3B, yoksa J-temiz kestirim.
+    """VURUS/BASARI icin DURUST mesafe (m): truth varsa gercek 3B, yoksa filtre-temiz kestirim.
     HAM ASLA kullanilmaz (buyuk ham hata sahte vurus tetikler). -> (mesafe_m, kaynak) | (None, None)."""
     truth = drone.get_debug_truth()
     if truth.get("available"):
@@ -634,7 +633,7 @@ def _gps_log_yaz():
 
 
 def _kiyas_guncelle():
-    """Her YENI ham pakette Inovasyonlu J'yi besle, gercege hatasini olc."""
+    """Her YENI ham pakette GNSS filtresini besle, gercege hatasini olc."""
     global _kiyas_idx, _kiyas_son_ham, _gps_log_t0, _gps_log_son_yaz
     ham = drone.get_target_location()
     if ham == _kiyas_son_ham:
@@ -666,18 +665,20 @@ def _kiyas_guncelle():
     hx, hy, hz = ham
     ham_e = float(np.linalg.norm(np.array(ham, float) - gercek))
     _kiyas_ham_hata.append(ham_e)
-    j_e = None
+    filtre_e = None
 
-    # Inovasyonlu J (uretim): anlik cikti -> su anki gercekle karsilastir
-    j_out = _kiyas_j.guncelle(hx, hy, hz)
-    if j_out is not None:
-        j_e = float(np.linalg.norm(np.array(j_out, float) - gercek))
-        _kiyas_j_hata.append(j_e)
+    # GNSS filtre (uretim): telafisiz ANLIK temiz konum -> su anki gercekle karsilastir
+    # (guncelle'nin lead'li ciktisi degil durum_gudum["pos"]: "temizleme" kalitesi olcusu).
+    _kiyas_filtre.guncelle(hx, hy, hz)
+    durum = _kiyas_filtre.durum_gudum()
+    if durum is not None:
+        filtre_e = float(np.linalg.norm(np.array(durum["pos"], float) - gercek))
+        _kiyas_filtre_hata.append(filtre_e)
 
     # CSV log (metre): bos sutun = o pakette cikti yok (None/isinma)
     if _kiyas_log_f is not None:
         he = "%.2f" % (ham_e / 100.0)
-        js = ("%.2f" % (j_e / 100.0)) if j_e is not None else ""
+        js = ("%.2f" % (filtre_e / 100.0)) if filtre_e is not None else ""
         try:
             _kiyas_log_f.write("%d,%s,%s\n" % (idx, he, js))
             _kiyas_log_f.flush()
@@ -716,7 +717,7 @@ def kontrol_dongusu():
                         if beyin.debug_olc:
                             beyin._debug_olc()    # ham vs J hatasini olc
                     # Kiyas HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
-                    _kiyas_guncelle()             # Inovasyonlu J sapma olcumu (ham vs J)
+                    _kiyas_guncelle()             # GNSS filtre sapma olcumu (ham vs filtre)
                     try:
                         _gorev_izle()             # olay/durum izleyici (GUDUME DOKUNMAZ)
                     except Exception as e:
@@ -947,12 +948,11 @@ def dedektor_dongusu():
             time.sleep(0.05)
             continue
         if dedektor is None:                          # LAZY: ilk gorev tikinde yukle
-            # imgsz=640 (2026-07-10): aktif model best3 (yolo11s) 640'ta EGITILDI -> native 640
-            # EN HIZLI (izole 10.7ms/~93FPS; asil darbogaz GPU paylasimi). SAHI (Cfg.SAHI_*):
-            # SADECE best.pt (detect) -> uzak/kucuk hedef recall (dilim=640 ile tutarli).
-            # Pose dedektorune UYGULANMAZ. Model 1280 egitimliyse geri 1280 (uzak recall).
+            # imgsz=960 (2026-07-10): aktif model yolo26s 960'ta EGITILDI -> native 960
+            # (kullanici tercihi; best3@640'tan geri donuldu). SAHI (Cfg.SAHI_*): SADECE
+            # best.pt (detect) -> uzak/kucuk hedef recall. Pose dedektorune UYGULANMAZ.
             dedektor = HedefDedektor(Cfg.VIS_MODEL_PATH, conf=Cfg.VIS_CONF_MIN,
-                                     imgsz=640, half=FP16_AKTIF,
+                                     imgsz=960, half=FP16_AKTIF,
                                      sahi=bool(getattr(Cfg, "SAHI_AKTIF", False)),
                                      sahi_dilim=getattr(Cfg, "SAHI_DILIM_PX", 640),
                                      sahi_ortusme=getattr(Cfg, "SAHI_ORTUSME", 0.2),
@@ -1207,11 +1207,11 @@ def build_telemetry():
     # J (GNSS duzeltici) durumu ve canli olcum (beyin_lock ile guvenli oku)
     with beyin_lock:
         j_durum = beyin.durum
-        j_kaynak = beyin.kaynak           # aktif guduum kaynagi (Inovasyonlu J / gercek)
+        j_kaynak = beyin.kaynak           # aktif guduum kaynagi (filtre / gercek)
         j_temiz = None if beyin.son_temiz is None else (
             float(beyin.son_temiz[0]), float(beyin.son_temiz[1]), float(beyin.son_temiz[2]))
         ham_list = list(beyin.ham_hatalar)
-        j_list = list(beyin.j_hatalar)
+        j_list = list(beyin.filtre_hatalar)
         vis_tespit = _son_tespit_ui       # normalize son tespit (dedektor thread yazar)
         vis_poz = _son_poz_ui             # normalize son POZ kestirimi (ayni thread yazar)
         vis_pos = beyin._vis_pos_count
@@ -1230,7 +1230,6 @@ def build_telemetry():
         # --- IZLEYICI/GUDUM alanlari (video isterleri) — hepsi ayni kilit altinda anlik kopya ---
         prev_cmd = dict(beyin.prev)                    # uygulanan 4 komut (tek dogruluk kaynagi)
         b_handoff = bool(beyin.handoff)
-        b_none = int(getattr(beyin, "none_count", 0))
         son_xy = None if beyin.son_xy_anlik is None else (
             float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]))
         son_ham_full = None if beyin.son_ham is None else (
@@ -1254,10 +1253,10 @@ def build_telemetry():
         j_info["kazanc_pct"] = (100.0 * (ham_ort - j_ort) / ham_ort) if ham_ort > 0 else 0.0
         j_info["ornek"] = n
 
-    # Sapma ozeti (gercege hata, metre): uretim Inovasyonlu J + Ham taban cizgisi
+    # Sapma ozeti (gercege hata, metre): uretim GNSS filtresi + Ham taban cizgisi
     with beyin_lock:
         ham_h = list(_kiyas_ham_hata)
-        j_h = list(_kiyas_j_hata)
+        j_h = list(_kiyas_filtre_hata)
     kiyas = {}
     if ham_h:
         kiyas["ham_ort_m"] = sum(ham_h) / len(ham_h) / 100.0
@@ -1302,7 +1301,6 @@ def build_telemetry():
         "bozulmalar": list(debug_info.get("corruptions", [])),
         "ham_hata_m": debug_info.get("target_raw_error_m"),
         "j_duzeltme_m": j_duzeltme_m,
-        "none_count": b_none,
     }
     gudum_info = {
         "thr": prev_cmd.get("thr", 0.0), "pitch": prev_cmd.get("pitch", 0.0),
@@ -1467,10 +1465,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = {}
             cmd = data.get("cmd", "")
             msg = "Bilinmeyen komut"
-            if cmd in ("start", "start_v2", "start_gercek"):
-                kaynak = {"start": "v2", "start_v2": "v2", "start_gercek": "gercek"}[cmd]
+            if cmd in ("start", "start_v2", "start_filtre", "start_gercek"):
+                # start/start_v2/start_filtre -> uretim GNSS filtresi; start_gercek -> truth (test)
+                kaynak = "gercek" if cmd == "start_gercek" else "filtre"
                 with beyin_lock:
-                    beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (v2 / gercek)
+                    beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (filtre / gercek)
                     beyin.log_dondur()        # KOSULSUZ yeni ucus logu: ayni kaynak
                     # ust uste secilse de her "Gorev Baslat" = ayri ucus dosyasi/klasoru
                     _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
@@ -1481,7 +1480,7 @@ class Handler(BaseHTTPRequestHandler):
                     _perf_log_f = None
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
-                _ad = {"v2": "Inovasyonlu J", "gercek": "GERCEK GPS"}[kaynak]
+                _ad = {"filtre": "GNSS Filtre", "gercek": "GERCEK GPS"}[kaynak]
                 msg = "GOREV BASLATILDI - kaynak: %s%s" % (
                     _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
                 olay_ekle("iyi", "GOREV BASLADI — kaynak: %s" % _ad)

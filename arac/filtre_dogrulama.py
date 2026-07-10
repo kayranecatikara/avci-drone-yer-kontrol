@@ -6,7 +6,7 @@ kullanilmaz. (Truth erisimi YALNIZCA arac/ altinda yasayabilir.)
 ================================================================================
 FILTRE DOGRULAMA: fusion cikti kalitesini SAYIYLA gormek
 ================================================================================
-Fusion filtresinin (GNSSDuzeltici) ciktisi ile sim'in DEBUG TRUTH kanali
+Fusion filtresinin (GNSSFiltre) ciktisi ile sim'in DEBUG TRUTH kanali
 arasinda uc metrik raporlar (ham GPS taban cizgisiyle birlikte):
 
   * RMSE   : hata karelerinin ortalamasinin karekoku — tek sayilik dogruluk
@@ -17,11 +17,11 @@ arasinda uc metrik raporlar (ham GPS taban cizgisiyle birlikte):
              + gecikme-arindirilmis RMSE (o tau'daki kalan hata)
 
 BESLEME DESENI pipeline ile AYNIDIR (guidance._hedef_temizle): filtre yalnizca
-YENI ham pakette guncellenir; metrik filtre.durum_guduum()['pos'] (lead'siz
+YENI ham pakette guncellenir; metrik filtre.durum_gudum()['pos'] (lead'siz
 ANLIK kestirim) uzerinden alinir — "temize yakin mi?" sorusunun dogru karsiligi
 budur (2 sn'lik lead ongorusu ayri is; burada degerlendirilmez).
 
-fusion/'a DOKUNULMAZ: filtre modulu degisse de arayuz (guncelle/durum_guduum)
+fusion/'a DOKUNULMAZ: filtre modulu degisse de arayuz (guncelle/durum_gudum)
 ayni kaldikca bu arac otomatik uyumludur.
 
 KULLANIM (dogrudan SDK; WEB ARAYUZU KAPALI olmali — oyun tek TCP kabul eder):
@@ -50,7 +50,7 @@ TAU_ADIM = 0.05      # tarama adimi (s)
 
 
 def olc(sure_s, csv_yolu, drone_baglanti=None):
-    from fusion.inovasyonlu_j_v2 import GNSSDuzeltici
+    from fusion.gnss_filtre import GNSSFiltre as GNSSDuzeltici
 
     # TEK TCP OTURUMU: cagiran bagli bir drone modulu verirse onu kullan
     # (kosu_yonetici turlarinda baglan/kop dongusu yok). Verilmezse kendi acar/kapatir.
@@ -90,7 +90,7 @@ def olc(sure_s, csv_yolu, drone_baglanti=None):
         if ham != son_ham:                   # yeni paket -> filtreyi besle (pipeline deseni)
             son_ham = ham
             filtre.guncelle(ham[0], ham[1], ham[2])
-            d = filtre.durum_guduum()
+            d = filtre.durum_gudum()
             filt = (None if d is None else d["pos"])   # lead'siz ANLIK kestirim
         truth = drone.get_debug_truth()
         tt = truth["target"]["position"] if truth.get("available") else ("", "", "")

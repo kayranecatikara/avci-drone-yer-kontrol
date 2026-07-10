@@ -133,7 +133,7 @@ class DevTruthKaynagi:
         if m == "filtre":
             beyin.set_hedef_kaynagi(None, "filtre")
             self.aktif = False
-            return True, "KAYNAK: FILTRE — uretim yolu (Inovasyonlu J) aktif."
+            return True, "KAYNAK: FILTRE — uretim yolu (GNSS Filtre) aktif."
         return False, "Gecersiz kaynak modu: %s" % mod
 
     def durum(self, beyin):
@@ -144,8 +144,8 @@ class DevTruthKaynagi:
 
     def mesafe_m(self):
         """DEV olcum: avci<->hedef GERCEK 3B mesafe (m). Truth akmiyorsa None.
-        server'daki VURUS/BASARI latch'i DEV kosularinda J-temiz yerine bunu
-        kullanir (cit icinde); paketlenmis kodda bu modul yoktur -> J-temiz kalir."""
+        server'daki VURUS/BASARI latch'i DEV kosularinda filtre-temiz yerine bunu
+        kullanir (cit icinde); paketlenmis kodda bu modul yoktur -> filtre-temiz kalir."""
         try:
             dbg = self.drone.get_debug_truth()
             if not dbg.get("available"):

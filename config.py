@@ -8,11 +8,11 @@ parametreleri ise ait olduklari modulun Cfg blogunda yasar: her sabit
 yonettigi kodun yaninda durur -> tek yerde koparilmis dev sabit listesi yok,
 her sabit baglaminda aciklanabilir (yarisma kurali 8). Parametre haritasi:
 
-  guidance/ana_kontrol.py :: Cfg        -> guduum / yaklasma / gorsel esikleri
+  guidance/ana_kontrol.py :: Cfg        -> FSM (gorsel-devir) + gorsel esikleri
                                            (kilit isteri sayaci dahil, §6.1.4)
-  guidance/ibvs_gorsel.py :: AvciIBVS   -> gorsel guduum yasasi (basit IBVS +
-                                           pose roll acı-beslemesi; Cfg IBVS_*)
-  fusion/inovasyonlu_j_v2.py            -> GNSS filtre / hiz kestirim kazanclari
+  guidance/gps_takip.py   :: GPSCfg     -> GPS-yaklasma guduumu (kalkis/PD/PID/DR)
+  guidance/ibvs_gorsel.py :: AvciIBVS   -> gorsel guduum yasasi (basit IBVS; Cfg IBVS_*)
+  fusion/gnss_filtre.py                 -> GNSS spike temizleme + hiz kestirimi
   detection/kamera_model.py             -> kamera ic parametreleri (K)
   detection/model_yonetici.py           -> model registry (hot-swap)
 
