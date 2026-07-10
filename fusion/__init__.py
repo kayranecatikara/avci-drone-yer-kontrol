@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""fusion — sensor fuzyonu / GNSS filtresi + hedef hiz kestirimi (Inovasyonlu J)."""
+"""fusion — sensor fuzyonu / GNSS filtresi + hedef hiz kestirimi (GNSSFiltre; gnss_filtre.py)."""
