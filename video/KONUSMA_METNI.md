@@ -53,7 +53,7 @@ otomatik kısıyoruz — gürültülü anlarda yanlış yere fırlamayalım diye
 `[EKRAN: gps_takip.py adim() → detection/gorsel_tespit.py + takip.py]`
 
 Bu temiz konumu gps_takip dosyası kullanıyor: önce on metre kalkış, sonra hedefe bir PD ve bir PID'le
-yaklaşma; veri kesilirse otuz saniyeye kadar son hızla ölü-hesap. Görüntü tarafını kısaca geçiyoruz —
+yaklaşma, bir yandan da burnu sürekli hedefe dönük tutma. Görüntü tarafını kısaca geçiyoruz —
 hedefi kendi eğittiğimiz YOLO26s modeliyle buluyoruz, uzak hedefi kaçırmamak için kareyi dilimleyerek
 tarıyoruz; sonra açık kaynak HybridSort takipçisi hedefe kalıcı bir kimlik verip izi ayakta tutuyor.
 
@@ -82,8 +82,8 @@ vuruş ayrı bir komut değil, görsel hatayı sıfıra sürmenin doğal sonucu.
 
 Özetle açtığımız üç çekirdek: gnss_filtre GNSS'i temizliyor, ana_kontrol kararı veriyor, ibvs_gorsel
 görsel güdümü yürütüyor. Kullandığımız açık kaynak kütüphaneler: tespit için Ultralytics ve PyTorch,
-takip için boxmot, görüntü için OpenCV. Ama filtre, karar ve güdüm mantığının tamamı — az önce açtığımız
-kodlar — bize ait. Teşekkürler.
+takip için boxmot, görüntü için OpenCV. Filtre, karar ve güdüm mantığının tamamı az önce açtığımız
+kodlar tamamen bize ait. Teşekkürler.
 
 ---
 
@@ -92,7 +92,7 @@ kodlar — bize ait. Teşekkürler.
   dursun; metindeki "şu satırda / ekranda gördüğünüz" ifadeleri o vurgulanan yeri kastediyor.
 - Ekranda gösterilecek fonksiyonlar: `ana_kontrol.adim`, `gnss_filtre.spike_temizle` + `_egim` +
   `guncelle`, `ibvs_gorsel.hesapla`, `ana_kontrol._kilit_degerlendir`. Hepsi kodda var.
-- Rakamlar doğrulandı: 50 Hz kontrol / 5 Hz GPS, 10 m kalkış, 30 sn ölü-hesap, 1 sn gecikme telafisi,
+- Rakamlar doğrulandı: 50 Hz kontrol / 5 Hz GPS, 10 m kalkış, 1 sn gecikme telafisi,
   YOLO26s @960, kilit 10/5 sn, handoff 40 m. Yatay standoff 0 → "geride dur" demedik.
 - **`[VURUŞ-BAĞIMLI]`** kayda yetişmezse: "…terminal faza geçip nişanı hedefe kaydırıyor…" → "…kilidi
   sürdürüp hedefe yaklaşmaya devam ediyor…"; vuruş cümlesi çıkarılır.
