@@ -1,0 +1,32 @@
+# Avci Drone - Yer Kontrol Istasyonu : Python bagimliliklari
+# Kurulum:  pip install -r requirements.txt
+numpy
+mss
+Pillow
+
+# --- Windows'a ozel (Linux'ta gerekmez, otomatik atlanir) ---
+# pygetwindow oyun penceresini bulmak icindir. Linux'ta yuklenmezse
+# server.py tum ekrani yakalar (kod bunu try/except ile otomatik yapar).
+pygetwindow; platform_system == "Windows"
+
+# --- Gorsel gudum (IBVS) fazi: YOLO nesne tespiti (models/best.pt) ---
+# NOT (CUDA/GPU): torch'u ONCE dogru wheel'den kur, sonra bu dosyayi yukle:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# (CPU-only ise: pip install torch torchvision)  Ardindan: pip install -r requirements.txt
+# ultralytics/torch YOKSA sistem zarif bozulur: gorsel faz pasif, saf GPS calisir.
+ultralytics
+opencv-python
+
+# --- Tune raporu: "Degerleri Yazdir" -> veri/tune_rapor_*.xlsx (web/tune_rapor.py) ---
+# Yoksa sistem zarif bozulur: Excel raporu yazilamaz, arayuz sebebini soyler.
+openpyxl
+
+# --- windows-capture: dedektorun kare kaynagi (pencere ICERIGI, occlusion-proof) ---
+# ACIK (2026-07-06): mss ekran-bolgesi, oyun penceresi tarayicinin arkasinda kalinca
+# dedektore masaustu/tarayici pikselini besliyordu (canli gorevde tespit yok).
+# windows-capture pencere icerigini yakalar; pencere arkada olsa bile dogru kare.
+# Kurulamazsa / eski Windows'ta kararsizsa sistem mss'e zarif duser
+# (web/server.py: PENCERE_YAKALA_AKTIF bayragi; o durumda oyun ONDE tutulmali).
+windows-capture; platform_system == "Windows"
+psutil; platform_system == "Windows"
+boxmot>=21.0.0   # HybridSort tracker (detection/takip.py)
