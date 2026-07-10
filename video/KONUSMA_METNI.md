@@ -1,123 +1,98 @@
-# KONUŞMA METNİ — A Bölümü (Algoritma, Yazılım Mimarisi ve Kaynak Kod)
+# KONUŞMA METNİ — A Bölümü (OKU-BİTİR: anlatım + kod açıklaması tek metin)
 
 > **Takım:** Hamidiye · **Yarışma:** TEKNOFEST 2026 Savaşan İHA Avcı Drone
-> **Bu metin:** Videonun ilk bölümü (algoritma + kod anlatımı). Hızlandırma YOK, sesli anlatım.
-> **Hedef süre:** ~4 dk (≈560 kelime; 140 kelime/dk). Süre 3 dk'ya indirilmek gerekirse
-> `[OPSİYONEL]` bloklar çıkarılır — kalan metin kendi içinde akıcı ve eksiksizdir.
-> **Etiketler:** `[OPSİYONEL]` = süre için çıkarılabilir · `[VURUŞ-BAĞIMLI]` = terminal faz/vuruş
-> kayıt gününe kadar yetişmezse revize edilecek cümle.
 >
-> **⛔ TUTARLILIK NOTU:** Her cümle koddaki karşılığıyla eşleştirildi (bkz. `MIMARI_ENVANTER.md`).
-> Kodda olmayan hiçbir yetenek anlatılmıyor. Pose/keypoint bu sürümde KAPALI → hiç geçmiyor.
+> ### ✅ NASIL KULLANILIR: Bu metni baştan sona SESLİ OKU, başka bir şey yapma.
+> Kod açıklaması cümlelerin **İÇİNDE** — "ekranda gördüğünüz şu fonksiyon…", "şu satırda…" derken
+> zaten kodu anlatıyorsun. Ekranda, her bloğun başındaki `[EKRAN: …]` notunda yazan **dosya + fonksiyon**
+> gösterilsin (editör hazırlar); sen yalnızca metni oku. Doğaçlama, ekleme gerekmez.
+>
+> **Kod DÜZEYİNDE açılan 3 çekirdek dosya:** `gnss_filtre.py`, `ana_kontrol.py`, `ibvs_gorsel.py`.
+> Tespit/takip kısa geçilir (hazır kütüphane). Süre ~4 dk. `[VURUŞ-BAĞIMLI]` = vuruş kayda yetişmezse
+> revize edilecek cümle. Adı geçen fonksiyonların hepsi kodda gerçekten var; rakamlar doğrulandı.
 
 ---
 
-### [00:00–00:18] Açılış + genel mimari  · (43 kelime)
-`[EKRAN: Takım adı "Hamidiye" + yarışma logosu açılış kartı → uçtan uca mimari diyagramı]`
+### [00:00–00:15] Açılış
+`[EKRAN: Takım kartı "Hamidiye" → mimari diyagramı → kod dosyaları]`
 
-Merhaba. Biz Hamidiye takımı olarak, avcı dronumuzu tamamen otonom çalışan bir **yer
-kontrol istasyonu** yazılımıyla yönetiyoruz. Tüm algılama, filtreleme ve karar üretimi
-yerde çalışır; drona yalnızca dört eksenlik kontrol komutu gider. Sistemimiz iki
-bağımsız girdiyi birleştirir: **bozuk hedef GNSS'i** ve **kameradan gelen görüntüyü**.
+Merhaba, biz Hamidiye takımıyız. Bu videoda hem sistemimizi anlatacağız, hem de ekranda kodumuzu
+açıp üç çekirdek dosyayı göstereceğiz: GNSS filtremiz, karar mekanizmamız ve görsel güdüm yasamız.
+Dronumuz tamamen otonom uçuyor; tüm karar yerde üretiliyor, drona sadece dört eksenlik uçuş komutu
+gidiyor.
 
-### [00:18–00:45] Uçtan uca veri akışı  · (61 kelime)
-`[EKRAN: Aynı diyagram üzerinde iki thread vurgulanır — 50 Hz kontrol + GPU dedektör]`
+### [00:15–00:40] Beyin — ana_kontrol.py, adim()
+`[EKRAN: guidance/ana_kontrol.py — adim() fonksiyonu + LOOP_HZ = 50.0 satırı vurgulu]`
 
-Mimarimiz iki paralel iş parçacığı üzerine kurulu. **Elli hertzlik kontrol döngüsü**
-güdüm komutlarını üretir. Ayrı bir **dedektör döngüsü** ise oyun penceresinden aldığı
-kareyi yapay zeka modeliyle işler. İkisini ayırdık; çünkü ağır görüntü işleme, kontrol
-döngüsünü asla yavaşlatmamalı. Simülasyona bağlantıyı resmi `drone_sdk` sağlar; bu
-dosya, şartnamedeki `input.py` muadilimizdir — telemetriyi okur, kontrol komutunu yollar.
+Ekranda ilk açtığımız dosya ana_kontrol; yazılımın beyni burada, adim fonksiyonunda. Vurgulu satırda
+gördüğünüz gibi bu fonksiyon saniyede elli kez çalışıyor ve üç durumlu bir makine gibi karar veriyor:
+arama, kilit, görsel güdüm. Uzaktayken GPS'le hedefe yaklaşıyor; hedef menzile girip kilit verince
+kontrolü kameraya devrediyor. Yani bütün faz geçişlerini bu tek fonksiyon yönetiyor.
 
-### [00:45–01:20] Bozuk GNSS ve filtreleme  · (79 kelime)
-`[EKRAN: fusion/gnss_filtre.py — spike temizleme fonksiyonları + ham vs filtre grafiği]`
+### [00:40–01:20] Birinci çekirdek — gnss_filtre.py: spike_temizle, _egim
+`[EKRAN: fusion/gnss_filtre.py — spike_temizle ve _egim fonksiyonları vurgulu]`
 
-Hedef İHA'nın GNSS verisi bize kasıtlı olarak bozuk gelir: konum gürültüsü, ani
-sıçramalar, kayma ve veri kesintileri. Biz bu veriyi doğrudan doğru kabul etmiyoruz.
-**GNSS Filtre** modülümüz her eksende bir pencere tutar; komşu ölçümlerden çizdiği
-lineer eğimle bir sonraki konumu **öngörür**. Gelen ölçüm hem hız hem konum eşiğini
-birlikte aşarsa, onu bir sıçrama sayıp öngörülen değerle değiştirir. Temizlenen seriden
-hedefin **hızını** kestirir ve haberleşme gecikmesini telafi etmek için konumu bir
-saniye ileri taşır. `[OPSİYONEL]` Bu ileri taşımayı **güven ağırlığıyla** ölçekleriz:
-anlık hız ile yumuşatılmış hız birbirini tutmuyorsa güven düşer, öngörü kısılır.
+Şimdi birinci çekirdek koda, gnss_filtre dosyasına geçelim. Hedefin konumu bize kasten bozuk geliyor:
+gürültü, ani sıçrama, kayma, kopma, bir de gecikme. Ekranda gördüğünüz spike_temizle fonksiyonları bu
+bozulmayı temizliyor. Şöyle çalışıyor: her ölçüm için bir "beklenen değer" hesaplıyor; dikey eksende
+ani bir türev sıçraması varsa, yatayda ise ölçüm hem hızıyla hem konumuyla birlikte saparsa, onu bir
+sıçrama sayıp eliyor. Yerine de, şu egim fonksiyonuyla önceki noktalardan çizdiğimiz doğrunun tahminini
+koyuyor. Bir de şu var: kontrolümüz elli hertz ama GPS beş hertz; o yüzden her tikte paketin gerçekten
+yeni olup olmadığına bakıp donmuş veriyi tekrar işlemiyoruz, yoksa hedefe sahte bir hız uydururduk.
 
-### [01:20–01:45] GPS güdümü ve kesinti dayanıklılığı  · (55 kelime)
-`[EKRAN: guidance/gps_takip.py — adim() + dead-reckoning bloğu]`
+### [01:20–01:45] gnss_filtre.py — guncelle(): gecikme telafisi
+`[EKRAN: gnss_filtre.py — guncelle() içinde lead + güven faktörü satırları vurgulu]`
 
-Temizlenmiş konumu **GPS güdüm** modülümüz kullanır. Kalkıştan sonra hedefe yatayda bir
-**PD**, dikeyde bir **PID** yasasıyla yaklaşır; burnu sürekli hedefe döndürür. En kritik
-kısım kesinti anıdır: GNSS paketi gelmeyi kestiğinde sistem donmaz, son bilinen hızla
-**ölü-hesap** yaparak otuz saniyeye kadar tahminî konumu sürdürür. Amacımız, GNSS
-güvenilmez olduğu anlarda bile göreve devam edebilmek.
+Filtrenin en kritik işi, ekrandaki guncelle fonksiyonunda: gecikme telafisi. Simülasyon bize hedefin
+bir saniye önceki konumunu veriyor; biz de hızını çıkarıp konumu bir saniye ileri taşıyarak hedefin şu
+an gerçekte olduğu yeri tahmin ediyoruz. Şu güven faktörü satırlarında da tahmine körü körüne
+güvenmiyoruz: anlık hızla yumuşatılmış hız ayrışırsa, ya da yeni bir kopmadan çıktıysak, ileri tahmini
+otomatik kısıyoruz — gürültülü anlarda yanlış yere fırlamayalım diye.
 
-### [01:45–02:20] Görüntü işleme ve hedef tespiti  · (76 kelime)
-`[EKRAN: detection/gorsel_tespit.py + örnek tespit kareleri (bbox + conf)]`
+### [01:45–02:08] GPS güdümü ve görüntü hattı (kısa)
+`[EKRAN: gps_takip.py adim() → detection/gorsel_tespit.py + takip.py]`
 
-Hedefi görüntüden kendi eğittiğimiz bir **YOLO26s** modeliyle tespit ediyoruz; model tek
-sınıf tanır: Talon İHA. Kareyi dokuz yüz altmış piksel çözünürlükte, yarı hassasiyette
-işleriz. Uzak ve küçük hedefi kaçırmamak için kendi yazdığımız **dilimleme** yöntemini
-ekledik: kare yeterince yakın bir tespit vermezse, onu örtüşen parçalara bölüp her
-parçada ayrı çıkarım yapar, sonuçları birleştiririz. `[OPSİYONEL]` Tek karelik yanlış
-tespitlere güvenmeyiz; bir hedefin geçerli sayılması için üst üste beş kare doğrulanması
-ve güven eşiğini geçmesi gerekir. Böylece anlık parazit, kilide dönüşmez.
+Bu temiz konumu gps_takip dosyası kullanıyor: önce on metre kalkış, sonra hedefe bir PD ve bir PID'le
+yaklaşma; veri kesilirse otuz saniyeye kadar son hızla ölü-hesap. Görüntü tarafını kısaca geçiyoruz —
+hedefi kendi eğittiğimiz YOLO26s modeliyle buluyoruz, uzak hedefi kaçırmamak için kareyi dilimleyerek
+tarıyoruz; sonra açık kaynak HybridSort takipçisi hedefe kalıcı bir kimlik verip izi ayakta tutuyor.
 
-### [02:20–02:50] Takip  · (62 kelime)
-`[EKRAN: detection/takip.py — HybridSort; FPV'de ID:n etiketi + takip durumu]`
+### [02:08–02:53] İkinci-üçüncü çekirdek — ibvs_gorsel.py: hesapla()
+`[EKRAN: guidance/ibvs_gorsel.py — hesapla(); "GPS: KAPALI" rozeti; imza satırı vurgulu]`
 
-Tespit çıktısını doğrudan güdüme vermeyiz; önce bir **çoklu-nesne takipçisinden**
-geçiririz. Açık kaynak **boxmot HybridSort** algoritmasını kullanıyoruz — bunu videoda
-açıkça belirtiyoruz. Takipçi, hedefe kalıcı bir kimlik atar, kareler arası hareketini
-kestirir ve kısa tespit deliklerinde izi ayakta tutar. Dedektörün gördüğü kısa boşluklarda
-ise güdüm tarafında **görüntü-düzlemi köprüsü** devreye girer: kutuyu son ölçülen hızıyla
-kısa süre ileri taşırız, böylece takip sürekli görünür.
+Şimdi görsel güdüm yasamıza geldik: ibvs_gorsel dosyasındaki hesapla fonksiyonu. Ekranda gördüğünüz
+gibi, görsel temas kurulduktan sonra komutu üreten tek fonksiyon bu. Mantığı sade: görüntünün merkeziyle
+hedef kutusu arasındaki hatayı alıyor ve üç boyutlu konum hesabı yapmadan doğrudan yaw ve yükseklik
+komutuna çeviriyor. Şu satırda bu hatayı önce bir EMA filtresinden geçiriyoruz ki tek karelik bir titreme
+komuta yansımasın. Uçuş verimizin öğrettiği dersi de buraya koyduk: hedefe fazla sokulunca açısal hızı
+burnumuzun dönüşünü aşıp kadrajdan kaçıyor; o yüzden dalmak yerine kilit boyutunun hemen üstünde durup
+ortalıyoruz. Ve en önemlisi — şu imza satırına dikkat edin, burada konum bilgisi yok. Yani görsel fazda
+GPS'i kullanmak yapısal olarak imkânsız; kuralı kodun mimarisiyle garantiledik.
 
-### [02:50–03:30] Sensör füzyonu, güdüm ve karar  · (88 kelime)
-`[EKRAN: guidance/ana_kontrol.py FSM → guidance/ibvs_gorsel.py; "GPS GÜDÜMÜ: KAPALI" rozeti]`
+### [02:53–03:23] Kilit — ana_kontrol.py, _kilit_degerlendir()
+`[EKRAN: ana_kontrol._kilit_degerlendir() → kilit sayacı (10/5 sn) → ANGAJMAN → VURUŞ]`
 
-Karar mekanizmamız üç durumlu bir makinedir: **arama**, **kilit** ve **görsel güdüm**.
-GPS ile hedef bölgesine yaklaşırız; hedef kırk metre menzile girip model üst üste kilit
-verince, güdümü **kameraya devrederiz**. Bu an kritik: görsel temas kurulduktan sonra
-hareket komutu **yalnızca görüntüden** üretilir. Görsel yasamız sade bir **görüntü-tabanlı
-görsel servolama**dır — üç boyutlu konum kestirmeden, hedefin kadraj içindeki hata
-açısını doğrudan komuta çevirir. Kameramız yirmi beş derece yukarı baktığından, hedefi
-merkezin biraz üstünde tutmak aracı hedefin altına yerleştirir; gökyüzü arka planında
-temiz takip sağlar. **Bu fazda GPS verisi komuta asla girmez — bunu kodun imzasıyla
-yapısal olarak garanti ettik.**
+Son olarak kilidi, yine ana_kontrol'deki kilit_degerlendir fonksiyonu ölçüyor: on saniyelik pencerede
+toplam beş saniye boyunca hedef merkezde ve yeterince büyük kalırsa kilit onaylanıyor — şartnamedeki
+kural bu. `[VURUŞ-BAĞIMLI]` Kilit sağlanınca araç terminal faza geçip nişanı doğrudan hedefe kaydırıyor;
+vuruş ayrı bir komut değil, görsel hatayı sıfıra sürmenin doğal sonucu.
 
-### [03:30–03:55] Terminal faz ve angajman  · (52 kelime)
-`[EKRAN: kilit sayacı (10 sn pencere / 5 sn) → ANGAJMAN çipi → VURUŞ]`
-
-Kilitlenme şartnamedeki kuralla ölçülür: on saniyelik pencerede toplam beş saniye. `[VURUŞ-BAĞIMLI]`
-Bu kilit sağlanıp hedef nişanda kararlı hale gelince sistem **terminal faza** geçer:
-nişan noktasını doğrudan hedefe kaydırır, mesafe frenlerini kaldırır ve çarpışma rotasına
-kilitlenir. `[VURUŞ-BAĞIMLI]` Vuruş ayrı bir komut değildir; araç görsel hatayı sıfıra
-sürerek hedefin üzerine kapanır ve fiziksel temas gerçekleşir.
-
-### [03:55–04:15] Kaynak kod turu ve kütüphaneler  · (44 kelime)
+### [03:23–03:40] Dosya haritası ve kütüphaneler
 `[EKRAN: dosya ağacı — modül adları okunur zoom]`
 
-Özetle: `drone_sdk` girdiyi sağlar, `gnss_filtre` GNSS'i temizler, `gps_takip` GPS
-güdümünü, `ibvs_gorsel` görsel güdümü yürütür; `gorsel_tespit` ve `takip` görüntü
-hattıdır, `ana_kontrol` hepsini bir karar makinesinde birleştirir. Kullandığımız açık
-kaynak kütüphaneler: nesne tespiti için **Ultralytics** ve **PyTorch**, takip için
-**boxmot**, görüntü işleme için **OpenCV**. Karar mantığının tamamı bizim özgün
-kodumuzdur. Teşekkürler.
+Özetle açtığımız üç çekirdek: gnss_filtre GNSS'i temizliyor, ana_kontrol kararı veriyor, ibvs_gorsel
+görsel güdümü yürütüyor. Kullandığımız açık kaynak kütüphaneler: tespit için Ultralytics ve PyTorch,
+takip için boxmot, görüntü için OpenCV. Ama filtre, karar ve güdüm mantığının tamamı — az önce açtığımız
+kodlar — bize ait. Teşekkürler.
 
 ---
 
-## Süre / kelime özeti
-- **Toplam (tüm bloklar):** ≈ 560 kelime → **~4:00 dk** (140 kelime/dk).
-- **`[OPSİYONEL]` bloklar çıkarılırsa** (3 cümle, ≈ 55 kelime) → ≈ 505 kelime → **~3:36 dk**.
-  Daha da kısaltmak gerekirse §Takip ile §Görüntü işleme tek blokta özetlenebilir (bkz. STORYBOARD).
-- **`[VURUŞ-BAĞIMLI]` cümleler:** §Terminal faz'daki 2 cümle. Terminal faz kayıt gününe kadar
-  yetişmezse: "…terminal faza geçer…" → "…kilidi sürdürür ve hedefe yaklaşmaya devam eder…"
-  şeklinde revize edilir, vuruş cümlesi çıkarılır (TESLIM_KONTROL_LISTESI'nde madde var).
-
-## Anlatım notları (sunan için)
-- Uzman terimleri ilk geçtiğinde bir cümleyle açıkladık: "görüntü-tabanlı görsel servolama —
-  3B konum kestirmeden hedefin görüntü hatasını doğrudan komuta çeviren yaklaşım", "ölü-hesap —
-  veri kesilince son hızla tahmin sürdürme".
-- Rakamlar koddan **gerçek**: YOLO26s, imgsz 960, tek sınıf; kilit 10 sn/5 sn; handoff 40 m;
-  ölü-hesap 30 sn; gecikme telafisi 1 sn; kesinti toleransı. Değiştirilirse bu metin de güncellenmeli.
-- Eğitim seti kare sayısı gibi bir rakam **kasıtlı olarak verilmedi** (repoda kesin sayı yok);
-  gerekirse takım kendi veri seti boyutunu ekler — bkz. `YAPILACAKLAR.md`.
+## Editör / sunan için kısa notlar
+- Sen sadece **yukarıdaki metni oku**. Her blokta `[EKRAN: …]`'daki dosya + fonksiyon ekranda vurgulu
+  dursun; metindeki "şu satırda / ekranda gördüğünüz" ifadeleri o vurgulanan yeri kastediyor.
+- Ekranda gösterilecek fonksiyonlar: `ana_kontrol.adim`, `gnss_filtre.spike_temizle` + `_egim` +
+  `guncelle`, `ibvs_gorsel.hesapla`, `ana_kontrol._kilit_degerlendir`. Hepsi kodda var.
+- Rakamlar doğrulandı: 50 Hz kontrol / 5 Hz GPS, 10 m kalkış, 30 sn ölü-hesap, 1 sn gecikme telafisi,
+  YOLO26s @960, kilit 10/5 sn, handoff 40 m. Yatay standoff 0 → "geride dur" demedik.
+- **`[VURUŞ-BAĞIMLI]`** kayda yetişmezse: "…terminal faza geçip nişanı hedefe kaydırıyor…" → "…kilidi
+  sürdürüp hedefe yaklaşmaya devam ediyor…"; vuruş cümlesi çıkarılır.
