@@ -1,19 +1,6 @@
 # -*- coding: utf-8 -*-
-"""
-HAMIDIYE - GORSEL TESPIT (YOLO best.pt inference sarmalayici)
-================================================================================
-best.pt'yi yukler, bir kareden EN-YUKSEK-conf bbox'i dondurur. Agir inference
-AYRI thread'de kosar (server.py:dedektor_dongusu); bu modul sadece "model + tek
-kare -> bbox" isini yapar.
-
-DAYANIKLILIK: ultralytics/torch KURULU DEGILSE veya model yuklenemezse sessizce
-`hazir=False` olur ve `tespit_et()` hep None doner -> sistem GPS ile calismaya
-DEVAM eder (gorsel faz devreye girmez, ama cokme YOK). requirements.txt'e
-ultralytics + torch (CUDA wheel) eklenmeli; model models/best.pt'de durur.
-
-Renk notu: ultralytics numpy diziyi BGR varsayar; web.server.grab_frame_bgr() BGR
-ndarray dondurdugunden dogrudan gecmek DOGRU renktir (PIL RGB de kabul edilir).
-"""
+"""YOLO best.pt sarmalayici: bir kareden en-yuksek-conf bbox'i dondurur.
+Model yuklenemezse hazir=False ve tespit_et() None doner (sistem GPS ile devam eder)."""
 
 
 class HedefDedektor:
@@ -27,31 +14,27 @@ class HedefDedektor:
         self.conf = float(conf)
         self.imgsz = int(imgsz)
         self.device = device
-        self.half = half            # FP16 inference (None -> cuda'da otomatik AC; cpu'da kapali)
-        # --- SAHI (Slicing Aided Hyper Inference) — bizim temiz impl, sahi paketi GEREKMEZ.
-        # Kareyi ortusen dilimlere bol, HER dilimde predict, kutulari tam-kare koordina
-        # tasi + NMS ile birlestir -> uzak/kucuk hedef recall artar (kural 8 aciklanabilir).
-        # SADECE detect modelinde kullan; pose modelinde KAPALI (keypoint dilim-merge yok).
+        self.half = half            # FP16 (None -> cuda'da otomatik acik)
+        # SAHI: kareyi ortusen dilimlere bol, her dilimde predict, kutulari
+        # tam-kare koordina tasi + NMS ile birlestir (uzak/kucuk hedef recall).
         self.sahi = bool(sahi)
         self.sahi_dilim = int(sahi_dilim)
         self.sahi_ortusme = float(sahi_ortusme)
         self.sahi_tam_kare = bool(sahi_tam_kare)
         self.sahi_nms_iou = float(sahi_nms_iou)
         self.sahi_kosul_conf = float(sahi_kosul_conf)
-        self._fp16_kwargs = {}      # predict'e eklenen FP16 arg'i (API'ye gore quantize/half)
+        self._fp16_kwargs = {}
         self.hata = None
-        self.task = None            # 'detect' | 'pose' (yukleme sonrasi)
-        self.kpt_shape = None       # pose ise (n, dim); PnP [6,3] bekler
+        self.task = None            # 'detect' | 'pose'
+        self.kpt_shape = None       # pose ise (n, dim)
         try:
             from ultralytics import YOLO
-            if self.device is None:                       # cihaz otomatik: cuda varsa kullan
+            if self.device is None:                       # cihaz otomatik
                 try:
                     import torch
                     self.device = "cuda" if torch.cuda.is_available() else "cpu"
                 except Exception:
                     self.device = "cpu"
-            # FP16: cuda'da ~2x hizlanma, dogruluk kaybi ihmal edilebilir. CPU'da FP16
-            # anlamsiz/yavas -> otomatik kapali. Cagiran acikca half=True/False verebilir.
             if self.half is None:
                 self.half = (self.device == "cuda")
             self.model = YOLO(model_path)
@@ -64,13 +47,11 @@ class HedefDedektor:
             self._warmup()                                # ilk predict yavas -> onceden isit
         except Exception as e:
             self.hazir = False
-            self.hata = repr(e)                           # neden yuklenemedi (log icin)
+            self.hata = repr(e)
 
     def _warmup(self):
-        # FP16 API SECIMI + isitma: yeni ultralytics 'quantize="fp16"' (uyarisiz),
-        # eski surumde bu arg YOK -> TypeError -> 'half=True'ya dus (fonksiyonel).
-        # Secilen arg self._fp16_kwargs'a yazilir, tum predict'lerde kullanilir.
-        # (ilk predict yavas oldugundan warmup zaten sart; API testini birlestirdik.)
+        # FP16 API secimi + isitma: yeni ultralytics 'quantize="fp16"', eski surumde
+        # bu arg yok -> TypeError -> 'half=True'ya dus. Secilen arg _fp16_kwargs'a yazilir.
         try:
             import numpy as np
             bos = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
@@ -83,7 +64,6 @@ class HedefDedektor:
                     return
                 except TypeError:
                     continue                      # bu FP16 arg'i bu surumde yok -> digerini dene
-            # FP16 adaylarinin hicbiri gecmedi -> FP32 warmup (garanti)
             self._fp16_kwargs = {}
             self.model.predict(bos, imgsz=self.imgsz, conf=self.conf,
                                device=self.device, verbose=False)
@@ -92,8 +72,7 @@ class HedefDedektor:
 
     @staticmethod
     def _maskede(cxn, cyn, maske):
-        """Normalize merkez (cxn,cyn) verilen dikdortgenlerden birinin ICINDE mi?
-        maske: [(x0,y0,x1,y1), ...] normalize (0..1). None/bos -> False."""
+        """Normalize merkez (cxn,cyn) maske dikdortgenlerinden birinin icinde mi?"""
         if not maske:
             return False
         for r in maske:
@@ -106,23 +85,13 @@ class HedefDedektor:
         return False
 
     def tespit_et(self, frame, maske=None):
-        """frame: PIL Image (RGB, tercih) veya ndarray. -> en-yuksek-conf bbox dict | None.
-        dict: {cx,cy,w,h,conf,cls,W,H,t}  (px + perf_counter zaman damgasi).
-        maske: PERVANE bolgeleri [(x0,y0,x1,y1),...] normalize; MERKEZI icinde olan
-        kutular ELENIR (argmax ONCESI) -> kendi pervanemiz hedef sanilmaz. Tum kutular
-        maskeliyse None doner (o kare tespit yok)."""
+        """En-yuksek-conf bbox dict | None. maske: merkezi icinde olan kutular elenir."""
         hepsi = self.tespit_hepsi(frame, maske=maske)
         return hepsi[0] if hepsi else None
 
     def tespit_hepsi(self, frame, maske=None):
-        """Karedeki TUM tespitler, conf'a gore AZALAN sirali liste (bos olabilir).
-        Cok-nesneli sahnede (orn. park etmis ikinci Talon) cagiranin SECIM
-        yapabilmesi icin; uretim tek-kutu API'si (tespit_et) ilk elemani alir,
-        davranisi degismez. Eleman semasi tespit_et ile ayni; pose modelinde her
-        kutuya 'keypoints' [[x,y,conf],...] eklenir (detect modelinde alan yok).
-        maske: pervane bolgeleri — merkezi maskede olan kutular listeye GIRMEZ.
-        self.sahi=True ise SAHI dilimleme yolu kosar (uzak/kucuk hedef recall);
-        ciktisi tam-kare piksel koordinda -> downstream (maske/sema/sort) ayni."""
+        """Karedeki tum tespitler, conf'a gore azalan sirali (bos olabilir).
+        maske: merkezi maskede olan kutular listeye girmez. sahi=True ise SAHI yolu."""
         if not self.hazir:
             return []
         import time as _t
@@ -136,9 +105,8 @@ class HedefDedektor:
         for d in ham:
             cx = (d["x1"] + d["x2"]) / 2.0
             cy = (d["y1"] + d["y2"]) / 2.0
-            # PERVANE MASKESI: merkezi maskede olan kutu listeye girmez.
             if maske and W > 0 and H > 0 and self._maskede(cx / W, cy / H, maske):
-                continue                                  # kendi pervanemiz -> atla
+                continue                                  # pervane maskesi -> atla
             e = {
                 "cx": cx, "cy": cy,
                 "w": (d["x2"] - d["x1"]), "h": (d["y2"] - d["y1"]),
@@ -146,27 +114,22 @@ class HedefDedektor:
                 "W": W, "H": H, "t": t,
             }
             if d.get("kp") is not None:
-                e["keypoints"] = d["kp"]                   # [[x,y,conf],...] (PnP tuketicisi)
+                e["keypoints"] = d["kp"]
             cikti.append(e)
         cikti.sort(key=lambda d: -d["conf"])
         return cikti
 
-    # ------------------------------------------------------------------
-    #  Inference yollari: _tek_ham (tek predict) / _sahi_ham (dilimleme)
-    #  ikisi de -> (ham_kutu_listesi, W, H). ham kutu: {x1,y1,x2,y2,conf,cls,kp}
-    #  tam-kare piksel koordinda (kp: keypoint listesi | None).
-    # ------------------------------------------------------------------
+    # Inference yollari: _tek_ham (tek predict) / _sahi_ham (dilimleme).
+    # Ikisi de -> (ham_kutu_listesi, W, H). ham kutu: {x1,y1,x2,y2,conf,cls,kp}.
     def _tek_ham(self, frame):
-        """Tek tam-kare predict (eski davranis, bit-ayni). Keypoint TASINIR (pose)."""
+        """Tek tam-kare predict. Keypoint tasinir (pose)."""
         res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
                                  device=self.device, verbose=False, **self._fp16_kwargs)[0]
         return self._res_kutular(res, 0.0, 0.0, kp_al=True)
 
     def _sahi_ham(self, frame):
         """SAHI: tam-kare + ortusen dilim predict'leri -> offset + NMS merge.
-        KOSULLU: tam-karede conf>=sahi_kosul_conf kutu VARSA dilimleme ATLANIR
-        (yakin hedef -> tek inference; N-dilim maliyeti yalniz uzak/kucukte).
-        Detect modeli varsayilir -> keypoint YOK (kp=None)."""
+        Tam-karede conf>=sahi_kosul_conf kutu varsa dilimleme atlanir. kp=None."""
         import numpy as np
         arr = np.asarray(frame)
         if arr.ndim != 3:                     # PIL/beklenmedik -> guvenli tek predict
@@ -176,7 +139,7 @@ class HedefDedektor:
                                  device=self.device, verbose=False, **self._fp16_kwargs)[0]
         tam, tW, tH = self._res_kutular(res, 0.0, 0.0, kp_al=False)
         W, H = (tW or Wf), (tH or Hf)
-        # KOSULLU perf kapisi: yakin/buyuk hedef zaten tam-karede yakalandiysa dilimleme yok
+        # Kosullu perf kapisi: yakin/buyuk hedef zaten tam-karede yakalandiysa dilimleme yok
         if (self.sahi_kosul_conf > 0.0
                 and max((d["conf"] for d in tam), default=0.0) >= self.sahi_kosul_conf):
             return tam, W, H
@@ -191,12 +154,11 @@ class HedefDedektor:
             except Exception:
                 continue
             sub, _, _ = self._res_kutular(r, float(x0), float(y0), kp_al=False)
-            kutular.extend(sub)                            # koordlar zaten tam-kareye offsetli
+            kutular.extend(sub)
         return self._nms(kutular, self.sahi_nms_iou), W, H
 
     def _res_kutular(self, res, ox, oy, kp_al):
-        """ultralytics res -> (ham_kutu_listesi, W, H). Koordlara (ox,oy) offset eklenir
-        (dilim -> tam-kare). kp_al=True ise keypoint (varsa) tasinir + offsetlenir."""
+        """ultralytics res -> (ham_kutu_listesi, W, H). Koordlara (ox,oy) offset eklenir."""
         import numpy as np
         boxes = getattr(res, "boxes", None)
         H = int(res.orig_shape[0]) if getattr(res, "orig_shape", None) is not None else 0
@@ -234,8 +196,7 @@ class HedefDedektor:
 
     @staticmethod
     def _dilimler(W, H, dilim, ortusme):
-        """SAHI dilim izgarasi -> [(x0,y0,x1,y1), ...] tam-kare px. Son dilim kareyi
-        kaplar (kenarda bosluk kalmasin); kare zaten dilimden kucukse bos liste."""
+        """SAHI dilim izgarasi -> [(x0,y0,x1,y1), ...] tam-kare px. Son dilim kenari kaplar."""
         dilim = int(dilim)
         if dilim <= 0 or (W <= dilim and H <= dilim):
             return []
@@ -243,7 +204,7 @@ class HedefDedektor:
         xs = list(range(0, max(1, W - dilim + 1), adim)) or [0]
         ys = list(range(0, max(1, H - dilim + 1), adim)) or [0]
         if xs[-1] + dilim < W:
-            xs.append(W - dilim)                          # son sutun kenari kaplasin
+            xs.append(W - dilim)
         if ys[-1] + dilim < H:
             ys.append(H - dilim)
         out = []
@@ -266,8 +227,7 @@ class HedefDedektor:
 
     @staticmethod
     def _nms(kutular, iou_esik):
-        """Sinif-agnostik greedy NMS (tek sinif talon). Dilim+tam-kare cift kutulari
-        birlestirir: en yuksek conf tutulur, IoU>esik olanlar elenir."""
+        """Sinif-agnostik greedy NMS: en yuksek conf tutulur, IoU>esik olanlar elenir."""
         if len(kutular) <= 1:
             return list(kutular)
         sirali = sorted(kutular, key=lambda d: -d["conf"])
@@ -279,7 +239,7 @@ class HedefDedektor:
 
 
 def siniflar(model_path):
-    """DOGRULAMA yardimcisi: best.pt siniflarini (model.names) yazdir."""
+    """best.pt siniflarini (model.names) yazdir."""
     try:
         from ultralytics import YOLO
         m = YOLO(model_path)
@@ -292,5 +252,5 @@ def siniflar(model_path):
 
 if __name__ == "__main__":
     import os
-    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))   # depo koku
+    _root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     siniflar(os.path.join(_root, "models", "best.pt"))

@@ -1,34 +1,21 @@
 # -*- coding: utf-8 -*-
-"""
-================================================================================
- PENCERE-ICERIGI YAKALAMA  (Windows.Graphics.Capture / windows-capture)
-================================================================================
-mss EKRAN-BOLGESI yakalar -> tek monitorde oyun tarayicinin ARKASINDA kalinca
-yanlis pencereyi (masaustu/tarayici) alir ve ozyineleme (ayna) olur. Bu modul
-hedef PENCERENIN ICERIGINI yakalar: pencere arkada / kucultulmus olsa BILE dogru
-oyun goruntusu gelir. Tek monitor + tarayici onde senaryosu icin sart.
-
-start_free_threaded ile kutuphane kendi thread'inde kare uretir; en son kareyi
-lock altinda saklariz. get_latest_bgr() son BGR (H,W,3) kareyi doner (yoksa None).
-
-ZARIF BOZULMA: windows-capture yoksa / pencere bulunamazsa hazir=False, get_latest_bgr=None
--> server.py mss'e geri duser (mevcut davranis korunur, sistem cokmez).
-"""
+"""PENCERE-ICERIGI YAKALAMA. Hedef pencerenin icerigini yakalar (pencere arkada/kucultulmus
+olsa bile dogru oyun goruntusu). windows-capture yoksa hazir=False -> server mss'e duser."""
 import ctypes
 import threading
 import time
 
 
-GAME_PROC_HINTS = ("dronesofwar",)      # oyun exe/surec adi bunu icermeli (kucuk harf)
-# Baslik-ipucu fallback'inde ELENECEK surecler: tarayici sekmesi/editor basligi
-# "Drones of War" icerebilir (orn. GitHub/Drive sayfasi) -> YANLIS pencere yakalanir.
+GAME_PROC_HINTS = ("dronesofwar",)      # oyun surec adi bunu icermeli (kucuk harf)
+# Baslik-ipucu fallback'inde elenecek surecler (tarayici sekmesi basligi "Drones of War"
+# icerebilir -> yanlis pencere yakalanir).
 _TARAYICI_EXE = ("brave", "chrome", "msedge", "firefox", "opera", "vivaldi", "code")
 _TARAYICI_BASLIK = (" - brave", " - google chrome", " - microsoft edge",
                     " - mozilla firefox", " - opera", "visual studio code")
 
 
 def _pencere_pid(hwnd):
-    """hwnd -> sahibi surecin PID'i (ctypes; hata olursa None)."""
+    """hwnd -> sahibi surecin PID'i (hata olursa None)."""
     try:
         import ctypes
         pid = ctypes.c_ulong(0)
@@ -39,7 +26,7 @@ def _pencere_pid(hwnd):
 
 
 def _surec_adi(pid):
-    """PID -> surec exe adi (kucuk harf; psutil yoksa/bilinmiyorsa bos string)."""
+    """PID -> surec exe adi (kucuk harf; bilinmiyorsa bos string)."""
     if not pid:
         return ""
     try:
@@ -51,9 +38,8 @@ def _surec_adi(pid):
 
 def pencere_bul(title_hints):
     """Oyun penceresini bul; (baslik, hwnd) doner, bulamazsa (None, None).
-    ONCE pencerenin SAHIBI SUREC ADIYLA esler (DronesOfWar*.exe) — en saglami:
-    tarayici sekmesinin basligi 'Drones of War' icerse bile yanilmaz.
-    Surec eslesmezse baslik ipucuna duser; orada da tarayici/editor pencereleri elenir."""
+    Once surec adiyla esler (DronesOfWar*.exe), olmazsa baslik ipucuna duser
+    (tarayici/editor pencereleri elenir)."""
     try:
         import pygetwindow as gw
     except Exception:
@@ -66,33 +52,27 @@ def pencere_bul(title_hints):
                 adaylar.append((t, getattr(w, "_hWnd", None)))
     except Exception:
         return None, None
-    # 1) SUREC ADI eslesmesi (dogru pencere garantisi)
+    # 1) surec adi eslesmesi
     for t, hwnd in adaylar:
         ad = _surec_adi(_pencere_pid(hwnd)) if hwnd else ""
         if ad and any(h in ad for h in GAME_PROC_HINTS):
             return t, hwnd
-    # 2) BASLIK ipucu (fallback) — tarayici/editor pencerelerini ELE
+    # 2) baslik ipucu (fallback) — tarayici/editor pencerelerini ele
     for t, hwnd in adaylar:
         tl = t.lower()
         if not any(h in tl for h in title_hints):
             continue
         ad = _surec_adi(_pencere_pid(hwnd)) if hwnd else ""
         if any(b in ad for b in _TARAYICI_EXE):
-            continue                          # tarayici sekmesi basligi -> yanlis pencere
+            continue
         if not ad and any(b in tl for b in _TARAYICI_BASLIK):
-            continue                          # psutil yoksa baslik sonekiyle ele
+            continue
         return t, hwnd
     return None, None
 
 
-# ============================================================
-#  PrintWindow pencere-ICERIGI yakalama (occlusion-proof, SAF Win32)
-# ============================================================
-# windows-capture (Windows.Graphics.Capture) bazi makinelerde (Win10 LTSC 19044)
-# KARARSIZ. Bu katman yalnizca GDI + PrintWindow kullanir (ek native kutuphane
-# YOK) -> kararli. Oyun BASKA PENCERELERIN (orn. tarayici) ARKASINDAYKEN bile
-# dogru kareyi verir -> tek monitorde arayuz onde iken sart. K sanity zinciri de
-# bu yolla olculdu (yakalama yolu tutarli). Basarisiz/siyah icerik -> None.
+# PrintWindow pencere-icerigi yakalama (saf Win32 GDI; ek native kutuphane yok).
+# Oyun baska pencerelerin arkasindayken bile dogru kareyi verir.
 class _BMIH(ctypes.Structure):
     _fields_ = [("biSize", ctypes.c_uint32), ("biWidth", ctypes.c_long),
                 ("biHeight", ctypes.c_long), ("biPlanes", ctypes.c_uint16),
@@ -103,9 +83,8 @@ class _BMIH(ctypes.Structure):
 
 
 def pencere_icerik_bgr(hwnd):
-    """PrintWindow (PW_CLIENTONLY|PW_RENDERFULLCONTENT) ile pencere ICERIGINI BGR
-    ndarray (H,W,3) doner. Oyun arkada/ortulu olsa bile dogru kare. Basarisiz veya
-    tumu-siyah icerik -> None (cagiran mss'e duser). SAF Win32 GDI; sim/veri izi yok."""
+    """PrintWindow ile pencere icerigini BGR ndarray (H,W,3) doner.
+    Basarisiz veya tumu-siyah icerik -> None (cagiran mss'e duser)."""
     import ctypes
     import numpy as np
     try:
@@ -150,11 +129,7 @@ def pencere_icerik_bgr(hwnd):
 
 class PencereYakala:
     def __init__(self, title_hints=None, window_name=None, window_hwnd=None):
-        """
-          title_hints : pencere basligi ipuclari (window_name/hwnd verilmezse aranir)
-          window_name : tam pencere basligi (verilirse dogrudan kullanilir)
-          window_hwnd : pencere handle'i (en saglam eslesme)
-        """
+        """title_hints: baslik ipuclari; window_name: tam baslik; window_hwnd: pencere handle."""
         self.title_hints = [h.lower() for h in (title_hints or [])]
         self.window_name = window_name
         self.window_hwnd = window_hwnd
@@ -164,10 +139,10 @@ class PencereYakala:
         self._lock = threading.Lock()
         self._baslat_lock = threading.Lock()   # baslat() cift-cagri yarisini onler
         self._control = None
-        # --- WATCHDOG durumu (bayat-kare / yanlis-pencere yeniden baglama) ---
-        self._latest_t = 0.0      # son KARE geldigi an (monotonic); 0 = hic kare gelmedi
-        self._baglama_t = 0.0     # yakalama basladigi an (ilk-kare beklerken bayatlik icin)
-        self._bagli_hwnd = None   # su an BAGLI oldugumuz pencere handle'i (degisirse yeniden bagla)
+        # WATCHDOG durumu (bayat-kare / yanlis-pencere yeniden baglama)
+        self._latest_t = 0.0      # son kare geldigi an; 0 = hic kare gelmedi
+        self._baglama_t = 0.0     # yakalama basladigi an
+        self._bagli_hwnd = None   # su an bagli oldugumuz pencere handle'i
         try:
             from windows_capture import WindowsCapture
             self._WindowsCapture = WindowsCapture
@@ -179,9 +154,8 @@ class PencereYakala:
         return self._control is not None
 
     def baslat(self):
-        """Yakalamayi baslatir (non-blocking). Zaten calisyorsa True; pencere
-        bulunamazsa / hata olursa False (server mss'e duser). Iki thread ayni anda
-        cagirsa bile kilit + cift-kontrol ile tek capture acilir."""
+        """Yakalamayi baslatir (non-blocking). Zaten calisyorsa True; hata olursa False.
+        Kilit + cift-kontrol ile tek capture acilir."""
         if not self.hazir:
             return False
         with self._baslat_lock:
@@ -196,7 +170,7 @@ class PencereYakala:
         if ad is None and hwnd is None:
             ad, hwnd = pencere_bul(self.title_hints)
         if ad is None and hwnd is None:
-            # Oyun penceresi henuz bulunamadi: ~her 10 sn bir kez bilgilendir (spam yok).
+            # Oyun penceresi bulunamadi: ~10 sn'de bir bilgilendir (spam yok).
             import time as _t
             simdi = _t.monotonic()
             if simdi - getattr(self, "_son_uyari_t", 0.0) > 10.0:
@@ -205,23 +179,17 @@ class PencereYakala:
                       "gorunur pencere yok). Oyun acik ve PLAY modunda mi? -> server mss'e duser.")
             return False
 
-        # Hedef (hwnd en saglam, sonra pencere adi) x yakalama ayarlari kombinasyonlari.
-        # DIKKAT (imlec-talon FP kok nedeni): iki WGC ayarinin build gereksinimi FARKLI:
-        #   - cursor_capture (IsCursorCaptureEnabled) -> build 19041+ (Win10 2004+); LTSC 19044 DESTEKLER.
-        #   - draw_border    (IsBorderRequired)       -> build 22000+ (Win11/Server2022); LTSC 19044 YOK.
-        # Ikisini TEK sette paketlersek (cursor_capture=False, draw_border=False), LTSC 19044'te
-        # draw_border satiri OTURUMU patlatir -> tum set duser -> varsayilana (imlec ACIK) inilir ->
-        # mouse imleci karelere girer, YOLO 'talon' saniyordu. Cozum: cursor-only ara set. Once
-        # ideal (yeni Windows), olmazsa YALNIZ cursor_capture=False (LTSC: imleci yine de kapatir),
-        # en son ayarlara HIC dokunmayan (None=varsayilan) son care.
+        # Hedef (hwnd/ad) x yakalama ayarlari kombinasyonlari. Iki WGC ayarinin build
+        # gereksinimi farkli (cursor_capture 19041+, draw_border 22000+); LTSC 19044'te
+        # ideal set duserse cursor-only ara sete, en son varsayilana inilir.
         hedefler = []
         if hwnd:
             hedefler.append(("hwnd", dict(window_hwnd=int(hwnd))))
         if ad:
             hedefler.append(("ad", dict(window_name=ad)))
         ayar_setleri = [dict(cursor_capture=False, draw_border=False),  # Win11/Server2022+: imlec+kenar kapali
-                        dict(cursor_capture=False),                     # LTSC 19044: yalniz imlec kapali (draw_border'a dokunma)
-                        dict(cursor_capture=None, draw_border=None)]     # son care: varsayilan (imlec ACIK)
+                        dict(cursor_capture=False),                     # LTSC 19044: yalniz imlec kapali
+                        dict(cursor_capture=None, draw_border=None)]     # son care: varsayilan (imlec acik)
         son_hata = None
         for yontem, hkw in hedefler:
             for akw in ayar_setleri:
@@ -251,7 +219,7 @@ class PencereYakala:
                 try:
                     self._control = cap.start_free_threaded()
                     self.aktif_pencere = ad if ad else ("hwnd:%s" % hwnd)
-                    self._bagli_hwnd = hwnd                 # WATCHDOG: bagli pencere
+                    self._bagli_hwnd = hwnd
                     self._baglama_t = time.monotonic()
                     self._latest_t = 0.0                    # ilk kareyi bekle
                     print("[PENCERE_YAKALA] yakalama basladi: %s" % self.aktif_pencere)
@@ -260,7 +228,7 @@ class PencereYakala:
                     son_hata = "baslatma(%s): %s" % (yontem, e)
                     self._control = None
 
-        # Tum kombinasyonlar basarisiz: ~10 sn'de bir raporla (2 sn'lik retry SPAM'i yok).
+        # Tum kombinasyonlar basarisiz: ~10 sn'de bir raporla.
         import time as _t
         simdi = _t.monotonic()
         if simdi - getattr(self, "_son_uyari_t", 0.0) > 10.0:
@@ -282,22 +250,18 @@ class PencereYakala:
                 pass
 
     def yeniden_baglanmali(self, stale_s=2.0):
-        """WATCHDOG: yakalama 'calisyor' gorunuyor AMA gercekte bozuk mu?
-        Oyun penceresi yeniden yaratildiginda / WGC dondugunda / baslangicta YANLIS
-        pencereye baglandiginda on_closed TETIKLENMEZ -> _control dolu kalir ama kare
-        gelmez/bayatlar; sistem mss'e duser (oyun arkadaysa yanlis piksel). Bu durumlari
-        yakalar; connection_manager durdur()+baslat() ile TAZE pencereye yeniden baglanir.
-        True = yeniden baglan. (Calismyorsa veya saglikliysa False.)"""
+        """WATCHDOG: yakalama 'calisyor' gorunuyor ama gercekte bozuk mu?
+        True = yeniden baglan (durdur+baslat ile taze pencereye)."""
         if self._control is None:
             return False
         simdi = time.monotonic()
-        # (a) KARE geldi ama BAYATLADI (WGC dondu / pencere oldu)
+        # (a) kare geldi ama bayatladi
         if self._latest_t > 0.0 and (simdi - self._latest_t) > stale_s:
             return True
-        # (b) Baglandi ama HIC kare gelmedi (yanlis/gorunmez pencereye baglanma) — makul sure gecti
+        # (b) baglandi ama hic kare gelmedi (yanlis/gorunmez pencere)
         if self._latest_t == 0.0 and self._baglama_t > 0.0 and (simdi - self._baglama_t) > stale_s:
             return True
-        # (c) BAGLI oldugumuz pencere artik gecerli oyun penceresi DEGIL (handle degisti)
+        # (c) bagli oldugumuz pencere artik gecerli oyun penceresi degil (handle degisti)
         if self.window_name is None and self.window_hwnd is None and self._bagli_hwnd is not None:
             try:
                 _, hwnd = pencere_bul(self.title_hints)

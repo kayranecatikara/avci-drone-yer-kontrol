@@ -1,19 +1,5 @@
 # -*- coding: utf-8 -*-
-"""
-TUNE RAPORU (Excel) — "Degerleri Yazdir" butonunun sunucu tarafi.
-
-Arayuzdeki tune panelinde "Degerleri Yazdir"a basilinca server bu modulu cagirir:
-aktif (ya da en yeni) veri/ucus_log_*.csv okunur, GORSEL faz (phase=VISUAL)
-satirlarindan performans metrikleri cikarilir ve o anki tune degerleriyle
-birlikte veri/tune_rapor_<zaman>.xlsx dosyasina yazilir.
-
-Metrikler NEDEN bu log'dan: beyin her tik zengin teshis satiri yazar
-(vis_gordu/vis_conf/vis_ex/vis_ey/ibvs_r/kilit_win_s/gercek_mesafe/yaw_cmd...);
-ayni degerlerle "bu tune seti ne kadar iyiydi?" sorusu dogrudan cevaplanir.
-Guduum koduna DOKUNMAZ (salt okuma + dosya yazma).
-
-Birimler: sim konumlari cm -> raporda metreye cevrilir. Sureler saniye.
-"""
+"""TUNE RAPORU (Excel) — ucus logundan gorsel-faz metrikleri + tune degerleri."""
 
 import csv
 import glob
@@ -24,11 +10,9 @@ import shutil
 import time
 
 
-# ----------------------------------------------------------------
-#  Yardimcilar
-# ----------------------------------------------------------------
+# Yardimcilar
 def _f(x):
-    """CSV hucresi -> float | None (bos/bozuk hucre None)."""
+    """CSV hucresi -> float | None."""
     if x is None or x == "":
         return None
     try:
@@ -50,12 +34,7 @@ def _oku(log_path):
         return list(csv.DictReader(f))
 
 
-# ----------------------------------------------------------------
-#  UCUS KLASORU — veri/tune_parametreler/ucus_N/ : bir ucusun TUM verileri
-#  tek yerde (ucus logu kopyasi + tune logu kopyasi + Excel raporlari).
-#  Ayni ucus logu HEP ayni klasore gider (kayit.json esler); yeni ucus logu
-#  gorulunce siradaki numara acilir -> ucus_1, ucus_2, ... kiyasi kolay.
-# ----------------------------------------------------------------
+# UCUS KLASORU: bir ucusun tum verileri veri/tune_parametreler/ucus_N/ altinda.
 def ucus_klasoru(base_dir, log_path):
     """Ucus loguna karsilik gelen (gerekirse YENI) klasoru dondur."""
     os.makedirs(base_dir, exist_ok=True)
@@ -80,8 +59,7 @@ def ucus_klasoru(base_dir, log_path):
 
 
 def dosyayi_klasore_al(kaynak, klasor):
-    """Log kopyasini ucus klasorune tazele (kaynak hala yaziliyor olabilir ->
-    kopya; ayni ada uzerine yazar, her rapor basiminda guncel kalir)."""
+    """Log kopyasini ucus klasorune tazele."""
     if not kaynak or not os.path.isfile(kaynak):
         return None
     hedef = os.path.join(klasor, os.path.basename(kaynak))
@@ -107,15 +85,10 @@ def _oku_tune_log(path):
     return out
 
 
-# ----------------------------------------------------------------
-#  Metrik hesabi — hepsi tek gecis + kucuk listeler (log ~binlerce satir)
-# ----------------------------------------------------------------
+# Metrik hesabi
 def metrik_hesapla(satirlar, kilit_gerek_s):
-    """
-    satirlar: _oku() ciktisi. kilit_gerek_s: Cfg.VIS_WIN_NEED_S (kilit isteri esigi).
-    Donus: [(baslik, deger, aciklama), ...] listesi (Excel'e satir satir yazilir).
-    """
-    M = []                                   # (baslik, deger, aciklama)
+    """Ucus logundan gorsel-faz metrikleri -> [(baslik, deger, aciklama), ...]."""
+    M = []
 
     def ekle(b, d, a=""):
         M.append((b, d, a))
@@ -267,13 +240,8 @@ def metrik_hesapla(satirlar, kilit_gerek_s):
     return M
 
 
-# ----------------------------------------------------------------
-#  SEGMENT KIYASI — ucus SIRASINDA parametre degistirerek A/B test:
-#  tune logundaki her degisim noktasi ucusu segmentlere boler; her segmentin
-#  gorsel-faz metrikleri AYRI satirda yazilir -> "artirinca iyilesti mi?"
-#  tek ucusta gorunur (ucus basina tek parametre seti kisiti kalkar).
-# ----------------------------------------------------------------
-_SEG_BIRLESTIR_S = 3.0     # slider surukleme: bu kadar yakin degisimler TEK segment sayilir
+# SEGMENT KIYASI: tune degisim noktalari ucusu segmentlere boler (ucus-ici A/B).
+_SEG_BIRLESTIR_S = 3.0     # bu kadar yakin degisimler tek segment sayilir
 
 
 def _ort(v):
@@ -341,10 +309,7 @@ _SEG_ACIKLAMA = ("tespit_% yuksek + kayip az + r_ort kucuk + merkez_% yuksek + "
 
 
 def segment_tablosu(satirlar, tune_rows):
-    """
-    Donus: (basliklar, satir listesi). Ucus logu t_wall ile tune degisim
-    noktalarina bolunur; her segment = o araliktaki parametre seti + metrikler.
-    """
+    """Ucusu tune degisimlerine gore segmentlere bol -> (basliklar, satirlar)."""
     if not satirlar:
         return [], []
     tw = [r for r in satirlar if _f(r.get("t_wall")) is not None]
@@ -379,11 +344,7 @@ def segment_tablosu(satirlar, tune_rows):
 
 
 def saniye_tablosu(satirlar, tune_rows):
-    """
-    SANIYE BAZLI detay: her saniye icin gorsel metrik ozetleri + o saniyedeki
-    tune degerleri (Excel'de grafige dokulup 'degisiklik ani' incelenebilir).
-    Donus: (basliklar, satirlar).
-    """
+    """Saniye bazli gorsel metrik + o saniyedeki tune degerleri -> (basliklar, satirlar)."""
     tw = [r for r in satirlar if _f(r.get("t_wall")) is not None]
     if not tw:
         return [], []
@@ -433,16 +394,7 @@ def saniye_tablosu(satirlar, tune_rows):
 # ----------------------------------------------------------------
 def rapor_uret(tune_vals, sabit_vals, log_path, cikti_dir, kilit_gerek_s=5.0,
                tune_log_path=None):
-    """
-    tune_vals    : {param: deger} — slider'daki CANLI degerler (TUNE_ALLOW seti)
-    sabit_vals   : {param: deger} — tune disinda rapora girmesi faydali sabitler
-                    (isaretler, kapilar; "bu kosuda neydi?" sorusu icin)
-    log_path     : okunacak ucus logu (None -> metriksiz, sadece degerler)
-    tune_log_path: 1 Hz tune logu (server.tune_log_dongusu). Varsa raporda
-                    "Segment Kiyas" (degisim basi A/B satiri) + "Saniye Detay"
-                    sayfalari uretilir -> ucus icinde parametre oynayarak test.
-    Donus        : (xlsx_yolu, ozet_dict)  ozet arayuzde kisa gosterim icindir.
-    """
+    """Tune degerleri + ucus metriklerini xlsx'e yaz -> (xlsx_yolu, ozet_dict)."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
     from openpyxl.utils import get_column_letter
@@ -484,8 +436,7 @@ def rapor_uret(tune_vals, sabit_vals, log_path, cikti_dir, kilit_gerek_s=5.0,
     ws = wb.create_sheet("Performans")
     sayfa_yaz(ws, ["Metrik", "Deger", "Aciklama"], metrikler)
 
-    # Sayfa 4-5: SEGMENT KIYAS + SANIYE DETAY (tune logu varsa) — ucus icinde
-    # parametre degistirilen her aralik ayri satir: "artirinca iyilesti mi?"
+    # Sayfa 4-5: SEGMENT KIYAS + SANIYE DETAY (tune logu varsa)
     tune_rows = _oku_tune_log(tune_log_path)
     seg_sayisi = 0
     if satirlar and tune_rows:

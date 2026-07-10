@@ -15,6 +15,7 @@
 
 ### [00:00–00:15] Açılış
 `[EKRAN: Takım kartı "Hamidiye" → mimari diyagramı → kod dosyaları]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "üç çekirdek dosyayı göstereceğiz" · "tamamen otonom"
 
 Merhaba, biz Hamidiye takımıyız. Bu videoda hem sistemimizi anlatacağız, hem de ekranda kodumuzu
 açıp üç çekirdek dosyayı göstereceğiz: GNSS filtremiz, karar mekanizmamız ve görsel güdüm yasamız.
@@ -23,6 +24,7 @@ gidiyor.
 
 ### [00:15–00:40] Beyin — ana_kontrol.py, adim()
 `[EKRAN: guidance/ana_kontrol.py — adim() fonksiyonu + LOOP_HZ = 50.0 satırı vurgulu]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "saniyede elli kez" · "bütün faz geçişlerini bu tek fonksiyon yönetiyor"
 
 Ekranda ilk açtığımız dosya ana_kontrol; yazılımın beyni burada, adim fonksiyonunda. Vurgulu satırda
 gördüğünüz gibi bu fonksiyon saniyede elli kez çalışıyor ve üç durumlu bir makine gibi karar veriyor:
@@ -31,6 +33,7 @@ kontrolü kameraya devrediyor. Yani bütün faz geçişlerini bu tek fonksiyon y
 
 ### [00:40–01:20] Birinci çekirdek — gnss_filtre.py: spike_temizle, _egim
 `[EKRAN: fusion/gnss_filtre.py — spike_temizle ve _egim fonksiyonları vurgulu]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "hem hızıyla hem konumuyla BİRLİKTE saparsa" (iki kapı) · "yoksa hedefe SAHTE bir hız uydururduk"
 
 Şimdi birinci çekirdek koda, gnss_filtre dosyasına geçelim. Hedefin konumu bize kasten bozuk geliyor:
 gürültü, ani sıçrama, kayma, kopma, bir de gecikme. Ekranda gördüğünüz spike_temizle fonksiyonları bu
@@ -42,6 +45,7 @@ yeni olup olmadığına bakıp donmuş veriyi tekrar işlemiyoruz, yoksa hedefe 
 
 ### [01:20–01:45] gnss_filtre.py — guncelle(): gecikme telafisi
 `[EKRAN: gnss_filtre.py — guncelle() içinde lead + güven faktörü satırları vurgulu]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "bir saniye İLERİ taşıyarak hedefin ŞU AN gerçekte olduğu yeri tahmin ediyoruz"
 
 Filtrenin en kritik işi, ekrandaki guncelle fonksiyonunda: gecikme telafisi. Simülasyon bize hedefin
 bir saniye önceki konumunu veriyor; biz de hızını çıkarıp konumu bir saniye ileri taşıyarak hedefin şu
@@ -51,6 +55,7 @@ otomatik kısıyoruz — gürültülü anlarda yanlış yere fırlamayalım diye
 
 ### [01:45–02:08] GPS güdümü ve görüntü hattı (kısa)
 `[EKRAN: gps_takip.py adim() → detection/gorsel_tespit.py + takip.py]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "HybridSort takipçisi hedefe KALICI bir kimlik verip izi ayakta tutuyor"
 
 Bu temiz konumu gps_takip dosyası kullanıyor: önce on metre kalkış, sonra hedefe bir PD ve bir PID'le
 yaklaşma, bir yandan da burnu sürekli hedefe dönük tutma. Görüntü tarafını kısaca geçiyoruz —
@@ -59,6 +64,7 @@ tarıyoruz; sonra açık kaynak HybridSort takipçisi hedefe kalıcı bir kimlik
 
 ### [02:08–02:53] İkinci-üçüncü çekirdek — ibvs_gorsel.py: hesapla()
 `[EKRAN: guidance/ibvs_gorsel.py — hesapla(); "GPS: KAPALI" rozeti; imza satırı vurgulu]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "bu imza satırında KONUM BİLGİSİ YOK; görsel fazda GPS kullanmak YAPISAL OLARAK İMKANSIZ" (en kritik cümle)
 
 Şimdi görsel güdüm yasamıza geldik: ibvs_gorsel dosyasındaki hesapla fonksiyonu. Ekranda gördüğünüz
 gibi, görsel temas kurulduktan sonra komutu üreten tek fonksiyon bu. Mantığı sade: görüntünün merkeziyle
@@ -71,6 +77,7 @@ GPS'i kullanmak yapısal olarak imkânsız; kuralı kodun mimarisiyle garantiled
 
 ### [02:53–03:23] Kilit — ana_kontrol.py, _kilit_degerlendir()
 `[EKRAN: ana_kontrol._kilit_degerlendir() → kilit sayacı (10/5 sn) → ANGAJMAN → VURUŞ]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "on saniyede TOPLAM BEŞ SANİYE" · "vuruş ayrı bir komut değil"
 
 Son olarak kilidi, yine ana_kontrol'deki kilit_degerlendir fonksiyonu ölçüyor: on saniyelik pencerede
 toplam beş saniye boyunca hedef merkezde ve yeterince büyük kalırsa kilit onaylanıyor — şartnamedeki
@@ -79,6 +86,7 @@ vuruş ayrı bir komut değil, görsel hatayı sıfıra sürmenin doğal sonucu.
 
 ### [03:23–03:40] Dosya haritası ve kütüphaneler
 `[EKRAN: dosya ağacı — modül adları okunur zoom]`
+> 🔊 **VURGU (bunu vurgulayarak oku):** "mantığının tamamı ... BİZE AİT"
 
 Özetle açtığımız üç çekirdek: gnss_filtre GNSS'i temizliyor, ana_kontrol kararı veriyor, ibvs_gorsel
 görsel güdümü yürütüyor. Kullandığımız açık kaynak kütüphaneler: tespit için Ultralytics ve PyTorch,

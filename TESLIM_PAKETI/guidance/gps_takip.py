@@ -12,101 +12,94 @@ except ImportError:
 
 
 class GPSCfg:
-    # --- ISARETLER / EKSEN YONU ---
-    ROT_IN_DEGREES = True       # get_drone_rotation derece donduruse True
-    PITCH_SIGN = +1.0           # ileri hareket +pitch degilse -1
-    ROLL_SIGN  = +1.0           # saga hareket +roll degilse -1
-    YAW_SIGN   = +1.0           # hedefe donus icin +yaw degilse -1
+    # Isaretler / eksen yonu
+    ROT_IN_DEGREES = True
+    PITCH_SIGN = +1.0
+    ROLL_SIGN  = +1.0
+    YAW_SIGN   = +1.0
     Z_SIGN     = +1.0
 
-    # --- DONGU ---
+    # Dongu
     LOOP_HZ = 50.0
     DT = 1.0 / LOOP_HZ
 
-    # --- KOMUT TAVANLARI ---
+    # Komut tavanlari
     PITCH_MAX = 0.75
     ROLL_MAX  = 0.75
     THR_UP    = 0.70
     THR_DN    = -1.00
     YAW_MAX   = 0.45
 
-    # --- KOMUT/TICK DEGISIMI LIMITI ---
-    MAX_DELTA_THR   = 0.12      # dikey
-    MAX_DELTA_PITCH = 0.08      # yatay
+    # Tik basi degisim limiti
+    MAX_DELTA_THR   = 0.12
+    MAX_DELTA_PITCH = 0.08
     MAX_DELTA_ROLL  = 0.08
     MAX_DELTA_YAW   = 0.08
 
-    # --- BURUN -> HEDEF YAW ---
+    # Burun -> hedef yaw
     KP_YAW = 1.3
     YAW_DEADBAND = math.radians(3)
 
-    # --- KALKIS ---
+    # Kalkis
     TAKEOFF = True
-    TAKEOFF_ALT_AGL = 1000.0    # cm; kalkista bulundugu yerden tirmanilacak yukseklik
-    TAKEOFF_THR = 0.6           # tirmanma throttle
+    TAKEOFF_ALT_AGL = 1000.0    # cm; tirmanilacak yukseklik
+    TAKEOFF_THR = 0.6
 
-    # --- TAKIP MESAFESI ---
-    APPROACH_STANDOFF   = 000.0 # cm; YATAY takip mesafesi (hedefin bu kadar gerisinde dur)
-    APPROACH_ALT_OFFSET = 500.0 # cm; DIKEY takip mesafesi (hedefin bu kadar altinda uc)
+    # Takip mesafesi
+    APPROACH_STANDOFF   = 000.0 # cm; yatay
+    APPROACH_ALT_OFFSET = 500.0 # cm; dikey
 
-    # --- PID KAZANCLARI ---
-    KP_H = 0.00025              # yatay konum hatasi -> pitch/roll
-    KD_H = 0.00060              # yatay hata turevi -> sonumleme/fren
-    KP_Z = 0.00040              # irtifa hatasi -> throttle
-    KD_Z = 0.00100              # dikey hiz -> sonumleme
-    KI_Z = 0.00020              # kalici irtifa hatasini kapat
-    INT_Z_BAND = 2500.0         # cm; integrali sadece |ez|<band iken biriktir (anti-windup)
-    INT_Z_MAX  = 5000.0         # cm; biriken integrali kis
+    # PID kazanclari
+    KP_H = 0.00025
+    KD_H = 0.00060
+    KP_Z = 0.00040
+    KD_Z = 0.00100
+    KI_Z = 0.00020
+    INT_Z_BAND = 2500.0         # cm; anti-windup bandi
+    INT_Z_MAX  = 5000.0         # cm; integral tavani
 
-    # --- FILTRE / DEADBAND ---
-    DERIV_EMA = 0.20            # hata turevi EMA orani
+    # Filtre / deadband
+    DERIV_EMA = 0.20
     POS_DEADBAND = 150.0        # cm; yakinda yatay jitter'i onle
 
-    # --- GNSS KESINTISI ---
-    DR_MAX_S = 30.0             # sn; kesintide son hizla en fazla bu kadar ileri tahmin edilir
+    # GNSS kesintisi (olu-hesap)
+    DR_MAX_S = 30.0             # sn; kesintide ileri tahmin tavani
 
-    # --- GNSS FILTRE ---
-    GECIKME_SN = 1.0            # simulasyon ham GNSS gecikme suresi
+    # GNSS filtre
+    GECIKME_SN = 1.0
 
 
-# ==========================================================
-# HELPERS
-# ==========================================================
 def wrap_pi(a):         # Aciyi -pi..+pi araligina alir
     return (a + math.pi) % (2.0 * math.pi) - math.pi
 
 
-def clamp(x, lo, hi):   # Degeri [lo, hi] araligina alir
+def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
 
-def deadband(x, db):    # Kucuk degerleri (|x|<db) sifirlar -> jitter onler
+def deadband(x, db):    # |x|<db ise 0
     return 0.0 if abs(x) < db else x
 
 
-def rate_limit(target, prev, max_delta):    # Tick basi degisimi +-max_delta ile sinirlar
+def rate_limit(target, prev, max_delta):
     return prev + clamp(target - prev, -max_delta, max_delta)
 
 
-def world_to_body(ex, ey, yaw_rad):         # Simulasyon dunyasının yatay hatasini govde (ileri/sag) cercevesine cevirir
+def world_to_body(ex, ey, yaw_rad):         # Yatay hatayi govde (ileri/sag) cercevesine cevirir
     c, s = math.cos(yaw_rad), math.sin(yaw_rad)
     e_fwd   = ex * c + ey * s
     e_right = ex * s - ey * c
     return e_fwd, e_right
 
 
-# ==========================================================
-# GPS TAKIP KONTROLU
-# ==========================================================
+# GPS-yaklasma kontrolu: kalkis + PD/PID + olu-hesap
 class GPSTakip:
     def __init__(self, drone):
         self.drone = drone
         self.filtre = None
         self.sifirla()
 
-    # ----------------------------------------------------------------
-    #  Yeni gorev icin durumu sıfırla
-    # ----------------------------------------------------------------
+    # Yeni gorev icin durumu sifirla
     def sifirla(self):
         self.filtre = GNSSFiltre(gecikme_sn=GPSCfg.GECIKME_SN)
 
@@ -123,16 +116,13 @@ class GPSTakip:
         self.prev = {'thr': 0.0, 'pitch': 0.0, 'roll': 0.0, 'yaw': 0.0}
         self.e_prev = None
         self.t_prev = None
-        self.de = [0.0, 0.0, 0.0]    # EMA-filtreli hata turevi (cm/s)
-        self._ez_int = 0.0           # dikey integral birikimi (cm*s)
+        self.de = [0.0, 0.0, 0.0]    # EMA-filtreli hata turevi
+        self._ez_int = 0.0           # dikey integral birikimi
 
         # kalkis durumu
         self._kalkis_done = (not GPSCfg.TAKEOFF)
-        self._zemin_z = None         # kalkis noktasi
+        self._zemin_z = None
 
-    # ----------------------------------------------------------------
-    #  Komut gonder
-    # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
         thr   = rate_limit(thr,   self.prev['thr'],   GPSCfg.MAX_DELTA_THR)
         pitch = rate_limit(pitch, self.prev['pitch'], GPSCfg.MAX_DELTA_PITCH)
@@ -148,9 +138,7 @@ class GPSTakip:
     def _loiter(self):
         self._send(0.0, 0.0, 0.0, 0.0)
 
-    # ----------------------------------------------------------------
-    #  GNSS Temizleme
-    # ----------------------------------------------------------------
+    # GNSS temizleme + hedef hiz/konum guncelle
     def _hedef_temizle(self):
         ham = self.drone.get_target_location()
         if ham == self.son_ham:
@@ -169,9 +157,7 @@ class GPSTakip:
         self.son_xy_anlik = np.array([self.son_temiz[0], self.son_temiz[1]], float)
         return self.son_temiz
 
-    # ----------------------------------------------------------------
-    #  EMA-filtreli Hata Turevi
-    # ----------------------------------------------------------------
+    # EMA-filtreli hata turevi
     def _derivative(self, e, t):
         if self.e_prev is None:
             self.e_prev, self.t_prev = e, t
@@ -185,9 +171,7 @@ class GPSTakip:
             self.e_prev, self.t_prev = e, t
         return self.de
 
-    # ================================================================
-    #  Kontrol Adimi
-    # ================================================================
+    # Kontrol adimi
     def adim(self):
         drone_pos = np.array(self.drone.get_drone_location())
         yaw_m = self.drone.get_drone_rotation()[2]

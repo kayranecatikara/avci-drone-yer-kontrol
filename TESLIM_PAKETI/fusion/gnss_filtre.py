@@ -1,22 +1,18 @@
 import time
 
-# ==========================================================
-# CONSTANTS
-# ==========================================================
+# Sabitler
 CM_TO_M = 0.01
 M_TO_CM = 100.0
-MAX_HEDEF_HIZ = 4000.0    # cm/s; gercekci hedef hiz tavani (~40 m/s). Ham lead-hizi bununla kirpilir.
-VEL_EMA = 0.15            # lead-hizi yumusatma orani
-SHORT_N = 4               # guven kiyasi icin kisa-pencere egim nokta sayisi
-MAX_LEAD = 3000.0         # cm; lead-mesafe tavani
-TUTARLILIK_OLCEK = 1500.0  # cm/s; anlik vs yumusak hiz farki bu degerde lead guveni 0'a duser
-GAP_DT           = 2.5     # sn; dropout/kesinti -> cooldown baslat
-COOLDOWN_N       = 3       # ornek; bosluk sonrasi lead'i agir kistigimiz ornek sayisi
-COOLDOWN_GUVEN   = 0.2     # cooldown suresince lead carpani
+MAX_HEDEF_HIZ = 4000.0    # cm/s; hedef hiz tavani
+VEL_EMA = 0.15            # lead-hizi yumusatma
+SHORT_N = 4               # kisa-pencere nokta sayisi
+MAX_LEAD = 3000.0         # cm; lead tavani
+TUTARLILIK_OLCEK = 1500.0  # cm/s
+GAP_DT           = 2.5     # sn; kesinti esigi
+COOLDOWN_N       = 3
+COOLDOWN_GUVEN   = 0.2
 
-# ==========================================================
-# HELPERS
-# ==========================================================
+
 def _egim(ts, vs):
     m = len(ts)
     if m < 2:
@@ -36,9 +32,7 @@ def _zaman_ekseni(zamanlar, n):
     return list(map(float, zamanlar))
 
 
-# ==========================================================
-# SPIKE TEMIZLEYICILER
-# ==========================================================
+# Eksen-bazli spike temizleme
 def z_spike_temizle(z_dizi, zamanlar=None, esik=3.0, max_hold=8, vz_ema=0.3, max_vz=5.0):
     z = list(map(float, z_dizi))
     if not z:
@@ -144,51 +138,49 @@ def y_spike_temizle(y_dizi, zamanlar=None, hiz_esik=15.0, konum_esik=6.0,
     return temiz
 
 
-# ==========================================================
-# STREAMING SARMALAYICI
-# ==========================================================
+# Akis sarmalayici: ham GNSS -> temiz konum + hiz + gecikme telafisi
 class GNSSFiltre:
     def __init__(self, gecikme_sn=1.0, pencere=400, vel_n=7):
-        self.gecikme_sn = float(gecikme_sn)   # olcum ~bu kadar eski -> ileri-tahminle telafi
-        self.pencere = int(pencere)           # tutulan ham ornek penceresi
-        self.vel_n = int(vel_n)               # hiz kestiriminde son N nokta (buyuk = daha yumusak)
-        self._xs = []; self._ys = []; self._zs = []; self._ts = []   # ham (metre) + zaman
-        self._pos = None                      # son telafisiz temiz konum (cm)
-        self._vel = None                      # son hiz (cm/s) — yumusatilmis (guduum + lead ortak)
+        self.gecikme_sn = float(gecikme_sn)   # olcum gecikmesi (ileri-tahminle telafi)
+        self.pencere = int(pencere)           # ham ornek penceresi
+        self.vel_n = int(vel_n)               # hiz kestiriminde son N nokta
+        self._xs = []; self._ys = []; self._zs = []; self._ts = []
+        self._pos = None                      # son temiz konum (cm)
+        self._vel = None                      # son hiz (cm/s)
         self._vlead = None                    # lead-hizi EMA durumu
-        self._cooldown = 0                    # dropout/kesinti sonrasi lead-kisma sayaci
+        self._cooldown = 0                    # kesinti sonrasi lead-kisma sayaci
 
     def guncelle(self, bozuk_x, bozuk_y, bozuk_z):
         t = time.perf_counter()
-        self._xs.append(float(bozuk_x) * CM_TO_M)   # cm -> m (spike esikleri metre)
+        self._xs.append(float(bozuk_x) * CM_TO_M)   # cm -> m
         self._ys.append(float(bozuk_y) * CM_TO_M)
         self._zs.append(float(bozuk_z) * CM_TO_M)
         self._ts.append(t)
-        if len(self._ts) > self.pencere:            # pencereyi gergin tut (bellek + hiz)
+        if len(self._ts) > self.pencere:
             self._xs.pop(0); self._ys.pop(0); self._zs.pop(0); self._ts.pop(0)
-        if len(self._ts) < 2:                       # tek ornek: hiz yok, isinmadi
+        if len(self._ts) < 2:
             return None
 
-        # -- Batch temizleme (son eleman = simdiki temiz kestirim)
+        # Batch temizleme (son eleman = simdiki kestirim)
         zt = z_spike_temizle(self._zs, self._ts)
         xt = x_spike_temizle(self._xs, self._ys, self._ts)
         yt = y_spike_temizle(self._ys, self._ts)
         px = xt[-1] * M_TO_CM; py = yt[-1] * M_TO_CM; pz = zt[-1] * M_TO_CM
         self._pos = (px, py, pz)
 
-        # -- Hiz (son vel_n temiz nokta uzerinden lineer egim)
+        # Hiz (son vel_n temiz nokta, lineer egim)
         k = min(self.vel_n, len(self._ts))
         ts_k = self._ts[-k:]
         vx = _egim(ts_k, xt[-k:]) * M_TO_CM
         vy = _egim(ts_k, yt[-k:]) * M_TO_CM
         vz = _egim(ts_k, zt[-k:]) * M_TO_CM
 
-        # -- Ham hizi gercekci hedef hizina kirp 
+        # Hedef hizina kirp
         vx = max(-MAX_HEDEF_HIZ, min(MAX_HEDEF_HIZ, vx))
         vy = max(-MAX_HEDEF_HIZ, min(MAX_HEDEF_HIZ, vy))
         vz = max(-MAX_HEDEF_HIZ, min(MAX_HEDEF_HIZ, vz))
 
-        # -- EMA (dongu jitter'ından gelen hiz titremesini onler)
+        # EMA yumusatma
         if self._vlead is None:
             self._vlead = (vx, vy, vz)
         else:
@@ -198,7 +190,7 @@ class GNSSFiltre:
                            (1.0 - a) * self._vlead[2] + a * vz)
         self._vel = self._vlead
 
-        # --- Lead guven faktoru
+        # Lead guven faktoru
         dt_son = self._ts[-1] - self._ts[-2]
         if dt_son <= 1e-3:
             dt_son = 0.2
@@ -216,7 +208,7 @@ class GNSSFiltre:
             guven *= COOLDOWN_GUVEN
             self._cooldown -= 1
 
-        # -- Gecikme telafisi
+        # Gecikme telafisi
         g = self.gecikme_sn
         lx = max(-MAX_LEAD, min(MAX_LEAD, self._vlead[0] * g)) * guven
         ly = max(-MAX_LEAD, min(MAX_LEAD, self._vlead[1] * g)) * guven
