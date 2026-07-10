@@ -1029,6 +1029,10 @@ def build_telemetry():
         j_kaynak = beyin.kaynak           # aktif guduum kaynagi (filtre / gercek)
         j_temiz = None if beyin.son_temiz is None else (
             float(beyin.son_temiz[0]), float(beyin.son_temiz[1]), float(beyin.son_temiz[2]))
+        distance_filtre_m = None                 # FILTRELI GPS-avci mesafe (son_temiz ile)
+        if j_temiz is not None:
+            _fx, _fy, _fz = (c * CM_TO_M for c in j_temiz)
+            distance_filtre_m = ((dx - _fx) ** 2 + (dy - _fy) ** 2 + (dz - _fz) ** 2) ** 0.5
         ham_list = list(beyin.ham_hatalar)
         j_list = list(beyin.filtre_hatalar)
         vis_tespit = _son_tespit_ui       # normalize son tespit (dedektor thread yazar)
@@ -1192,6 +1196,7 @@ def build_telemetry():
             "speed_kmh": target_spd_ms * MS_TO_KMH,
         },
         "distance_m": distance_m,               # HAM GPS-avci mesafe (ekrandaki ana deger)
+        "distance_filtre_m": distance_filtre_m, # FILTRELI GPS-avci mesafe (son_temiz)
         "gercek_mesafe_m": gercek_mesafe_m,     # GERCEK GPS-avci mesafe (debug; bozulmamis)
         "debug": debug_info,
         "j": j_info,

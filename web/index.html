@@ -297,6 +297,15 @@
           <div class="row"><span class="k">Sonuç</span><span class="v mono" id="gvSonuc">—</span></div>
           <div id="gvBanner"></div>
         </div>
+
+        <div class="dist">
+          <div class="k">HAM GPS — AVCI MESAFE</div>
+          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+        </div>
+        <div class="dist" style="margin-top:8px">
+          <div class="k" style="color:#5fd39a">FİLTRELİ GPS — AVCI MESAFE</div>
+          <div class="v mono" style="color:#37e0a0"><span id="distF">—</span> <small>m</small></div>
+        </div>
       </div>
       <div class="status" id="gorevDurum">⚪ Görev: Pasif</div>
       <div class="status" id="leftStatus">Sistem hazır.</div>
@@ -425,11 +434,6 @@
           <div class="row"><span class="k">📏 Bbox boyutu / hedef</span><span class="v mono" id="ibvsBoyut">—</span></div>
           <div class="row"><span class="k">🎯 Dikey nişan (ey_ref)</span><span class="v mono" id="ibvsNisan">—</span></div>
           <div class="row"><span class="k">Yaw / gaz komutu</span><span class="v mono" id="ibvsCmd">—</span></div>
-        </div>
-
-        <div class="dist">
-          <div class="k">HAM GPS — AVCI MESAFE</div>
-          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
         </div>
       </div>
     </section>
@@ -941,6 +945,7 @@
       $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
+      $("distF").textContent = (t.distance_filtre_m!=null) ? f1(t.distance_filtre_m) : "—";
 
       // Sapma — gerçeğe hata: ortalama · en kötü (m). Tek üretim filtresi: GNSS Filtre.
       const ky = t.kiyas || {};
