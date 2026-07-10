@@ -53,17 +53,6 @@
     box-shadow:inset 0 0 0 1px var(--accent)}
   .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
 
-  /* ---- Canli Tune paneli (slider'lar) ---- */
-  .tune-panel{background:var(--panel2);border:1px solid var(--accent);
-    border-radius:8px;padding:10px 12px;margin:-2px 0 10px;max-height:52vh;overflow-y:auto}
-  .tune-panel .tnote{font-size:11px;color:var(--muted);margin-bottom:8px;line-height:1.4}
-  .tune-grp{font-size:10px;letter-spacing:1px;color:var(--accent);margin:10px 0 4px;
-    text-transform:uppercase;border-top:1px solid var(--border);padding-top:6px}
-  .tune-row{margin-bottom:7px}
-  .tune-row .trlab{font-size:11px;color:var(--muted);display:flex;justify-content:space-between}
-  .tune-row .trlab b{color:var(--text);font-family:Consolas,monospace}
-  .tune-row input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:18px;margin-top:2px}
-
   /* ---- Güdüm pipeline switch (test: OTO / GPS / GÖRSEL) ---- */
   .gudum-switch{margin:2px 0 10px}
   .gudum-switch .gs-label{font-size:10px;letter-spacing:1px;color:var(--muted);
@@ -76,40 +65,6 @@
   .gs-btn.active{background:#13202b;border-color:var(--accent);color:var(--accent);
     box-shadow:inset 0 0 0 1px var(--accent)}
   .gs-btn.gorsel.active{background:#211b10;border-color:var(--warn);color:var(--warn);
-    box-shadow:inset 0 0 0 1px var(--warn)}
-
-  /* ---- Manuel mod paneli (klavye + hiz slideri) ---- */
-  .manuel-panel{background:var(--panel2);border:1px solid var(--accent);
-    border-radius:8px;padding:12px 14px;margin:-2px 0 10px}
-  .manuel-panel .mlabel{font-size:12px;color:var(--muted);display:flex;
-    justify-content:space-between;align-items:center;margin-bottom:8px}
-  .manuel-panel .mlabel b{color:var(--accent);font-size:14px}
-  .manuel-panel input[type=range]{width:100%;accent-color:var(--accent);cursor:pointer;height:22px}
-  .mkeys{margin-top:12px;display:flex;flex-direction:column;gap:7px;
-    font-size:11px;color:var(--muted)}
-  .mkeys .krow{display:flex;align-items:center;gap:6px}
-  .mkeys .krow .sep{flex:0 0 12px}
-  .kcap{display:inline-flex;align-items:center;justify-content:center;min-width:22px;
-    height:22px;padding:0 5px;background:var(--panel);border:1px solid var(--border);
-    border-radius:5px;font-family:Consolas,monospace;font-size:12px;color:var(--text);
-    font-weight:600;transition:.08s}
-  .kcap.on{background:var(--accent);color:#04241c;border-color:var(--accent);
-    box-shadow:0 0 8px var(--accent)}
-
-  /* ---- Görev kaynak seçimi (Efe/Ömer/Kayra/Gerçek GPS) ---- */
-  .kaynak-panel{background:var(--panel2);border:1px solid var(--accent);
-    border-radius:8px;padding:10px 12px;margin:-2px 0 10px;
-    display:flex;flex-direction:column;gap:7px}
-  .kaynak-panel .kaynak-baslik{font-size:10px;letter-spacing:1.5px;color:var(--muted);
-    font-weight:600;text-transform:uppercase}
-  .kbtn{display:flex;align-items:center;gap:8px;width:100%;padding:9px 12px;
-    background:var(--panel);border:1px solid var(--border);border-radius:7px;
-    color:var(--text);font-size:13px;cursor:pointer;transition:.12s;text-align:left}
-  .kbtn:hover{border-color:var(--accent2);background:#1b2330}
-  .kbtn.active{border-color:var(--accent);background:#13202b;color:var(--accent);
-    box-shadow:inset 0 0 0 1px var(--accent);font-weight:600}
-  .kbtn-gercek:hover{border-color:var(--warn)}
-  .kbtn-gercek.active{border-color:var(--warn);background:#211b10;color:var(--warn);
     box-shadow:inset 0 0 0 1px var(--warn)}
 
   /* ---- Orta panel: görüntü ---- */
@@ -327,10 +282,7 @@
       <h2>Görev Kontrol</h2>
       <div class="body">
         <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (GNSS Filtre)</button>
-        <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
-        <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
-        <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
 
         <!-- GÜDÜM PIPELINE SWITCH (test): OTO=otomatik, GPS=zorla GPS, GÖRSEL=zorla görsel -->
         <div class="gudum-switch">
@@ -342,38 +294,8 @@
           </div>
         </div>
 
-        <!-- CANLI TUNE paneli: slider'lar Cfg'yi aninda degistirir (server restart YOK) -->
-        <div id="tunePanel" class="tune-panel" style="display:none">
-          <div class="tnote"><b>Sırayla 1→6 dene.</b> Bir slider'ı oynat → drone <b>anında</b> tepki verir.
-            Kötüleşirse geri al. İyi olunca <b>Değerleri Yazdır</b> ile kopyala, Cfg'ye yapıştır.
-            (Not: değişiklikler server kapanınca sıfırlanır — kalıcı olması için yapıştırman şart.)</div>
-          <div id="tuneList"></div>
-          <button class="btn" style="margin-top:8px" onclick="tuneYazdir()">📋 Değerleri Yazdır</button>
-          <pre id="tuneDump" style="display:none;white-space:pre-wrap;font-size:11px;color:var(--accent);
-            background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px"></pre>
-        </div>
-
-        <!-- Manuel mod paneli: butona basinca acilir -->
-        <div id="manuelPanel" class="manuel-panel" style="display:none">
-          <div class="mlabel">Hız <b id="hizVal">50%</b></div>
-          <input id="hizSlider" type="range" min="10" max="100" value="50" step="5">
-          <div class="mkeys">
-            <div class="krow"><span class="kcap" data-k="w">W</span> İleri
-              <span class="sep"></span><span class="kcap" data-k="s">S</span> Geri</div>
-            <div class="krow"><span class="kcap" data-k="a">A</span> Sola kay
-              <span class="sep"></span><span class="kcap" data-k="d">D</span> Sağa kay</div>
-            <div class="krow"><span class="kcap" data-k="q">Q</span> Sola dön
-              <span class="sep"></span><span class="kcap" data-k="e">E</span> Sağa dön</div>
-            <div class="krow"><span class="kcap" data-k="r">R</span> Yüksel
-              <span class="sep"></span><span class="kcap" data-k="f">F</span> Alçal</div>
-          </div>
-        </div>
-
-        <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>GNSS Filtre</b> ile hedefe gider.
-        İstediğin an <b>Gerçek GPS</b>'e basıp <b>canlı geçiş</b> yapabilirsin.<br>
-        🎯 <b>Gerçek GPS</b>: filtreyi atlar, doğrudan gerçek konuma gidip vurur (yalnızca sim/debug).<br>
-        Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).<br>
-        🎮 <b>Manuel Mod</b>: klavyeyle uç. Tuş bırakınca drone hover yapar.</p>
+        <p class="note">⚠️ <b>Görev Başlat</b>: drone <b>GNSS Filtre</b> ile hedefe gider.<br>
+        Sorun olursa hemen <b>Görev Durdur</b>'a bas (motorları keser).</p>
       </div>
       <div class="status" id="gorevDurum">⚪ Görev: Pasif</div>
       <div class="status" id="leftStatus">Sistem hazır.</div>
@@ -470,7 +392,7 @@
         <!-- BOZUK GNSS GİRDİSİ (ister 3): bozulmalar + kesinti + ham/filtre hata -->
         <div class="card" style="border-color:#3a3320">
           <div class="title" style="color:var(--warn)">📡 BOZUK GNSS GİRDİSİ</div>
-          <div class="note" style="margin:-4px 0 8px">Simülatör hedef GPS'i bozuk verir; GNSS Filtre temizler. (ham/gerçek yalnızca sim/debug)</div>
+          <div class="note" style="margin:-4px 0 8px">Simülatör hedef GPS'i bozuk verir; GNSS Filtre temizler.</div>
           <div class="row"><span class="k">Aktif bozulma</span><span class="v mono" id="gnssBoz" style="font-size:11px;text-align:right">—</span></div>
           <div class="row"><span class="k">Kesinti</span><span class="v" id="gnssKesinti"><span class="rozet ok">VERİ AKIYOR</span></span></div>
           <div class="row"><span class="k">Paket yaşı</span><span class="v mono" id="gnssYas">—</span></div>
@@ -505,19 +427,6 @@
           <div class="row"><span class="k">Kilit isteri</span><span class="v" id="klOk"><span class="rozet pasif">BEKLİYOR</span></span></div>
         </div>
 
-        <!-- POZ KESTİRİMİ: talon_pose.pt 6-nokta + PnP → KAMERADAN mesafe/yönelim.
-             Gözlemci akış (güdüme girmez); "gerçek" satırları sim/debug kıyası. -->
-        <div class="card" style="border-color:#1f3a45">
-          <div class="title" style="color:var(--accent2)">📐 POZ KESTİRİMİ (KAMERA)</div>
-          <div class="note" style="margin:-4px 0 8px">Mesafe/yön GNSS'siz, yalnız kameradan (keypoint+PnP). ~4-12 m bandında güvenilir; 15 m+ şişer.</div>
-          <div class="row"><span class="k">Durum</span><span class="v" id="pzDurum"><span class="rozet pasif">KAPALI</span></span></div>
-          <div class="row"><span class="k">Mesafe (kamera)</span><span class="v mono" id="pzMesafe">—</span></div>
-          <div class="row"><span class="k">Mesafe (gerçek)</span><span class="v mono" id="pzMesafeG">—</span></div>
-          <div class="row"><span class="k">Hedef yaw (kam)</span><span class="v mono" id="pzYaw">—</span></div>
-          <div class="row"><span class="k">Hedef yaw (gerçek)</span><span class="v mono" id="pzYawG">—</span></div>
-          <div class="row"><span class="k">Aspect açısı</span><span class="v mono" id="pzAspect">—</span></div>
-          <div class="row"><span class="k">Nokta / RMS</span><span class="v mono" id="pzKp">—</span></div>
-        </div>
 
         <!-- GÜDÜM KOMUTLARI (ister 8): uygulanan 4 komut + karar -->
         <div class="card" style="border-color:#26314a">
@@ -541,8 +450,6 @@
           <div class="row"><span class="k">📏 Bbox boyutu / hedef</span><span class="v mono" id="ibvsBoyut">—</span></div>
           <div class="row"><span class="k">🎯 Dikey nişan (ey_ref)</span><span class="v mono" id="ibvsNisan">—</span></div>
           <div class="row"><span class="k">Yaw / gaz komutu</span><span class="v mono" id="ibvsCmd">—</span></div>
-          <div class="row"><span class="k">🛩️ Hedef bank (roll)</span><span class="v mono" id="ibvsRoll">—</span></div>
-          <div class="row"><span class="k">⏩ Öngörü (yaw lead)</span><span class="v mono" id="ibvsLead">—</span></div>
         </div>
 
         <div class="card drone">
@@ -566,22 +473,7 @@
         <div class="dist">
           <div class="k">HAM GPS — AVCI MESAFE</div>
           <div class="v mono"><span id="dist">—</span> <small>m</small></div>
-          <div class="k" style="margin-top:10px">GERÇEK GPS — AVCI MESAFE</div>
-          <div class="v mono" style="font-size:20px;color:var(--muted)"><span id="dist_gercek">—</span> <small>m</small></div>
         </div>
-
-        <!-- GELİŞTİRİCİ: irtifa/Z teşhis — videoda katlı durur, gerektiğinde açılır -->
-        <details class="card" style="border-color:#2a3550;margin-top:12px">
-          <summary class="title" style="color:var(--accent2)">🔎 İRTİFA / Z TEŞHİS <small style="color:var(--muted);font-weight:400">(geliştirici)</small></summary>
-          <div class="note" style="margin:8px 0">Gerçek GPS modunda güdüm <b>Hedef Z (gerçek)</b> ile <b>Drone Z</b>'yi kıyaslar.</div>
-          <div class="row"><span class="k">Drone Z (konum)</span><span class="v mono" id="zDz">—</span></div>
-          <div class="row"><span class="k">Drone irtifa (alt)</span><span class="v mono" id="zDalt">—</span></div>
-          <div class="row"><span class="k">Hedef Z (ham)</span><span class="v mono" id="zTz">—</span></div>
-          <div class="row"><span class="k">Hedef Z (GERÇEK)</span><span class="v mono" id="zTgz">—</span></div>
-          <div class="row"><span class="k">Δ hedef−drone</span><span class="v mono" id="zDelta">—</span></div>
-          <div class="row"><span class="k">Truth geliyor mu</span><span class="v mono" id="zTruth">—</span></div>
-          <div class="row"><span class="k">Aktif bozulma</span><span class="v mono" id="zBoz" style="font-size:11px;text-align:right">—</span></div>
-        </details>
       </div>
     </section>
   </main>
@@ -612,180 +504,9 @@
     for(const k of ["OTO","GPS","GORSEL"]) $("gm_"+k).classList.toggle("active", k===m);
   }
 
-  // =====================================================================
-  //  MANUEL MOD — klavyeyle drone kontrolü + hız slideri
-  //  Tuş haritası (e.code ile fiziksel tuş; klavye dili fark etmez):
-  //    W/S = ileri/geri (pitch),  A/D = sola/sağa kay (roll),
-  //    Q/E = sola/sağa dön (yaw), R/F = yüksel/alçal (throttle)
-  //  Hız slideri tüm eksenleri ölçekler. Komutlar /api/manuel'e akıtılır;
-  //  tuş bırakınca 0 (hover) gider, sekme/pencere odağı kaybolunca da sıfırlanır.
-  // =====================================================================
-  let manuelAcik = false;
-  let manuelHiz  = 0.5;                 // hız çarpanı (slider: 0.10–1.00)
-  let manuelTimer = null;               // periyodik gönderim (slider/uzun basış için)
-  const tuslar = {w:false,a:false,s:false,d:false,q:false,e:false,r:false,f:false};
-  // Fiziksel tuş kodu -> mantıksal eksen tuşu
-  const TUS_KOD = {KeyW:"w",KeyA:"a",KeyS:"s",KeyD:"d",KeyQ:"q",KeyE:"e",KeyR:"r",KeyF:"f"};
-
-  function tusGorsel(){
-    document.querySelectorAll(".kcap").forEach(el=>{
-      el.classList.toggle("on", !!tuslar[el.dataset.k]);
-    });
-  }
-
-  function manuelGonder(){
-    if(!manuelAcik) return;
-    // Eksen niyeti (her eksen -1, 0 veya +1):
-    const pitch = (tuslar.w?1:0) - (tuslar.s?1:0);   // W ileri (+)
-    const roll  = (tuslar.a?1:0) - (tuslar.d?1:0);   // A sola, D sağa (oyunda roll işareti ters -> A(+)/D(-))
-    const yaw   = (tuslar.q?1:0) - (tuslar.e?1:0);   // Q sola dön (+) — ana_kontrol ile aynı işaret
-    const thr   = (tuslar.r?1:0) - (tuslar.f?1:0);   // R yüksel (+)
-    const g = manuelHiz;
-    const body = JSON.stringify({pitch:pitch*g, roll:roll*g, yaw:yaw*g, throttle:thr*g});
-    fetch("/api/manuel",{method:"POST",headers:{"Content-Type":"application/json"},body}).catch(()=>{});
-  }
-
-  function tusBas(e){
-    if(e.ctrlKey||e.metaKey||e.altKey) return;       // Ctrl+R vb. tarayıcı kısayollarına dokunma
-    const k = TUS_KOD[e.code]; if(!k) return;
-    e.preventDefault();
-    if(!tuslar[k]){ tuslar[k]=true; tusGorsel(); manuelGonder(); }
-  }
-  function tusBirak(e){
-    const k = TUS_KOD[e.code]; if(!k) return;
-    e.preventDefault();
-    if(tuslar[k]){ tuslar[k]=false; tusGorsel(); manuelGonder(); }
-  }
-  function tumTuslariBirak(){                          // odak kaybı / panel kapanışı: her şeyi bırak
-    let degisti=false;
-    for(const k in tuslar){ if(tuslar[k]){ tuslar[k]=false; degisti=true; } }
-    tusGorsel();
-    if(degisti) manuelGonder();                        // hover komutu gönder
-  }
-
-  function manuelUIAc(){
-    manuelAcik = true;
-    $("manuelBtn").classList.add("active");
-    $("manuelPanel").style.display = "block";
-    window.addEventListener("keydown", tusBas);
-    window.addEventListener("keyup", tusBirak);
-    window.addEventListener("blur", tumTuslariBirak);
-    manuelTimer = setInterval(manuelGonder, 80);       // ~12 Hz: slider değişimi + failsafe tazeleme
-  }
-  function manuelUIKapat(){                             // sadece yerel temizlik (komut göndermez)
-    manuelAcik = false;
-    $("manuelBtn").classList.remove("active");
-    $("manuelPanel").style.display = "none";
-    tumTuslariBirak();
-    window.removeEventListener("keydown", tusBas);
-    window.removeEventListener("keyup", tusBirak);
-    window.removeEventListener("blur", tumTuslariBirak);
-    if(manuelTimer){ clearInterval(manuelTimer); manuelTimer=null; }
-  }
-
-  function manuelTogle(){
-    if(!manuelAcik){ manuelUIAc(); gonderKomut("manuel_on"); }
-    else           { manuelUIKapat(); gonderKomut("manuel_off"); }
-  }
-
-  // ---- Görev güdümü: tek üretim GNSS filtresi + Gerçek GPS (test) ----
-  // Görev Başlat = filtre ile uç. Gerçek GPS = filtreyi atla, doğrudan gerçek
-  // konuma git (yalnızca sim/debug'da anlamlı, irtifa testi için).
-  function kaynakSec(k){ gonderKomut("start_" + k); }
-  function kaynakVurgula(k){                          // aktif kaynağa göre buton vurgusu
-    $("startBtn").classList.toggle("active", k === "filtre");
-    $("gercekBtn").classList.toggle("active", k === "gercek");
-  }
-  function gorevBaslat(){ if(manuelAcik) manuelUIKapat(); kaynakSec("filtre"); }
-  function gercekTest(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
-  function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
-
-  // ===== CANLI TUNE: slider'lar Cfg'yi ANINDA degistirir (server restart YOK) =====
-  // BASİT IBVS seti (2026-07-07): tek yasa = görüntü merkezi→bbox merkezi çizgisi.
-  // Çizginin yatay bileşeni yaw'a, dikey bileşeni gaza; büyüklüğü ileri itkiyi kısar.
-  // Eski PN slider yığını yasayla birlikte silindi. Sıra = ayarlama sırası.
-  const TUNE_DEFS = [
-    ["GÖRSEL GÜDÜM · BASİT IBVS (sırayla dene)", [
-      ["IBVS_ILERI","★★★ İleri TAVAN   (yaklaşma hızı sınırı — boyut yasası bunu aşamaz; sert giriyorsa DÜŞÜR)",0,1.0,0.025],
-      ["IBVS_BOYUT_HEDEF","★★★ Boyut hedefi (KİLİT-TUT)   (bbox max ekseni bu orana sürülür; kilit eşiği %6'nın ÜSTÜNDE tut — uzak tutuyorsa ARTIR, fazla sokuluyorsa DÜŞÜR)",0.06,0.20,0.005],
-      ["IBVS_K_BOYUT","★★★ Boyut kazancı   (mesafe tutma sertliği; ileri komut sörf yapıyorsa DÜŞÜR; 0=KAPALI→eski sabit-ileri yasa)",0,40,1],
-      ["IBVS_GERI_MAX","★★ Geri kaçış tavanı   (fazla yakınken geri itki sınırı; hedef frenleyince üstüne biniyorsa ARTIR; 0=asla geri)",0,0.40,0.025],
-      ["IBVS_FREN_HIZ","★★★ Kapanma-hızı freni (TTC)   (bbox HIZLI büyüyünce=hedefe hızlı kapanınca ileriyi önceden kısar → hedefi AŞMADAN kilit bandına oturur; hedefi geçip kaybediyorsan ARTIR, erken duruyorsa DÜŞÜR; 0=kapalı)",0,30,1],
-      ["IBVS_K_YAW","★★★ Yatay kazanç   (hedef sağ/sol kenarda kalıyorsa ARTIR; yatay salınım varsa DÜŞÜR)",0,2.0,0.05],
-      ["IBVS_K_DIKEY","★★★ Dikey kazanç   (hedef üst/alt kenardan kaçıyorsa ARTIR; dikey salınım varsa DÜŞÜR)",0,3.0,0.05],
-      ["IBVS_YAKIN_KAZANC","★★★ Yakınlık kazancı   (YAKLAŞINCA hedef kenara kaçıyorsa ARTIR: yaw/dikey kazancı bbox büyüdükçe otomatik sıkılaşır; yakında salınım→DÜŞÜR; 0=kapalı)",0,3.0,0.1],
-      ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (−0.3=ALTTAN VUR: hedefi merkez ÜSTÜNDE tut, araç altta+gökyüzü · 0=merkez · 1=HIZ VEKTÖRÜNÜ hedefe nişanla)",-0.8,1.2,0.05],
-      ["IBVS_MERKEZ_FREN","★★ Merkez freni   (sapma büyüyünce ileriyi kısar: önce ortala sonra ilerle; 0=hep tam gaz)",0,2.0,0.05],
-      ["IBVS_HANDOFF_S","★★ Yumuşak geçiş (GPS→görsel)   (geçişte hedef kadrajdan çıkıyorsa bu süre boyunca ileri-itki+dikey nişan 0'dan açılır; çok uzunsa yaklaşma gecikir, kısaysa lunge; 0=kapalı)",0,2.0,0.1],
-      ["IBVS_ALCAL_FREN","★★ Alçalma freni (anti-lift-carry)   (araç hedefin ÜSTÜNE çıkıyorsa ARTIR: fazla yükselince ileriyi kısıp alçalmayı mümkün kılar; 0=kapalı)",0,4.0,0.1],
-      // (pose öngörü sliderları IBVS_K_ROLL_LEAD/SIGN_ROLL/ROLL_CONF_MIN kaldırıldı — pose kapalı, 2026-07-10)
-      ["VIS_EMA","★ Tespit yumuşatma   (bbox titrek→komut titrekse DÜŞÜR; tepki gecikiyorsa ARTIR)",0.05,1.0,0.05],
-      ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
-      ["VIS_CONF_MIN","Tespit güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
-      ["VIS_LOST_TO_GPS_S","Kayıpta bekleme (s)   (0=kayıpta ANINDA GPS'e dön; titreme koruması VIS_STALE_S'te ayrı)",0,5.0,0.25],
-      ["VIS_KOPRU_S","★ Kayıp köprüsü / ölü-hesap (s)   (dedektör deliğinde bbox son hızıyla sanal sürülür; kilit SAYMAZ; 0=kapalı)",0,2.5,0.1],
-    ]],
-    // GPS-YAKLAŞMA ayarları artık guidance/gps_takip.py (GPSCfg) içinde (2026-07-10
-    // devri): kalkış, PD/PID, kesinti ölü-hesabı. Canlı slider'da DEĞİL — GPS
-    // davranışı doğrudan o dosyadan düzenlenir (görsel faz burada tune edilir).
-  ];
-  let tuneAcik=false;
-  // Ondalik basamak sayisini ADIM'dan tureti (0.1->1, 0.05->2, 0.005->3, 0.00005->5, 1/2->0).
-  function tuneFmt(v,st){ v=Number(v); const s=String(st); const d=s.indexOf('.');
-    return v.toFixed(Math.min(d<0?0:(s.length-d-1),5)); }
-  async function tuneKur(){
-    let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
-    const list=$("tuneList"); list.innerHTML="";
-    for(const [grp,rows] of TUNE_DEFS){
-      const g=document.createElement("div"); g.className="tune-grp"; g.textContent=grp; list.appendChild(g);
-      for(const [key,lab,mn,mx,st] of rows){
-        const val=(key in cur && cur[key]!=null)? cur[key] : mn;
-        const row=document.createElement("div"); row.className="tune-row";
-        row.innerHTML='<div class="trlab"><span>'+lab+'</span><b id="tv_'+key+'">'+tuneFmt(val,st)+'</b></div>'+
-          '<input type="range" id="ts_'+key+'" min="'+mn+'" max="'+mx+'" step="'+st+'" value="'+val+'">';
-        list.appendChild(row);
-        const sl=row.querySelector("#ts_"+key);
-        sl.addEventListener("input",()=>{ $("tv_"+key).textContent=tuneFmt(sl.value,st); tuneSet(key,sl.value); });
-      }
-    }
-  }
-  function tuneSet(key,value){
-    fetch("/api/tune",{method:"POST",headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({param:key,value:parseFloat(value)})}).catch(()=>{});
-  }
-  function tuneTogle(){
-    tuneAcik=!tuneAcik;
-    $("tunePanel").style.display=tuneAcik?"block":"none";
-    $("tuneBtn").classList.toggle("active",tuneAcik);
-    if(tuneAcik) tuneKur();               // her acilista guncel Cfg degerlerini cek
-  }
-  async function tuneYazdir(){
-    let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
-    let s="    # --- Tune ile bulunan degerler (ana_kontrol.py Cfg'ye yapistir) ---\n";
-    for(const [,rows] of TUNE_DEFS)
-      for(const [key,,,,st] of rows) if(key in cur && cur[key]!=null) s+="    "+key+" = "+tuneFmt(cur[key],st)+"\n";
-    const d=$("tuneDump"); d.style.display="block"; d.textContent=s+"\n⏳ Excel raporu hazırlanıyor…";
-    // EXCEL RAPORU: server bu ucusun logundan performans metriklerini cikarip
-    // tune degerleriyle birlikte veri/tune_rapor_*.xlsx dosyasina yazar.
-    try{
-      const r=await (await fetch("/api/tune_rapor",{method:"POST"})).json();
-      if(r.ok){
-        s+="\n📁 UÇUŞ KLASÖRÜ: "+r.klasor+"\n📊 EXCEL RAPORU: "+r.dosya+(r.log?"\n    (log: "+r.log+")":"")+"\n";
-        for(const [k,v] of Object.entries(r.ozet||{})) s+="    "+k+": "+v+"\n";
-      } else s+="\n⚠️ Rapor yazılamadı: "+(r.hata||"bilinmeyen hata")+"\n";
-    }catch(e){ s+="\n⚠️ Rapor isteği başarısız: "+e+"\n"; }
-    d.textContent=s;
-  }
-
-  // Hız slideri: anlık olarak çarpanı güncelle ve komutu tazele
-  (function(){
-    const sl = $("hizSlider"), lab = $("hizVal");
-    sl.addEventListener("input", ()=>{
-      manuelHiz = sl.value/100;
-      lab.textContent = sl.value + "%";
-      manuelGonder();
-    });
-  })();
+  // ---- Görev güdümü: GNSS filtresi ile uç ----
+  function gorevBaslat(){ gonderKomut("start_filtre"); }
+  function gorevDurdur(){ gonderKomut("stop"); }
 
   function setConn(state){
     const dot = $("dot"), txt = $("connText");
@@ -797,7 +518,7 @@
 
   const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
   const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
-  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist","dist_gercek"]
+  const dash = ()=>["dx","dy","dz","dalt","dspd","dyaw","tx","ty","tz","tspd","dist"]
                     .forEach(id=>$(id).textContent="—");
 
   // ---- FPV overlay: bbox + merkez + durum + "GPS GÜDÜMÜ" rozeti (telemetriden cizilir) ----
@@ -950,60 +671,6 @@
              bx, by+bh/2+42, zayif?"#ffb01f":(kilit?"#37e0a0":"#ff6b6b"), "center", "bold 11px monospace");
       }
     }
-    // POZ KESTİRİMİ overlay: 6 keypoint + iskelet + "MESAFE (KAM)/YAW" satırları.
-    // kp REF sırada gelir (0 burun,1 solK,2 sağK,3 solKuy,4 sağKuy,5 kuyArk);
-    // renkler pose/onizle.py ile aynı aile. Mesafe/yaw KAMERADAN (GNSS bağımsız).
-    let pz = hizliGorsel ? hizliGorsel.poz : gs.poz;     // poz da hızlı kanaldan (taze iskelet)
-    // İSKELET YAŞ TELAFİSİ: poz seyrek koşar (POZ_HER_N=3) → bbox'tan da bayat kalır.
-    // Tüm keypoint'ler tespitin (bbox) normalize hızıyla pozun yaşı kadar İLERİ kaydırılır
-    // → iskelet hedefin ŞİMDİKİ konumuna oturur (en çok 500 ms; hız yoksa olduğu gibi).
-    if(pz && pz.kp && pz.yas_s!=null && hizliGorsel && det && det.vx!=null){
-      const yasP=pz.yas_s+(performance.now()-hizliGorsel.alinan)/1000;
-      const ekP=Math.min(Math.max(yasP,0),0.50);
-      pz={...pz, kp: pz.kp.map(p=>p?[p[0]+det.vx*ekP, p[1]+det.vy*ekP, p[2]]:p)};
-    }
-    if(pz && pz.kp){
-      const PK=["#ff4646","#3dff7a","#ffc400","#3f9dff","#ff52ff","#2ee6e6"];
-      const KE=[[0,5],[1,2],[0,1],[0,2],[3,5],[4,5],[3,4]];
-      const P=pz.kp.map(p=>(p && p[2]>0.25) ? [rc.x+p[0]*rc.w, rc.y+p[1]*rc.h] : null);
-      ctx.lineWidth=1.5; ctx.strokeStyle="rgba(255,255,255,.75)";
-      for(const e of KE){ const a=P[e[0]], b=P[e[1]];
-        if(a&&b){ ctx.beginPath(); ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); ctx.stroke(); } }
-      for(let i=0;i<6;i++){ const p=P[i]; if(!p) continue;
-        ctx.fillStyle=PK[i]; ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.fill();
-        ctx.strokeStyle="rgba(0,0,0,.8)"; ctx.lineWidth=1;
-        ctx.beginPath(); ctx.arc(p[0],p[1],3.5,0,6.2832); ctx.stroke(); }
-      // ÖNGÖRÜ: kanat çizgisi (kp1↔kp2) vurgusu + hedefin bir an sonra döneceği yön oku.
-      // Bank açısı + yaw lead güdümden (gudum.ibvs); kanat çizgisi = bank'in görsel kanıtı.
-      const _ib=(t.gudum && t.gudum.ibvs) || {};
-      if(P[1] && P[2]){
-        ctx.strokeStyle="rgba(110,231,255,.95)"; ctx.lineWidth=2.5;   // kanat çizgisi (camgöbeği)
-        ctx.beginPath(); ctx.moveTo(P[1][0],P[1][1]); ctx.lineTo(P[2][0],P[2][1]); ctx.stroke();
-        // ÖNGÖRÜ oku YALNIZ GÖRSEL GÜDÜM'de (canlı) çizilir. GPS modunda ibvs_tlm güncellenmez
-        // -> bayat/yanıltıcı ok çizilmesin (kanat çizgisi yine de gösterilir).
-        if(gs.durum==="GORSEL_GUDUM" && _ib.roll_ok===true && _ib.lead!=null && Math.abs(_ib.lead)>0.01){
-          const mx=(P[1][0]+P[2][0])/2, my=(P[1][1]+P[2][1])/2;      // kanat orta noktası
-          const dir=_ib.lead>0?1:-1, uz=Math.min(Math.abs(_ib.lead)*90,60)+18;  // ok uzunluğu ∝ |lead|
-          const ex2=mx+dir*uz;
-          ctx.strokeStyle="rgba(255,205,25,.95)"; ctx.lineWidth=3;   // öngörü oku (sarı)
-          ctx.beginPath(); ctx.moveTo(mx,my); ctx.lineTo(ex2,my); ctx.stroke();
-          ctx.beginPath(); ctx.moveTo(ex2,my); ctx.lineTo(ex2-dir*9,my-6);
-          ctx.lineTo(ex2-dir*9,my+6); ctx.closePath(); ctx.fillStyle="rgba(255,205,25,.95)"; ctx.fill();
-          halo("↳ ÖNGÖRÜ: "+(dir>0?"SAĞA":"SOLA")+" dönecek", mx, my-12, "rgba(255,205,25,.95)", "center", "11px monospace");
-        }
-      }
-      if(pz.ok && pz.mesafe_ema_m!=null){
-        ctx.font="bold 13px monospace"; ctx.fillStyle="#6ee7ff";
-        let s="MESAFE (KAM): "+Number(pz.mesafe_ema_m).toFixed(1)+" m";
-        if(t.gercek_mesafe_m!=null) s+="  ·  GERÇEK: "+Number(t.gercek_mesafe_m).toFixed(1)+" m";
-        ctx.fillText(s, rc.x+10, rc.y+58);
-        if(pz.yaw_deg!=null){
-          let s2="HEDEF YAW (KAM): "+Number(pz.yaw_deg).toFixed(0)+"°";
-          if(pz.yaw_gercek!=null) s2+="  ·  GERÇEK: "+Number(pz.yaw_gercek).toFixed(0)+"°";
-          ctx.fillText(s2, rc.x+10, rc.y+76);
-        }
-      }
-    }
     ctx.font="bold 13px monospace"; ctx.fillStyle="#9fb3c8";        // durum (sol-ust)
     const dur = gs.durum==="GORSEL_GUDUM" ? "GÖRSEL GÜDÜM" : (gs.durum||"—");
     const modTxt = (gs.mod && gs.mod!=="OTO") ? "  [ZORLA "+gs.mod+"]" : "";
@@ -1028,7 +695,7 @@
       const rk = fps>=25?"rgba(55,224,160,.95)":(fps>=15?"rgba(255,205,25,.95)":"rgba(255,107,107,.95)");
       ctx.font="bold 11px monospace"; ctx.fillStyle=rk;
       const pt="⚙ DET "+pf.det_ms+"ms"+(pf.det_p95!=null?" (p95 "+pf.det_p95+")":"")
-        +(pf.poz_ms!=null?" · POZ "+pf.poz_ms+"ms":"")+" · "+fps+" FPS";
+        +" · "+fps+" FPS";
       ctx.fillText(pt, rc.x+rc.w-ctx.measureText(pt).width-10, rc.y+rc.h-30);
     }
     if(gs.durum!=="GORSEL_GUDUM" && gs.n_lock){                     // kilit ilerlemesi
@@ -1148,36 +815,6 @@
       ? '<span class="rozet ok">SAĞLANDI ✓ — vuruş izni açık</span>'
       : '<span class="rozet pasif">BEKLİYOR</span>';
   }
-  // POZ KESTİRİMİ kartı: kamera-PnP mesafe/yaw + gerçekle kıyas (fark renklenir)
-  function _aciFark(a,b){ return Math.abs(((a-b+540)%360)-180); }
-  function guncellePoz(gs, gercekM){
-    gs = gs || {};
-    const pz = gs.poz, ok = !!(pz && pz.ok);
-    let roz;
-    if(!gs.poz_hazir)      roz='<span class="rozet pasif">KAPALI</span>';
-    else if(ok)            roz='<span class="rozet ok">ÇÖZÜM VAR</span>';
-    else if(pz)            roz='<span class="rozet kes">PnP OTURMADI</span>';
-    else                   roz='<span class="rozet pasif">TESPİT YOK</span>';
-    $("pzDurum").innerHTML = roz;
-    $("pzMesafe").innerHTML = (ok && pz.mesafe_ema_m!=null)
-      ? f1(pz.mesafe_ema_m)+' <small>m</small>' : "—";
-    if(gercekM!=null){
-      let renk="var(--muted)";
-      if(ok && pz.mesafe_ema_m!=null){
-        const fark=Math.abs(pz.mesafe_ema_m-gercekM);
-        renk = (fark<=Math.max(1,0.10*gercekM)) ? "var(--accent)" : "var(--warn)";
-      }
-      $("pzMesafeG").innerHTML = '<span style="color:'+renk+'">'+f1(gercekM)+' <small>m</small></span>';
-    } else $("pzMesafeG").textContent="—";
-    $("pzYaw").textContent = (ok && pz.yaw_deg!=null) ? Number(pz.yaw_deg).toFixed(0)+"°" : "—";
-    if(ok && pz.yaw_deg!=null && pz.yaw_gercek!=null){
-      const fy=_aciFark(pz.yaw_deg, pz.yaw_gercek);
-      const renk = fy<=15 ? "var(--accent)" : "var(--warn)";
-      $("pzYawG").innerHTML = '<span style="color:'+renk+'">'+Number(pz.yaw_gercek).toFixed(0)+'° (Δ'+fy.toFixed(0)+'°)</span>';
-    } else $("pzYawG").textContent = (pz && pz.yaw_gercek!=null) ? Number(pz.yaw_gercek).toFixed(0)+"°" : "—";
-    $("pzAspect").textContent = (ok && pz.aspect_deg!=null) ? Number(pz.aspect_deg).toFixed(0)+"°" : "—";
-    $("pzKp").textContent = ok ? (pz.n_kp+"/6 · rms "+Number(pz.rms_px).toFixed(1)+" px") : "—";
-  }
   function setCmdBar(id, v){
     v = Number(v)||0; if(v>1)v=1; if(v<-1)v=-1;
     const fill=$(id); if(!fill) return;
@@ -1226,15 +863,6 @@
         +((ib.alcal!=null && ib.alcal<0.99)?' <small style="color:var(--warn,#ffb01f)">· alçalma freni '+Number(ib.alcal).toFixed(2)+'</small>':'') : "—";
     $("ibvsCmd").textContent = (ib.yaw!=null && ib.dikey!=null)
       ? ("yaw "+Number(ib.yaw).toFixed(2)+" · gaz "+Number(ib.dikey).toFixed(2)) : "—";
-    // ÖNGÖRÜ: pose kanat uçlarından hedef bank (roll) + yaw lead. roll_ok=false ise pasif.
-    const rok=(ib.roll_ok===true);
-    $("ibvsRoll").innerHTML = (ib.roll_deg!=null)
-      ? '<span style="color:'+(rok?"var(--accent2)":"var(--muted)")+'">'+Number(ib.roll_deg).toFixed(0)+'°'
-        +(rok?"":" <small>(pasif)</small>")+'</span>' : "—";
-    if(ib.lead!=null && rok){
-      const yon = ib.lead>0.001?"→ sağa" : (ib.lead<-0.001?"← sola":"düz");
-      $("ibvsLead").innerHTML = '<span style="color:var(--accent)">'+Number(ib.lead).toFixed(2)+' <small>'+yon+'</small></span>';
-    } else $("ibvsLead").innerHTML = '<span style="color:var(--muted)">—</span>';
   }
 
   // ---- Görev olay günlüğü (dedup: sadece yeni id'ler DOM'a; renk sınıfı sv'den) ----
@@ -1386,15 +1014,13 @@
       // Bağlantı bir an aksasa bile son bilinen değerleri göstermeye devam et.
       // (SDK son değeri tutar; 2.5 sn içinde bağlıysak "bağlı" kabul ederiz.)
       setConn((Date.now()-lastOk) < 2500 ? "ok" : "wait");
-      const KAD = {filtre:"GNSS Filtre", gercek:"Gerçek GPS"};
+      const KAD = {filtre:"GNSS Filtre"};
       const kad = KAD[t.kaynak] || "";
-      $("gorevDurum").innerHTML = t.manuel_aktif
-        ? '🎮 MANUEL MOD — klavye kontrol'
-        : t.gorev_aktif
-          ? "🟢 Görev: AKTİF — " + kad + (t.j && t.j.durum ? " · " + t.j.durum : "")
-          : "⚪ Görev: Pasif";
-      // Aktif güdüm kaynağına göre buton vurgusu
-      kaynakVurgula(t.gorev_aktif ? t.kaynak : null);
+      $("gorevDurum").innerHTML = t.gorev_aktif
+        ? "🟢 Görev: AKTİF — " + kad + (t.j && t.j.durum ? " · " + t.j.durum : "")
+        : "⚪ Görev: Pasif";
+      // Görev Başlat butonunu aktif duruma göre vurgula
+      $("startBtn").classList.toggle("active", !!t.gorev_aktif);
       const d=t.drone, g=t.target;
       $("dx").innerHTML  = f1(d.x)+' <small>m</small>';
       $("dy").innerHTML  = f1(d.y)+' <small>m</small>';
@@ -1407,28 +1033,6 @@
       $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
-      // GERCEK GPS-avci mesafe (debug truth varsa; yoksa "—")
-      $("dist_gercek").textContent = (t.gercek_mesafe_m != null) ? f1(t.gercek_mesafe_m) : "—";
-
-      // 🔎 İrtifa / Z teşhis — Gerçek GPS modunda drone neden inmiyor?
-      // Güdüm dikey komutu: throttle ≈ (Hedef Z gerçek − Drone Z). + → tırman, − → alçal.
-      const dbg = t.debug || {};
-      const tgz = (dbg.available && dbg.target_real) ? dbg.target_real.z : null;
-      $("zDz").innerHTML   = f1(d.z)+' <small>m</small>';
-      $("zDalt").innerHTML = f1(d.altitude_m)+' <small>m</small>';
-      $("zTz").innerHTML   = f1(g.z)+' <small>m</small>';
-      $("zTgz").innerHTML  = tgz!=null ? f1(tgz)+' <small>m</small>' : '<small>— (truth yok)</small>';
-      if(tgz!=null && d.z!=null){
-        const delta = tgz - d.z;
-        const renk  = delta>0 ? 'var(--warn)' : 'var(--accent)';
-        const yon   = delta>0 ? 'tırman ↑' : 'alçal ↓';
-        $("zDelta").innerHTML = '<span style="color:'+renk+'">'+f1(delta)+' <small>m · '+yon+'</small></span>';
-      } else { $("zDelta").innerHTML = "—"; }
-      $("zTruth").innerHTML = dbg.available
-        ? '<span style="color:var(--accent)">EVET</span>'
-        : '<span style="color:var(--danger)">HAYIR</span>';
-      $("zBoz").textContent = (dbg.corruptions && dbg.corruptions.length)
-        ? dbg.corruptions.join(' · ') : 'yok';
 
       // Sapma — gerçeğe hata: ortalama · en kötü (m). Tek üretim filtresi: GNSS Filtre.
       const ky = t.kiyas || {};
@@ -1442,7 +1046,6 @@
       guncelleGnss(t.gnss);
       guncelleTakip(t.takip, t.gorsel && t.gorsel.tespit);
       guncelleKilit(t.gorsel);                    // KİLİTLENME kartı: 5/10 sn pencere + faz
-      guncellePoz(t.gorsel, t.gercek_mesafe_m);   // POZ kartı: kamera-PnP vs gerçek
       guncelleGudum(t.gudum);
       sonTelemetri=t;            // ATIŞ DURUMU 100ms motoru en taze telemetriyi okur
       guncelleEnstruman(t);      // pusula/burun + hız + batarya(tahmini) + LOS açısı
