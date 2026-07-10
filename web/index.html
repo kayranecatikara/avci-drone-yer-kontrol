@@ -326,7 +326,7 @@
     <section class="col">
       <h2>Görev Kontrol</h2>
       <div class="body">
-        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (İnovasyonlu J)</button>
+        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (Doğru GPS)</button>
         <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
@@ -696,7 +696,10 @@
     $("startBtn").classList.toggle("active", k === "v2");
     $("gercekBtn").classList.toggle("active", k === "gercek");
   }
-  function gorevBaslat(){ if(manuelAcik) manuelUIKapat(); kaynakSec("v2"); }
+  // 2026-07-10 kullanici karari: ANA gorev butonu DOGRU (gercek/truth) GPS ile yaklasir — filtre YOK.
+  // Akis: dogru GPS -> 5 m -> gorsel algila -> 5 sn kilit -> TERMINAL RAM (imha).
+  // Inovasyonlu J filtresiyle baslatmak istersen: kaynakSec("v2").
+  function gorevBaslat(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
   function gercekTest(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
   function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
 
@@ -728,6 +731,10 @@
     ["GPS YAKLAŞMA · DİKEY (cascade hız kontrolü)", [
       ["VZ_MAX","★★★ Dikey hız TAVANI (cm/s)   (asıl anti-overshoot: tırmanma/alçalma hızını sınırlar → momentum ile hedefin üstüne FIRLAYAMAZ. Hâlâ üstüne çıkıyorsa DÜŞÜR; irtifaya çok yavaş ulaşıyorsa ARTIR)",100,800,10],
       ["KV_Z","★★ Dikey hız-izleme kazancı   (throttle ölçülen hızı hedefe ne sertlikte sürsün; alçalma/tırmanma tepkisi zayıfsa ARTIR, dikey titreme varsa DÜŞÜR)",0.0005,0.0060,0.0001],
+      ["INTERCEPT_LEAD_S","★★★ ÖNGÖRÜLÜ İNTERCEPT (s)   (hedefin GİDECEĞİ yeri yay boyunca karşıla — dönen hedefte geriden kovalamak yerine önden kes; geride kalıyorsa ARTIR, üstünden geçip savruluyorsa DÜŞÜR; 0=kapalı/eski düz lead)",0,3.0,0.1],
+      ["APPROACH_STANDOFF","★★★ YAKINLIK / standoff (cm)   (drone hedefin bu kadar gerisinde durur — KÜÇÜK=daha yakın gelir (korkmasın), efektif mesafe ~2×; 7m handoff'a ulaşması için düşük tut)",0,500,25],
+      ["V_CAP_NEAR","★★★ HIZ TAVANI - yakında (cm/s)   (hedefe yakınken hız sınırı — Talon ~1800 cm/s uçuyor; BUNUN ALTINDA olursa drone ARKADA KALIR/kaybeder. Kovalayamıyorsa ARTIR, dönüşte üstüne fırlıyorsa DÜŞÜR)",500,3500,100],
+      ["V_CAP_FAR","★★ HIZ TAVANI - uzakta (cm/s)   (uzaktayken yaklaşma hız sınırı; yavaş yaklaşıyorsa ARTIR)",1500,3500,100],
     ]],
   ];
   let tuneAcik=false;
@@ -1647,21 +1654,24 @@
   const ATIS_PENCERE=10000, ATIS_ESIK_S=5.0;         // 10 sn kayan pencere, 5 sn eşik
   let atisAralik=[], atisAcik=null, atisSonKilit=null;
   let atisKurRun=0, atisKopRun=0, atisKilitli=false, atisSonT0=null;
+  let atisEsikPct=5;                                 // kilit boyut eşiği % (server VIS_LOCK_PCT'ten)
+  let atisOtoOnay=false;                             // OTONOM kilitlenme paketi onayi bir kez
 
   function atisDegerlendir(){
     const now=performance.now(), t=sonTelemetri;
     const t0=t && t.gorev && t.gorev.t0;
     if(t0!==atisSonT0){ atisSonT0=t0; atisAralik=[]; atisAcik=null; atisSonKilit=null;
-                        atisKurRun=0; atisKopRun=0; atisKilitli=false; }   // yeni görev -> sıfırla
+                        atisKurRun=0; atisKopRun=0; atisKilitli=false; atisOtoOnay=false; }   // yeni görev -> sıfırla
 
-    // --- kilit(kare) koşulu: AV + %6 kaplama ---
+    // --- kilit(kare) koşulu: AV + eşik kaplama (eşik = server VIS_LOCK_PCT, dinamik) ---
+    atisEsikPct = ((t && t.kilit && t.kilit.esik_pct!=null) ? t.kilit.esik_pct*100 : 5);  // %6->%5 (VIS_LOCK_PCT)
     const det=t && t.gorsel && t.gorsel.tespit;
     let present=false, inAV=false, sizePct=0, lockedFrame=false;
     if(det && det.cx!=null){
       present=true;
       inAV = det.cx>=0.25 && det.cx<=0.75 && det.cy>=0.10 && det.cy<=0.90;
       sizePct = Math.max(det.w||0, det.h||0)*100;
-      lockedFrame = inAV && sizePct>=6;
+      lockedFrame = inAV && sizePct>=atisEsikPct;
     }
 
     // --- debounce/histerezis + aralık defteri (başlangıç/bitiş kilitli kareyle) ---
@@ -1699,16 +1709,25 @@
     $("atisSayac").textContent = kumS.toFixed(1);
     $("atisKalan").textContent = hazir ? "eşik sağlandı" : (Math.max(0,ATIS_ESIK_S-kumS).toFixed(1)+" s kaldı");
     $("atisPFill").style.width = Math.min(100, kumS/ATIS_ESIK_S*100)+"%";
-    const bok = present && sizePct>=6;
+    const bok = present && sizePct>=atisEsikPct;
+    const esikS = '%'+atisEsikPct.toFixed(0);
     $("atisBoyut").innerHTML = present
-      ? 'boyut: <b>%'+sizePct.toFixed(0)+'</b> / %6 <span class="'+(bok?'ok':'no')+'">'+(bok?'✓':'✗')+'</span>'
-      : 'boyut: <b>—</b> / %6';
+      ? 'boyut: <b>%'+sizePct.toFixed(0)+'</b> / '+esikS+' <span class="'+(bok?'ok':'no')+'">'+(bok?'✓':'✗')+'</span>'
+      : 'boyut: <b>—</b> / '+esikS;
     $("atisMerkez").innerHTML = present
       ? 'merkez (AV): <span class="'+(inAV?'ok':'no')+'">'+(inAV?'içinde ✓':'dışında ✗')+'</span>'
       : 'merkez (AV): <b>—</b>';
     $("atisEnUzun").innerHTML = 'en uzun kesintisiz: <b>'+enUzunS.toFixed(1)+' s</b>';
     const btn=$("atisGonderBtn");
-    if(btn && !btn.dataset.gonderildi) btn.disabled = !hazir;   // yalnız ATIŞA HAZIR iken aktif
+    // ⭐ OTONOM KİLİTLENME PAKETİ (2026-07-10 kullanıcı): 5 sn kümülatif kilit (ATIŞA HAZIR)
+    // sağlanınca paket OTOMATİK onaylanır (manuel buton gerekmez). Ardından brain zaten
+    // kilit_ok ile TERMİNAL dalış+imha yapar -> tam otonom zincir: 5 sn kilit -> paket onay ->
+    // hedefe dalış -> imha. (Manuel buton yedek olarak da kalır.)
+    if(hazir && !atisOtoOnay){
+      atisOtoOnay = true;
+      atisPaketGonder(true);   // otonom onay (tıklama gerekmez)
+    }
+    if(btn && !btn.dataset.gonderildi) btn.disabled = !hazir;   // manuel yedek: yalnız ATIŞA HAZIR iken aktif
     atisSeritCiz(win, now);
   }
 
@@ -1724,12 +1743,17 @@
     if(atisAcik!=null) ciz(atisAcik, now);
   }
 
-  function atisPaketGonder(){
-    const btn=$("atisGonderBtn"); if(!btn || btn.disabled) return;
-    // Şartname: gönderme aksiyonu YALNIZ ATIŞA HAZIR iken. (Sunucu ucu eklenince buraya POST bağlanır.)
-    btn.dataset.gonderildi="1"; btn.disabled=true;
-    btn.textContent="✓ KİLİTLENME PAKETİ GÖNDERİLDİ";
-    setTimeout(()=>{ btn.textContent="🔒 Kilitlenme paketi gönder"; delete btn.dataset.gonderildi; }, 2500);
+  function atisPaketGonder(oto){
+    const btn=$("atisGonderBtn");
+    if(!oto){ if(!btn || btn.disabled) return; }          // manuel: yalnız aktifken; otonom: her zaman
+    if(btn){
+      btn.dataset.gonderildi="1"; btn.disabled=true;
+      btn.textContent = oto ? "✓ OTONOM ONAY — KİLİTLENME PAKETİ GÖNDERİLDİ → DALIŞ+İMHA"
+                            : "✓ KİLİTLENME PAKETİ GÖNDERİLDİ";
+    }
+    // (Sunucu ucu eklenince buraya POST bağlanır.) Dalış+imha brain'de kilit_ok ile OTONOM.
+    // otonom onayda buton KALICI kalir (görev boyunca "onaylandı"); manuel'de 2.5 sn sonra reset.
+    if(!oto) setTimeout(()=>{ if(btn){ btn.textContent="🔒 Kilitlenme paketi gönder"; delete btn.dataset.gonderildi; } }, 2500);
   }
   window.atisPaketGonder=atisPaketGonder;
 

@@ -85,7 +85,10 @@ class AvciIBVS:
         self.ex_f = 0.0              # EMA yatay sapma (-1 sol .. +1 sag)
         self.ey_f = 0.0              # EMA dikey sapma (-1 ust .. +1 alt)
         self.boyut_f = 0.0           # EMA bbox eksen orani max(w/W,h/H) — KILIT-TUT girdisi
+        self.terminal = False        # TERMINAL RAM (kilit_ok sonrasi IMHA): istasyon-tut birak, carp
         self._had = False            # ilk kare EMA'siz alinir
+        self._boyut_prev = None      # onceki tik boyut_f (kapanma-hizi sonumleme icin PD)
+        self._t_prev = None          # onceki tik damgasi (dt icin)
         self.roll_f = 0.0            # EMA hedef bank (EGO-TELAFILI roll, rad; pose kanat uclarindan)
         self._roll_had = False       # ilk gecerli roll EMA'siz alinir
         self._roll_raw_deg = 0.0     # ANLIK ham goruntu-roll (ego-telafisiz, EMA'siz; teshis/A-B)
@@ -157,6 +160,18 @@ class AvciIBVS:
             self.ex_f, self.ey_f, self.boyut_f = ex, ey, boyut
             self._had = True
 
+        # KAPANMA HIZI (boyut buyume orani, 1/s) — KILIT-TUT PD sonumlemesi icin.
+        # Hizli yaklasirken (boyut_rate>0) ileri itki kisilir -> asma/carpma OSILASYONU
+        # sonumlenir (2026-07-10: guclu forward 0.78 + reverse dal-kac-dal yapiyordu).
+        t_now = float(det.get("t", 0.0))
+        if self._boyut_prev is not None and self._t_prev is not None and t_now > self._t_prev:
+            dt_b = t_now - self._t_prev
+            boyut_rate = (self.boyut_f - self._boyut_prev) / dt_b if dt_b > 1e-6 else 0.0
+        else:
+            boyut_rate = 0.0
+        self._boyut_prev = self.boyut_f
+        self._t_prev = t_now
+
         # YUMUSAK GECIS (soft-handoff) RAMPASI — GPS->gorsel gecis surekliligi.
         # GPS ve gorsel yasa TAMAMEN farkli mimaride; gecis tikinde iki sey hedefi
         # kadrajdan atiyor: (1) uzakta ileri itki tavana doyup tam LUNGE veriyor ->
@@ -219,8 +234,9 @@ class AvciIBVS:
         lead, roll_ok = self._roll_lead(poz, W, H, p, own_roll_rad=own_roll_rad)
 
         # cizginin yatay bileseni (+ongoru lead) -> yaw, dikey sapmasi -> throttle (nisana sur)
+        yaw_max = float(getattr(p, "IBVS_YAW_MAX", p.YAW_MAX))   # gorsel faz AYRI yaw tavani (GPS'i bozmadan)
         yaw = clamp(float(p.IBVS_SIGN_YAW) * float(p.IBVS_K_YAW) * self.ex_f + lead,
-                    -float(p.YAW_MAX), float(p.YAW_MAX))
+                    -yaw_max, yaw_max)
         thr = clamp(float(p.IBVS_SIGN_DIKEY) * float(p.IBVS_K_DIKEY) * (-eyy),
                     float(p.THR_DN), float(p.THR_UP))
         # ileri itki: cizgi (nisandan sapma) buyudukce kisilir (once nisanla, sonra bas gitsin)
@@ -243,24 +259,42 @@ class AvciIBVS:
         kb = float(getattr(p, "IBVS_K_BOYUT", 0.0))
         hedef_boyut = float(getattr(p, "IBVS_BOYUT_HEDEF", 0.09))
         geri = max(0.0, float(getattr(p, "IBVS_GERI_MAX", 0.0)))
-        ileri_istek = (clamp(kb * (hedef_boyut - self.boyut_f), -geri, ileri_cap)
-                       if kb > 0.0 else ileri_cap)
-        # YAKLASMA-AGIRLIKLI FREN (2026-07-08, "gorsel fazda hizlanamiyor" teshisi):
-        # merkez freni (kisma) + alcalma freni (alcal) CARPIMSAL bindiginde ileri itkiyi
-        # ~10'da 1'e eziyordu (220830 logu: pitchC med 0.04 vs GPS 0.17; hedef 18 m/s
-        # kaciyor, yaklasilamiyor -> IBVS_ILERI'yi sonuna cekmek carpanlarin altinda
-        # yeniyor). Cozum: frenler YALNIZ kilit-tut bandinda (hedefe yakin) devrede;
-        # UZAKTA (istek tavanda = yak~1) frenler DEVRE DISI -> tam ileri, mesafe kapat.
-        # yak = istek/tavan (0..1). Merkezleme (yaw/thr) yak'tan BAGIMSIZ hep aktif ->
-        # "dengeleme" bozulmaz, yalniz ILERI itki acilir. Sadece goruntu verisi -> kural OK.
-        yak = clamp(ileri_istek / ileri_cap, 0.0, 1.0) if ileri_cap > 1e-6 else 0.0
-        kisma_eff = yak + (1.0 - yak) * kisma
-        alcal_eff = yak + (1.0 - yak) * alcal
-        # RAMPA (A): YALNIZ ILERI (pozitif) itki s ile olceklenir -> gecer gecmez tam
-        # lunge YOK; drone once ortalar (yaw/thr tam guc), sonra ileri 0'dan acilir.
-        # Geri-kacis (negatif terim) DOKUNULMAZ (yalniz hedefe cok yakinken olur, gecis
-        # aninda degil). yak/fren baypasi tam ileri_istek'ten hesaplanir (degismez).
-        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma_eff * alcal_eff * s
+        # TERMINAL RAM (2026-07-10, kilit sonrasi IMHA): kilit_ok latch'lenince ana_kontrol
+        # self.terminal=True yapar -> istasyon-tut (KILIT-TUT boyut regulasyonu) BIRAKILIR, ileri
+        # itki TAVANA sabit -> hedefe kapan/CARP = gorsel imha. Terminal disi: eski KILIT-TUT.
+        terminal = bool(getattr(self, "terminal", False))
+        if terminal:
+            # ⭐ TERMINAL IMHA FAZI (kilit_ok sonrasi, kullanici SPEC 2026-07-10): "tum frenleme
+            # fonksiyonlari durdurulup araca arkadan CARP". Boyut regulasyonu + merkez freni +
+            # alcalma freni + soft-start rampasi HEPSI BYPASS -> IBVS_TERM_ILERI ile TAM RAM.
+            # Merkezleme (yaw/thr) yine tam aktif -> hedefi kadrajda tutarak carpar. DETECTION
+            # GATE ana_kontrol'da: terminal YALNIZ GERCEK tespit surerken TRUE; kopru/kayipta
+            # FALSE -> ram durur (kullanici: "tespit kesilirse araca carpilmasin").
+            ileri_istek = clamp(float(getattr(p, "IBVS_TERM_ILERI", ileri_cap)), 0.0, 1.0)
+        elif kb > 0.0:
+            # PD KILIT-TUT (2026-07-10): P = kb*(hedef-boyut) yaklastirir; D = -kd*boyut_rate
+            # kapanma hizini SONUMLER -> hedefe yaklasirken erken frenler, ASMA/CARPMA yerine
+            # boyut hedefinde STABIL durur (guclu forward+reverse dal-kac-dal osilasyonu biter).
+            kd = float(getattr(p, "IBVS_BOYUT_KD", 0.0))
+            ileri_istek = clamp(kb * (hedef_boyut - self.boyut_f) - kd * boyut_rate,
+                                -geri, ileri_cap)
+        else:
+            ileri_istek = ileri_cap
+        # YAKLASMA-AGIRLIKLI FREN (KILIT-TUT bandinda): merkez freni (kisma) + alcalma freni
+        # (alcal) yalniz hedefe YAKIN + istek dusukken devrede; UZAKTA (istek tavanda) kapali.
+        # ⭐ TERMINAL'de TUM frenler + rampa KAPALI (kullanici spec: "tum frenleme durdurulup").
+        if terminal:
+            # TERMINAL (kullanici SON SPEC 2026-07-10): "cok hizli dengesiz, eski goruntuye
+            # gidiyor -> yavas yavas ilerleyip vursun". MERKEZ FRENI (kisma) ACIK KALIR ->
+            # hedef off-center'ken ileri YAVASLAR (once ortala/izle, sonra ilerle) -> manevra
+            # yapan hedefi TAKIP eder, eski konuma savrulmaz. Alcalma freni + rampa kapali.
+            yak, kisma_eff, alcal_eff, s_eff = 1.0, kisma, 1.0, 1.0
+        else:
+            yak = clamp(ileri_istek / ileri_cap, 0.0, 1.0) if ileri_cap > 1e-6 else 0.0
+            kisma_eff = yak + (1.0 - yak) * kisma
+            alcal_eff = yak + (1.0 - yak) * alcal
+            s_eff = s
+        pitch = float(p.PITCH_SIGN) * (max(ileri_istek, 0.0) * kisma_eff * alcal_eff * s_eff
                                        + min(ileri_istek, 0.0))
         roll = 0.0
 
@@ -276,6 +310,7 @@ class AvciIBVS:
             "kisma": round(kisma, 3),         # ham merkez freni (1=tam gaz)
             "alcal": round(alcal, 3),         # ham alcalma freni (1=serbest; eyy>0'da kisar)
             "yak": round(yak, 3),             # yaklasma agirligi (1=uzak/frensiz, 0=hedefte/fren tam)
+            "terminal": bool(terminal),       # TERMINAL IMHA fazi (frensiz tam ram) aktif mi
             # KILIT-TUT: EMA'li bbox eksen orani + hedefi + regulator istegi
             # (istek tavanda = yaklasiyor, bantta = tutuyor, -geri'de = kacisiyor)
             "boyut": round(self.boyut_f, 4),

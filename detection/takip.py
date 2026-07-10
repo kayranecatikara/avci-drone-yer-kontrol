@@ -24,7 +24,8 @@ import numpy as np
 # Kullanicinin hybridsort_tracker.py'sindeki TRACKER_PARAMS (birebir) + cmc.
 TRACKER_PARAMS = {
     # BaseTracker
-    "det_thresh": 0.3, "max_age": 30, "max_obs": 50, "min_hits": 3,
+    "det_thresh": 0.3, "max_age": 30, "max_obs": 50, "min_hits": 1,   # 2026-07-10: 3->1
+    #  (canli ~8 FPS'te 3 ardisik hit imkansiz -> iz onaylanmiyordu; 1 = ilk tespitte onayla)
     "iou_threshold": 0.3, "asso_func": "iou",
     # HybridSort
     "with_reid": False, "low_thresh": 0.1, "delta_t": 3, "inertia": 0.05,

@@ -313,7 +313,8 @@ def test_aci_ve_buyukluk():
 
 def test_clamp_ve_roll_sifir():
     thr, _, roll, yaw = _tek(1.0, 0.0)           # sag-ust kose (asiri sapma)
-    assert abs(yaw) <= Cfg.YAW_MAX + 1e-9, "yaw YAW_MAX'i asmamali"
+    yaw_max = getattr(Cfg, "IBVS_YAW_MAX", Cfg.YAW_MAX)   # gorsel faz AYRI yaw tavani
+    assert abs(yaw) <= yaw_max + 1e-9, "yaw IBVS_YAW_MAX'i asmamali"
     assert Cfg.THR_DN - 1e-9 <= thr <= Cfg.THR_UP + 1e-9
     assert roll == 0.0, "roll HEP 0 (bank yok)"
     thr2 = _tek(0.5, 1.0)[0]                     # tam alt kenar

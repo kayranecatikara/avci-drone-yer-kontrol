@@ -113,14 +113,20 @@ def test_pencere_eski_kilitler_dusuyor():
 # ---------------------------------------------------------------------------
 #  3) Sayac SALT GOZLEM (gudume karismaz)
 # ---------------------------------------------------------------------------
-def test_kilit_salt_gozlem_komutu_degistirmez():
-    """kilit_ok latch'i olsun olmasin ayni tespit AYNI komutu uretmeli (tek yasa)."""
-    d = _det(cxn=0.7, cyn=0.4, wp=0.10, hp=0.05, t=1.0)
-    b1 = _beyin(); b1.durum = "GORSEL_GUDUM"
-    k1 = b1._gorsel_guduum(dict(d), 1.0)
-    b2 = _beyin(); b2.durum = "GORSEL_GUDUM"; b2.kilit_ok = True
-    k2 = b2._gorsel_guduum(dict(d), 1.0)
-    assert k1 == k2, "kilit_ok komutu degistirdi (salt gozlem olmali): %s vs %s" % (k1, k2)
+def test_kilit_ok_terminal_ram():
+    """FAZ (2026-07-10 kullanici: '7m -> gorsel kilit -> IMHA'): kilit_ok latch'lenince
+    TERMINAL RAM -> istasyon-tutma (KILIT-TUT) BIRAKILIR, ileri itki istasyondan FAZLA olur
+    (hedef hedef-boyuttayken). Merkezleme (yaw) kanali degismez. (Kilit SAYACI hala salt gozlem;
+    degisen sey kilit_ok LATCH'inin terminal rami tetiklemesi = gorsel imha.)"""
+    hb = float(Cfg.IBVS_BOYUT_HEDEF)                      # hedef-boyutta -> KILIT-TUT istasyon (~0 ileri)
+    d = _det(cxn=0.5, cyn=0.5, wp=hb, hp=hb / 2.0, t=1.0)
+    b1 = _beyin(); b1.durum = "GORSEL_GUDUM"              # terminal DEGIL (istasyon tut)
+    _, ileri1, _, yaw1 = b1._gorsel_guduum(dict(d), 1.0)
+    b2 = _beyin(); b2.durum = "GORSEL_GUDUM"; b2.kilit_ok = True   # terminal (ram/imha)
+    _, ileri2, _, yaw2 = b2._gorsel_guduum(dict(d), 1.0)
+    assert ileri2 > ileri1, "terminal ram istasyondan FAZLA ileri vermeli: %.3f vs %.3f" % (ileri2, ileri1)
+    assert ileri2 > 0.0, "terminal ram ileri itki uretmeli: %.3f" % ileri2
+    assert abs(yaw1 - yaw2) < 1e-9, "merkezleme (yaw) terminalde degismemeli: %.3f vs %.3f" % (yaw1, yaw2)
 
 
 # ---------------------------------------------------------------------------
@@ -183,12 +189,40 @@ def test_manuel_gorselde_gps_revert_yok():
 
 
 def test_revert_kilit_ok_latch_korunur():
-    """GPS'e donuste kilit penceresi temizlenir ama kilit_ok latch'i KORUNUR."""
+    """Kilit sonrasi angajman COMMIT (2026-07-10 FIX-C): kisa kayipta GPS'e DONMEZ
+    (5 sn hover toleransi); cok uzun kayipta revert eder ama kilit_ok latch + kilit_win
+    KORUNUR (FIX-B: revert artik pencereyi TEMIZLEMEZ)."""
     b = _beyin(); b.durum = "GORSEL_GUDUM"; b.kilit_ok = True
-    _kayip_kos(b, 0.0, Cfg.VIS_LOST_TO_GPS_S + 1.0)
-    assert b.durum == "ARAMA"
+    b._gorsel_guduum(_det(t=0.0), 0.0)                 # kilit penceresine bir ornek koy
+    win_dolu = len(b.kilit_win)
+    # KISA kayip (1 sn < 5 sn): kilit sonrasi GPS'e DONMEMELI (angajmani tamamla)
+    reverted, _ = _kayip_kos(b, 0.02, 1.0)
+    assert not reverted and b.durum == "GORSEL_GUDUM", "kilit sonrasi kisa kayipta commit"
+    # COK UZUN kayip (6 sn > 5 sn): artik gercek kayip -> GPS'e revert
+    reverted2, _ = _kayip_kos(b, 1.1, 6.0)
+    assert reverted2 and b.durum == "ARAMA", "kilit sonrasi 5 sn+ kayipta revert etmeli"
     assert b.kilit_ok is True, "revert kilit_ok latch'ini dusurmemeli"
-    assert b.kilit_sure == 0.0 and len(b.kilit_win) == 0
+    assert len(b.kilit_win) >= win_dolu, "FIX-B: revert kilit_win'i TEMIZLEMEMELI"
+
+
+def test_kilit_birikimi_kisa_revert_hayatta_kalir():
+    """FIX-B cekirdegi: kisa GORSEL<->GPS titremesi kilit birikimini SIFIRLAMAZ.
+    Eski kod her revert'te kilit_win.clear() yapiyordu -> canli titremede kilit HIC
+    dolmuyordu (kilit_sure max 1s) oysa UI 5.7s gosteriyordu. Simdi birikim korunur."""
+    b = _beyin(); b.durum = "GORSEL_GUDUM"
+    # 0.5 sn merkezli kilit topla
+    t = 0.0
+    while t < 0.5:
+        b._gorsel_guduum(_det(t=t), t); t += Cfg.DT
+    sure_once = b.kilit_sure
+    assert sure_once > 0.3, "on-birikim olmali"
+    # KISA revert (0.6 sn kayip -> GPS'e doner cunku VIS_LOST_TO_GPS_S=0, kilit_ok yok)
+    _kayip_kos(b, t, 0.6); t += 0.7
+    # tekrar GORSEL: birikim eski pencereden DEVAM etmeli (clear YOK)
+    b.durum = "GORSEL_GUDUM"
+    while t < 1.4:
+        b._gorsel_guduum(_det(t=t), t); t += Cfg.DT
+    assert b.kilit_sure > sure_once, "FIX-B: kisa revert sonrasi kilit birikimi DEVAM etmeli (sifirlanmamali)"
 
 
 # ---------------------------------------------------------------------------

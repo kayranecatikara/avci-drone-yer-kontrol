@@ -159,3 +159,16 @@ class GNSSDuzeltici:
         return {"pos": (float(self._x[0]), float(self._x[1]), float(self._z[0])),
                 "vel": (float(self._x[2]), float(self._x[3]), float(self._z[1])),
                 "w": float(self._x[4])}
+
+    # --------------------------------------------------------------
+    #  ONGORULU-INTERCEPT NISANI (2026-07-10): hedefin T saniye SONRAKI
+    #  YATAY konumunu YAY boyunca (CT modeli, tahmini w ile) dondur. Guduum
+    #  bunu nisan olarak kullaninca DUZ-lead yerine EGRI-lead olur -> oval
+    #  donuste tegete degil, hedefin GIDECEGI yere nisanlar (geriden kovalamayi
+    #  keser). Genel: her donen hedefe calisir (rotaya OZEL degil). Isinmadiysa None.
+    # --------------------------------------------------------------
+    def ongoru(self, T):
+        if not self._baslandi:
+            return None
+        p = self._ct(self._x, float(T))
+        return float(p[0]), float(p[1])
