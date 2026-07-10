@@ -382,15 +382,13 @@
     <section class="col">
       <h2>Telemetri</h2>
       <div class="body">
-        <!-- BOZUK GNSS GİRDİSİ (ister 3): bozulmalar + kesinti + ham/filtre hata -->
+        <!-- BOZUK GNSS GİRDİSİ (ister 3): aktif bozulma + kesinti + filtre düzeltme -->
         <div class="card" style="border-color:#3a3320">
           <div class="title" style="color:var(--warn)">📡 BOZUK GNSS GİRDİSİ</div>
           <div class="note" style="margin:-4px 0 8px">Simülatör hedef GPS'i bozuk verir; GNSS Filtre temizler.</div>
           <div class="row"><span class="k">Aktif bozulma</span><span class="v mono" id="gnssBoz" style="font-size:11px;text-align:right">—</span></div>
           <div class="row"><span class="k">Kesinti</span><span class="v" id="gnssKesinti"><span class="rozet ok">VERİ AKIYOR</span></span></div>
           <div class="row"><span class="k">Paket yaşı</span><span class="v mono" id="gnssYas">—</span></div>
-          <div class="row"><span class="k">Ham hata (gerçeğe)</span><span class="v mono" id="kHam">—</span></div>
-          <div class="row"><span class="k">🟣 Filtre hata</span><span class="v mono" id="kJ">—</span></div>
           <div class="row"><span class="k">Filtre düzeltme (anlık)</span><span class="v mono" id="gnssJd">—</span></div>
         </div>
 
@@ -728,7 +726,6 @@
       : '<span class="rozet ok">VERİ AKIYOR</span>';
     $("gnssYas").innerHTML = gn.paket_yasi_s!=null ? (gn.paket_yasi_s*1000).toFixed(0)+' <small>ms</small>' : "—";
     $("gnssJd").innerHTML  = gn.j_duzeltme_m!=null ? f1(gn.j_duzeltme_m)+' <small>m</small>' : "—";
-    // kHam / kJ (SAPMA satırları buraya taşındı) tick() içinde t.kiyas'tan doldurulur.
   }
   function guncelleTakip(tk, det){
     tk = tk || {};
@@ -946,13 +943,6 @@
       $("tspd").innerHTML= f1(g.speed_kmh)+' <small>km/h</small>';
       $("dist").textContent = f1(t.distance_m);
       $("distF").textContent = (t.distance_filtre_m!=null) ? f1(t.distance_filtre_m) : "—";
-
-      // Sapma — gerçeğe hata: ortalama · en kötü (m). Tek üretim filtresi: GNSS Filtre.
-      const ky = t.kiyas || {};
-      const kfmt = (ort,mx)=> ort==null ? '<small>ısınıyor…</small>'
-            : f1(ort)+' <small>m · kötü '+f1(mx)+'</small>';
-      $("kHam").innerHTML = ky.ham_ort_m!=null ? f1(ky.ham_ort_m)+' <small>m</small>' : "—";
-      $("kJ").innerHTML   = kfmt(ky.j_ort_m, ky.j_max_m);
 
       // --- Video ister panelleri (görev/gnss/takip/güdüm + olay günlüğü + harita) ---
       guncelleGorev(t.gorev);

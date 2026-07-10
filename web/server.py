@@ -373,36 +373,10 @@ MANUEL_TIMEOUT = 0.7         # sn: bu sureden uzun giris gelmezse HOVER'a gec
 # Telafi tarama testi tamamlandi -> en iyi telafi_sn=2.0 (Efe'nin orijinal ayari).
 
 # ----------------------------------------------------------
-#  SAPMA OLCUMU: tek uretim GNSS filtresi, GERCEGE hatasi.
-#  Ham taban cizgisiyle birlikte. Gudume DOKUNMAZ; sadece sim/debug olcum.
+#  KESINTI IZLEYICI: her yeni ham GNSS paketinin freshness damgasi.
+#  Yalniz paketin yenilenip yenilenmedigini izler; gudume DOKUNMAZ.
 # ----------------------------------------------------------
-_kiyas_filtre = GNSSFiltre()   # uretim filtresi ornegi (yalniz sapma olcumu)
-_kiyas_idx = 0
 _kiyas_son_ham = None
-# Son ~80 olcumun penceresi (anlik performans; eski veriye takilmaz)
-_kiyas_ham_hata = deque(maxlen=80)
-_kiyas_filtre_hata = deque(maxlen=80)
-
-# Olcum CSV log: her paket icin ham/J hatasi (m). Her baslangicta sifirlanir.
-_KIYAS_LOG = os.path.join(VERI_DIR, "kiyas_log.csv")
-try:
-    _kiyas_log_f = open(_KIYAS_LOG, "w", encoding="utf-8")
-    _kiyas_log_f.write("paket,ham_m,j_m\n")
-    _kiyas_log_f.flush()
-except Exception:
-    _kiyas_log_f = None
-
-# --- GPS SAPMA LOGU (bozuk + gercek konum; sapma analizi icin) ----------------
-# (Fatih'in gps-log-server branch'inden main yapisina PORT edildi. Fark: cikti
-# HERE/gps_analiz yerine VERI_DIR altina yazilir — proje kulturu: tum calisma
-# ciktilari veri/ altinda ve zaten gitignore'lu; arac/ analizcileri de oradan okur.)
-# Her YENI ham pakette bozuk (get_target_location) + gercek (debug truth) konum,
-# zaman damgasi + aktif corruption ile biriktirilir; ~5 sn'de bir ATOMIK yazilir
-# (kopmada veri durur). gps_bozuk_gercek.json ile ayni sema. Gudume DOKUNMAZ.
-_GPS_LOG = os.path.join(VERI_DIR, "gps_log_canli.json")
-_gps_log_kayitlar = []
-_gps_log_t0 = None
-_gps_log_son_yaz = 0.0
 
 
 # ============================================================
@@ -454,14 +428,8 @@ def _gorev_sifirla(faz):
 
 
 def _mesafe_olc():
-    """VURUS/BASARI icin DURUST mesafe (m): truth varsa gercek 3B, yoksa filtre-temiz kestirim.
+    """VURUS/BASARI icin DURUST mesafe (m): filtreli-temiz kestirim (anlik temiz konum).
     HAM ASLA kullanilmaz (buyuk ham hata sahte vurus tetikler). -> (mesafe_m, kaynak) | (None, None)."""
-    truth = drone.get_debug_truth()
-    if truth.get("available"):
-        adx, ady, adz = truth["drone"]["position"]
-        tgx, tgy, tgz = truth["target"]["position"]
-        d = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
-        return d * CM_TO_M, "gercek"
     if beyin.son_xy_anlik is not None and beyin.son_z_anlik is not None:
         dp = drone.get_drone_location()
         tx, ty, tz = float(beyin.son_xy_anlik[0]), float(beyin.son_xy_anlik[1]), float(beyin.son_z_anlik)
@@ -611,79 +579,14 @@ def _gorev_izle():
         _gorev["faz"] = "KILIT" if durum in ("KILIT", "GORSEL_GUDUM") else "YAKLASMA"
 
 
-def _gps_log_yaz():
-    """Biriken bozuk/gercek konum logunu diske atomik yaz."""
-    if not _gps_log_kayitlar:
-        return
-    try:
-        veri = {
-            "birim": "cm (SDK ham)",
-            "eksenler": ["x", "y", "z"],
-            "aciklama": "web/server.py canli log: bozuk=get_target_location, "
-                        "gercek=get_debug_truth target",
-            "ornek_sayisi": len(_gps_log_kayitlar),
-            "kayitlar": _gps_log_kayitlar,
-        }
-        tmp = _GPS_LOG + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(veri, f, indent=2)
-        os.replace(tmp, _GPS_LOG)
-    except Exception:
-        pass
-
-
 def _kiyas_guncelle():
-    """Her YENI ham pakette GNSS filtresini besle, gercege hatasini olc."""
-    global _kiyas_idx, _kiyas_son_ham, _gps_log_t0, _gps_log_son_yaz
+    """Her YENI ham pakette kesinti izleyicinin paket-freshness damgasini gunceller (truth-siz)."""
+    global _kiyas_son_ham
     ham = drone.get_target_location()
     if ham == _kiyas_son_ham:
         return
     _kiyas_son_ham = ham
     _izci["son_paket_t"] = time.time()    # YENI paket geldi -> kesinti izleyici icin yas sifirlanir
-                                          # (truth erken donusunden ONCE: gercek yarismada truth yokken de calisir)
-    truth = drone.get_debug_truth()
-    if not truth.get("available"):
-        return
-    gercek = np.array(truth["target"]["position"], float)
-
-    # --- GPS sapma logu: bozuk + gercek konum + aktif corruption ---
-    _now = time.time()
-    if _gps_log_t0 is None:
-        _gps_log_t0 = _now
-    _gps_log_kayitlar.append({
-        "t": round(_now - _gps_log_t0, 3),
-        "bozuk": [round(float(c), 3) for c in ham],
-        "gercek": [round(float(c), 3) for c in gercek],
-        "corruption": drone.get_active_corruption(),
-    })
-    if _now - _gps_log_son_yaz > 5.0:   # her ~5 sn diske flush
-        _gps_log_yaz()
-        _gps_log_son_yaz = _now
-
-    idx = _kiyas_idx
-    _kiyas_idx += 1
-    hx, hy, hz = ham
-    ham_e = float(np.linalg.norm(np.array(ham, float) - gercek))
-    _kiyas_ham_hata.append(ham_e)
-    filtre_e = None
-
-    # GNSS filtre (uretim): telafisiz ANLIK temiz konum -> su anki gercekle karsilastir
-    # (guncelle'nin lead'li ciktisi degil durum_gudum["pos"]: "temizleme" kalitesi olcusu).
-    _kiyas_filtre.guncelle(hx, hy, hz)
-    durum = _kiyas_filtre.durum_gudum()
-    if durum is not None:
-        filtre_e = float(np.linalg.norm(np.array(durum["pos"], float) - gercek))
-        _kiyas_filtre_hata.append(filtre_e)
-
-    # CSV log (metre): bos sutun = o pakette cikti yok (None/isinma)
-    if _kiyas_log_f is not None:
-        he = "%.2f" % (ham_e / 100.0)
-        js = ("%.2f" % (filtre_e / 100.0)) if filtre_e is not None else ""
-        try:
-            _kiyas_log_f.write("%d,%s,%s\n" % (idx, he, js))
-            _kiyas_log_f.flush()
-        except Exception:
-            pass
 
 
 def _manuel_uygula():
@@ -716,8 +619,8 @@ def kontrol_dongusu():
                         beyin._hedef_temizle()    # sadece J'yi guncelle (olcum)
                         if beyin.debug_olc:
                             beyin._debug_olc()    # ham vs J hatasini olc
-                    # Kiyas HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
-                    _kiyas_guncelle()             # GNSS filtre sapma olcumu (ham vs filtre)
+                    # HER ZAMAN calisir (drone ucsa da uctmasa da donmaz)
+                    _kiyas_guncelle()             # kesinti izleyici paket-freshness damgasi
                     try:
                         _gorev_izle()             # olay/durum izleyici (GUDUME DOKUNMAZ)
                     except Exception as e:
@@ -1185,25 +1088,6 @@ def build_telemetry():
     # bozuk GPS spoof/sicramasinda ziplayabilir (bu normal, ham veri gostergesi).
     distance_m = ((dx - tx) ** 2 + (dy - ty) ** 2 + (dz - tz) ** 2) ** 0.5
 
-    # (Debug) Gercek (bozulmamis) degerler - oyunda debug acikken gelir.
-    truth = drone.get_debug_truth()
-    debug_info = {"available": bool(truth.get("available"))}
-    gercek_mesafe_m = None                       # avci <-> GERCEK hedef 3B mesafe (debug varsa)
-    if debug_info["available"]:
-        adx, ady, adz = (c * CM_TO_M for c in truth["drone"]["position"])
-        tgx, tgy, tgz = (c * CM_TO_M for c in truth["target"]["position"])
-        debug_info["drone_real"] = {"x": adx, "y": ady, "z": adz}
-        debug_info["target_real"] = {"x": tgx, "y": tgy, "z": tgz}
-        # GERCEK mesafe: gercek avci konumu <-> gercek hedef konumu (bozulmamis)
-        gercek_mesafe_m = ((adx - tgx) ** 2 + (ady - tgy) ** 2 + (adz - tgz) ** 2) ** 0.5
-        # Hedef HAM GPS ile GERCEK konum arasindaki fark (bozulma miktari, metre)
-        debug_info["target_raw_error_m"] = (
-            (tx - tgx) ** 2 + (ty - tgy) ** 2 + (tz - tgz) ** 2) ** 0.5
-        # Avci okumasi ile gercegi arasindaki fark (temiz olmali ~0)
-        debug_info["drone_error_m"] = (
-            (dx - adx) ** 2 + (dy - ady) ** 2 + (dz - adz) ** 2) ** 0.5
-        debug_info["corruptions"] = list(truth.get("corruption_active", []))
-
     # J (GNSS duzeltici) durumu ve canli olcum (beyin_lock ile guvenli oku)
     with beyin_lock:
         j_durum = beyin.durum
@@ -1257,23 +1141,7 @@ def build_telemetry():
         j_info["kazanc_pct"] = (100.0 * (ham_ort - j_ort) / ham_ort) if ham_ort > 0 else 0.0
         j_info["ornek"] = n
 
-    # Sapma ozeti (gercege hata, metre): uretim GNSS filtresi + Ham taban cizgisi
-    with beyin_lock:
-        ham_h = list(_kiyas_ham_hata)
-        j_h = list(_kiyas_filtre_hata)
     kiyas = {}
-    if ham_h:
-        kiyas["ham_ort_m"] = sum(ham_h) / len(ham_h) / 100.0
-    # Ozet: ortalama (tipik), std (dalgalanma), max (en kotu sapma).
-    def _ozet(ad, hlist):
-        if not hlist:
-            return
-        a = np.array(hlist, float) / 100.0          # cm -> m
-        kiyas[ad + "_ort_m"] = float(a.mean())
-        kiyas[ad + "_std_m"] = float(a.std())
-        kiyas[ad + "_max_m"] = float(a.max())
-        kiyas[ad + "_ornek"] = int(a.size)
-    _ozet("j", j_h)
 
     # (GECICI TANI) kontrolcunun SON gonderdigi dikey/ileri komut -> tani_irtifa.py icin.
     # Drone davranisini DEGISTIRMEZ; sadece son komutu gosterir. Sorun cozulunce silinebilir.
@@ -1302,8 +1170,7 @@ def build_telemetry():
     gnss_info = {
         "paket_yasi_s": paket_yasi_s,
         "kesinti": izci_kesinti,
-        "bozulmalar": list(debug_info.get("corruptions", [])),
-        "ham_hata_m": debug_info.get("target_raw_error_m"),
+        "bozulmalar": list(drone.get_active_corruption()),   # aktif bozulma adlari (truth-siz SDK)
         "j_duzeltme_m": j_duzeltme_m,
     }
     gudum_info = {
@@ -1382,8 +1249,6 @@ def build_telemetry():
         },
         "distance_m": distance_m,               # HAM GPS-avci mesafe (ekrandaki ana deger)
         "distance_filtre_m": distance_filtre_m, # FILTRELI GPS-avci mesafe (son_temiz)
-        "gercek_mesafe_m": gercek_mesafe_m,     # GERCEK GPS-avci mesafe (debug; bozulmamis)
-        "debug": debug_info,
         "j": j_info,
         "gorev_aktif": gorev_aktif,
         "manuel_aktif": manuel_aktif,
@@ -1470,11 +1335,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = {}
             cmd = data.get("cmd", "")
             msg = "Bilinmeyen komut"
-            if cmd in ("start", "start_v2", "start_filtre", "start_gercek"):
-                # start/start_v2/start_filtre -> uretim GNSS filtresi; start_gercek -> truth (test)
-                kaynak = "gercek" if cmd == "start_gercek" else "filtre"
+            if cmd in ("start", "start_v2", "start_filtre"):
+                # start/start_v2/start_filtre -> uretim GNSS filtresi (tek kaynak)
+                kaynak = "filtre"
                 with beyin_lock:
-                    beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (filtre / gercek)
+                    beyin.set_kaynak(kaynak)  # guduum kaynagini ayarla (GNSS filtre)
                     beyin.log_dondur()        # KOSULSUZ yeni ucus logu: ayni kaynak
                     # ust uste secilse de her "Gorev Baslat" = ayri ucus dosyasi/klasoru
                     _gorev_sifirla("YAKLASMA")   # izleyici latch'lerini sifirla (basari banner dahil)
@@ -1485,9 +1350,8 @@ class Handler(BaseHTTPRequestHandler):
                     _perf_log_f = None
                 gorev_aktif = True
                 manuel_aktif = False          # gorev ve manuel ayni anda olmaz
-                _ad = {"filtre": "GNSS Filtre", "gercek": "GERCEK GPS"}[kaynak]
-                msg = "GOREV BASLATILDI - kaynak: %s%s" % (
-                    _ad, " (filtre yok, gercek konuma gidiyor)" if kaynak == "gercek" else "")
+                _ad = {"filtre": "GNSS Filtre"}[kaynak]
+                msg = "GOREV BASLATILDI - kaynak: %s" % _ad
                 olay_ekle("iyi", "GOREV BASLADI — kaynak: %s" % _ad)
             elif cmd == "stop":
                 gorev_aktif = False

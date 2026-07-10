@@ -23,7 +23,10 @@
 - `detection/kamera_model.py` — kamera geometrisi / homografi
 - `detection/pencere_yakala.py` — oyun penceresini yakalama (görüntü kaynağı)
 - `web/index.html` — yer kontrol arayüzü (telemetri + görev göstergeleri)
-- `web/tune_rapor.py` — parametre ayar (tune) raporu yardımcısı (görev-dışı, opsiyonel özellik)
+
+> **NOT:** Gerçek/truth GPS (`get_debug_truth`), truth-tabanlı test güdüm modu, parametre-ayar
+> rapor aracı (tune_rapor) ve tüm debug göstergeleri teslim paketinden **tamamen çıkarıldı** —
+> güdüm yalnızca filtreli bozuk GNSS + kamera kullanır.
 
 > **NOT:** Poz/keypoint gözlemcisi (pose) bu sürümde KAPALI ve teslim paketinden **tamamen
 > çıkarıldı** (`pose/`, `poz_tespit.py`, `talon_pose_estimator.py`, `talon_pose.pt`); ilgili

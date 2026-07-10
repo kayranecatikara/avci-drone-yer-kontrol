@@ -25,8 +25,7 @@ _LOG_COLS = [
     # hedef (FILTRE): est=2sn lead, anlik=lead'siz, ham=bozuk
     "est_x", "est_y", "est_z", "z_ref", "xy_anlik_x", "xy_anlik_y", "son_z_anlik",
     "son_hiz_x", "son_hiz_y", "son_hiz_z", "son_ham_x", "son_ham_y", "son_ham_z",
-    # hedef (GERCEK / truth) + drone truth + gercek mesafe + hedef rotasyon (guvenilmez)
-    "true_tx", "true_ty", "true_tz", "true_dx", "true_dy", "true_dz", "gercek_mesafe",
+    # hedef rotasyon (ANA/bozuk akis; guvenilmez)
     "tgt_roll", "tgt_pitch", "tgt_yaw",
     # hata / guduum ici
     "ex", "ey", "ez", "d_h", "e_fwd", "e_right", "vcap", "mag_scale", "alc_oncelik", "ez_int",
@@ -202,58 +201,21 @@ def rate_limit(target, prev, max_delta):
     return prev + clamp(target - prev, -max_delta, max_delta)
 
 
-# ==========================================================
-#  GERCEK-GPS (DEV/test) kaynagi: filtreyi atlayip oyunun debug-truth hedef
-#  konumunu kullanir (filtre/guduum ayristirma testi). Yalniz hedef-temizlemeyi
-#  override eder; kontrol yasasi (kalkis/PD/PID/DR) ayni.
-# ==========================================================
-class _GercekGPSTakip(GPSTakip):
-    def sifirla(self):
-        super().sifirla()
-        self._gt_prev_p = None          # truth sonlu-fark hiz kestirimi durumu
-        self._gt_prev_t = None
-        self._gt_vel = np.zeros(3)
-
-    def _truth_hiz(self, p):
-        now = time.perf_counter()
-        if self._gt_prev_p is None or self._gt_prev_t is None:
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-            return self._gt_vel
-        dt = now - self._gt_prev_t
-        if 1e-3 < dt < 0.5:
-            raw = (p - self._gt_prev_p) / dt
-            self._gt_vel = 0.7 * self._gt_vel + 0.3 * raw
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-        elif dt >= 0.5:                                # bayat -> resetle
-            self._gt_prev_p = p.copy(); self._gt_prev_t = now
-        return self._gt_vel
-
-    def _hedef_temizle(self):
-        self.son_ham = self.drone.get_target_location()   # debug olcumu icin tut
-        dbg = self.drone.get_debug_truth()
-        if dbg.get("available"):
-            p = np.array(dbg["target"]["position"], float)
-            self.son_temiz = p
-            self.son_z_anlik = float(p[2])
-            self.son_xy_anlik = np.array([p[0], p[1]], float)
-            self.son_hiz = self._truth_hiz(p)
-            self._fresh = True
-        else:
-            self._fresh = False
-        return self.son_temiz
-
-
-# Guduum kaynagi -> GPS-takip fabrikasi ("gercek"=truth/test, "filtre"=uretim yolu).
+# GPS-takip fabrikasi: tek uretim yolu (fusion/gnss_filtre + guidance/gps_takip).
+# NOT: truth-tabanli "gercek GPS" test modu yarisma teslimi icin KALDIRILDI;
+# guduum artik HER ZAMAN uretim (filtre) yolunu kullanir.
 def _gps_uret(drone, kaynak):
-    return _GercekGPSTakip(drone) if kaynak == "gercek" else GPSTakip(drone)
+    return GPSTakip(drone)
 
 
 class AvciKontrol:
     def __init__(self, drone, debug_olc=True, kaynak="filtre"):
         self.drone = drone
+        if kaynak not in ("filtre", "v2"):  # truth/"gercek" test modu kaldirildi -> hep filtre
+            kaynak = "filtre"
         if kaynak == "v2":                  # eski ad (geriye-uyum)
             kaynak = "filtre"
-        self.kaynak = kaynak                # "filtre" | "gercek"
+        self.kaynak = kaynak                # her zaman "filtre" (telemetri alani korunur)
         self.gps = _gps_uret(drone, kaynak)  # GPS fazinin tek sahibi (kalkis+filtre+PD/PID)
         self.durum = "ARAMA"                # ARAMA -> KILIT -> GORSEL_GUDUM
         self.handoff = False
@@ -317,6 +279,8 @@ class AvciKontrol:
     #  durum taze baslar.
     # ----------------------------------------------------------------
     def set_kaynak(self, kaynak):
+        if kaynak not in ("filtre", "v2"):  # truth/"gercek" test modu kaldirildi -> hep filtre
+            kaynak = "filtre"
         if kaynak == "v2":
             kaynak = "filtre"               # eski ad (geriye-uyum)
         if kaynak == self.kaynak and self.gps is not None:
@@ -408,19 +372,6 @@ class AvciKontrol:
         try:
             trot = self.drone.get_target_rotation()             # ana (bozuk) akis - guvenilmez
             d["tgt_roll"], d["tgt_pitch"], d["tgt_yaw"] = float(trot[0]), float(trot[1]), float(trot[2])
-        except Exception:
-            pass
-        try:
-            dbg = self.drone.get_debug_truth()
-            if dbg.get("available"):
-                tp = dbg["target"]["position"]; dp = dbg["drone"]["position"]
-                d["true_tx"], d["true_ty"], d["true_tz"] = float(tp[0]), float(tp[1]), float(tp[2])
-                d["true_dx"], d["true_dy"], d["true_dz"] = float(dp[0]), float(dp[1]), float(dp[2])
-                d["gercek_mesafe"] = math.sqrt((tp[0]-dp[0])**2 + (tp[1]-dp[1])**2 + (tp[2]-dp[2])**2)
-                dpos = d.get("drone_pos"); dyaw = d.get("drone_yaw")
-                if dpos is not None and dyaw is not None:        # burun ile gercek hedef acisi (deg)
-                    d["nose_off_true"] = math.degrees(
-                        wrap_pi(math.atan2(tp[1] - dpos[1], tp[0] - dpos[0]) - dyaw))
         except Exception:
             pass
         d["phase"] = phase
@@ -647,18 +598,6 @@ class AvciKontrol:
         self.kilit_anlik = False
         return None                              # -> adim() GPS yoluna duser (bu tik)
 
-    # Debug olcum: filtre ham'dan iyi mi? (sim/teshis; gudume girmez)
-    def _debug_olc(self):
-        dbg = self.drone.get_debug_truth()
-        if not dbg.get("available") or self.son_temiz is None or self.son_ham is None:
-            return
-        gercek = np.array(dbg["target"]["position"])
-        ham = np.array(self.son_ham)
-        self.ham_hatalar.append(np.linalg.norm(ham - gercek))
-        self.filtre_hatalar.append(np.linalg.norm(np.asarray(self.son_temiz, dtype=float) - gercek))
-        for ad in self.drone.get_active_corruption():
-            self.bozukluk_sayac[ad] = self.bozukluk_sayac.get(ad, 0) + 1
-
     # ----------------------------------------------------------------
     #  Tek kontrol adimi (50 Hz). GPS fazi gps_takip'e devredilmistir. Bu metodun isi:
     #    1) gorsel tespit + FSM anahtari (ARAMA/KILIT <-> GORSEL_GUDUM),
@@ -720,8 +659,6 @@ class AvciKontrol:
                 self.gps._hedef_temizle()
                 if self.gps._fresh:
                     self.gps._son_fresh_t = t
-                if self.debug_olc:
-                    self._debug_olc()
                 self._log_gorsel(t, drone_pos, yaw_m, drone_yaw, v_own, tespit)
                 return
             # sonuc None (yalniz OTO) -> gorsel uzun kayip -> GPS yolu bu tik calisir
@@ -729,8 +666,6 @@ class AvciKontrol:
         # ==================== [GPS-YAKLASMA — gps_takip devraldi] ====================
         # Kalkis + GNSS temizleme + DR + PD/PID + rate-limit + gonderim gps.adim() icinde.
         self.gps.adim()
-        if self.debug_olc:
-            self._debug_olc()
 
         # HANDOFF (histerezisli) -> durum: ARAMA / KILIT (gorsel devir kapisi).
         d_h = None
