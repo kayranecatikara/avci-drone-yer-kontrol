@@ -108,7 +108,9 @@ damgası `on_frame_arrived`'da. UI: dedektör mss'e düşünce FPV'de turuncu "�
 
 Model (7 Tem 2026): `models/best.pt` = best_son (19 MB, detect/talon, imgsz=1280).
 Referans kayıtta eski 40 MB modele karşı kilit-eşiği-üstü %62.5→%73.0 ve %33 hızlı
-(640'ta çöküyor — imgsz 1280 kalacak; kıyas: scratchpad model_kiyas, 7 Tem).
+(kıyas: scratchpad model_kiyas, 7 Tem). **DÜZELTME 2026-07-18:** "640'ta çöker — imgsz 1280
+kalacak" o eski best_son içindi; aktif model best3/yolo11s NATIVE 640, dedektör **imgsz=640**
+çalışıyor — bkz THROUGHPUT DARBOĞAZI bölümü.
 
 ## ⭐ YENİ MODELLER ENTEGRE — enson_bbox + ensonpose (2026-07-09)
 Kullanıcının en son eğittiği iki model sisteme alındı: `enson_bbox.pt`→`models/best.pt`
@@ -145,22 +147,24 @@ ileri itki kalıcı olunca kalıcı zararlı ofset oldu. **Düzeltme:** `IBVS_EG
 |ey| dikey p90 0.77→0.59 en merkezi). Kaçak-tırmanma koruması 0.4'te kısmen korunur (geçici
 spike hâlâ telafi, kalıcı yatıklık aşırı silinmez). Yatay kanal (yaw) zaten iyiydi, dokunulmadı.
 
-## ⭐ MODEL PERFORMANSI — DARBOĞAZ GPU PAYLAŞIMI, MODEL DEĞİL (2026-07-08)
-Kullanıcı "YZ modellerinden tam performans alamıyoruz" → ÖLÇTÜK (`veri/perf_log_*.csv`,
-`server._perf`/`_perf_log_yaz`, ~1 Hz; FPV sağ-altta canlı gösterge). **Canlı:** DET ~100 ms,
-POZ ~180 ms, döngü ~8-9 FPS. **İzole benchmark (oyun KAPALI, aynı RTX 4060):** DET best.pt
-@1280 **39 ms**, POZ @1280 **42 ms** → ~25 FPS. **Kanıt:** model zaten hızlı; canlı 2.5-4.5x
-yavaşlama tamamen **oyunun (Drones of War) GPU'yu paylaşmasından** (oyun render + inference
-aynı dGPU'da yarışıyor). → **TensorRT/FP16 bu sorunu ÇÖZMEZ** (model compute-bound değil;
-FP16 izolede 39→39 ms, KAZANÇ YOK — Ada TF32 zaten FP32 matmul'ü hızlandırıyor). **Gerçek
-çözüm kullanıcı tarafında:** oyunun grafik kalitesini/çözünürlüğünü düşür veya FPS cap koy
-(NVIDIA panel max frame rate) → GPU headroom inference'e kalsın.
-Yine de uygulanan (zararsız, contention'ı biraz azaltır): **FP16** (`quantize=fp16`/`half`
-dinamik — yeni ultralytics uyarısız, eski `half`'e düşer; `AVCI_FP16=0` ile kapatılır),
-**pose imgsz 1280→960** (eğitim imgsz'iyle uyumlu — POSE_REHBERI; doğruluk için de iyi),
-**`POZ_HER_N` 3→5** (pose gözlemci/güdümde yok — 180 ms contention spike'ı seyrekleşir,
-best.pt'ye temiz GPU kalır). best.pt imgsz=1280 KALIR (640'ta çöker). Doğruluk (uzak/küçük
-hedef recall) ayrı iş: eğitim/veri (ekip). Perf ölçüm altyapısı: `AVCI_FP16` env + FPV göstergesi.
+## ⭐ THROUGHPUT DARBOĞAZI = SAHI (2026-07-18 ÖLÇÜLDÜ — eski "GPU paylaşımı / TensorRT gerekir" anlatısı DÜZELTİLDİ)
+Gerçek makine **GTX 1650 Ti** (eski "RTX 4060 @1280 39 ms" sayıları TEK SEFERLİK benchmark
+kutusuydu; canlı uçuşlar HEP 1650 Ti — `perf_log` gpu kolonu). Aktif dedektör çağrısı
+**imgsz=640** (best3/yolo11s 640'ta native eğitildi, server.py:955). Ölçüm araçları:
+`bench_sahi.py` (izole det_ms, SAHI on/off), `kiyas_sahi.py` (menzil-binli recall), `perf_log_*.csv` (canlı).
+- **Kök neden = SAHI, model DEĞİL.** İzole bench (1650 Ti, FP16 açık): TEK predict @640 **~30 ms**
+  (model HIZLI); SAHI açık **347-459 ms** (kare başına 7-9+ predict; **12-15x**). Yani ~800 ms canlı
+  det_ms = SAHI'nin kare-başına dilim-predict'leri, ağır model DEĞİL. → **`SAHI_AKTIF=False`**
+  (ana_kontrol.py:304). Canlı det_ms 800→**~203 ms / ~5 FPS**.
+- **FP16 ZATEN default açık** (`AVCI_FP16=1`, server.py:69) — lever DEĞİLDİ. "Model ağır,
+  TensorRT/FP16 gerekir" anlatısı YANLIŞ (tek predict 30 ms; compute-bound değil).
+- **Kalan ~203 ms (izole 30 ms değil) = oyun GPU contention** (Drones of War PLAY'de aynı 1650 Ti'yi
+  paylaşıyor). Bu kısım geçerli: gerçek çözüm KULLANICI tarafında (grafik kalitesi/çözünürlük düşür
+  veya NVIDIA panel FPS cap → inference'e headroom).
+- **imgsz=640 KALIR** (aktif model native 640; eski "imgsz 1280 KALIR / 640'ta çöker" GEÇERSİZ).
+  Doğruluk (uzak/küçük recall + düşük conf ~0.30) ayrı iş: eğitim/veri (ekip).
+- Önceki mitigasyonlar (poz OFF olduğundan çoğu moot): pose imgsz 1280→960, `POZ_HER_N` 3→5, FP16
+  (`quantize=fp16`/`half` dinamik — yeni ultralytics uyarısız, eski `half`'e düşer; `AVCI_FP16=0` ile kapatılır).
 
 ## ⭐ BÜYÜK SIFIRLAMA — BASİT IBVS (2026-07-07 v7, kullanıcı kararı)
 Kullanıcı: "bu IBVS işine çok değişik şeyler eklemişsin (PN'i yönelime entegre etmiştik),
@@ -456,8 +460,12 @@ Yapılan (branch'teki kanıtlanmış bağlama, main'in FP16/perf ölçümü koru
   ile uyumlu); `en_iyi_track` önce `tespit_mi=True` (ölçülen iz hayaleti bastırır).
   Simülasyon (8 FPS delikli desen): eski cfg ham tespitlerin %0'ını, yeni %99'unu beyne
   ulaştırıyor. Testler yeni semantiğe uyarlandı (test_takip 16/16).
-- **ANAHTARLAR (Cfg, ana_kontrol.py):** `TAKIP_AKTIF=True` — False = tracker devre dışı,
-  ham argmax tespit doğrudan beyne (ByteTrack öncesi davranışla bire bir; hızlı geri-dönüş).
+- **ANAHTARLAR (Cfg, ana_kontrol.py):** `TAKIP_AKTIF=False` (2026-07-18 DÜZELTME — eskiden True) —
+  tracker KAPALI, ham argmax tespit doğrudan beyne. SEBEP: HybridSort yaşam-döngüsü ~50 Hz
+  varsayımlıydı; canlı ~5 FPS'te izi eşleştiremeyip coast'layıp bbox'u DONDURUYORDU (canlı A/B:
+  tracker-on 32 s'de 2 kutu / tracker-off detektör hızında ~0.24 s tazeleniyor; bkz hafıza
+  `tracker-coast-freeze-5fps`). boxmot 22.0.0 kurulu + `takip.py` import düzeltildi → 5 FPS için
+  retune edilirse geri açılabilir; ŞİMDİLİK ham argmax (güdüm track_id kullanmıyor, sorunsuz).
 - CANLI DOĞRULAMA BEKLİYOR: bir uçuş + tune raporu "kayıp sayısı / en uzun kesintisiz
   takip" kıyası (baz: 8-9 Tem gece uçuşları %14-30). NOT (9 Tem): kullanıcı canlı gözlemle
   "tracking düzeldi" dedi; DETECTION log kolonlarında hata var (loga güvenme, FPV/gözlem esas).
@@ -469,8 +477,9 @@ geri kapatıldı. KANIT (durum-geçişi kıyası, bozuk tespit kolonundan BAĞIM
 kök neden: sim attitude işareti ters (Blokör B açık) → ters CMC kaymayı 2x yapıp her dönüşte
 izi kırıyor → görsel faza geçilemiyor. Kod + emniyet knob'ları DURUYOR (silinmedi); DOĞRU
 açmak için önce `arac/attitude_dogrula.py` (uçuşlu truth sweep) ile işaret doğrulanmalı,
-ters çıkarsa `TAKIP_CMC_SIGN=-1`, sonra `TAKIP_CMC_AKTIF=True`. **ByteTrack (TAKIP_AKTIF=True)
-korunuyor — kullanıcı onu canlı gözlemle beğendi; sadece gyro-CMC katmanı kapalı.**
+ters çıkarsa `TAKIP_CMC_SIGN=-1`, sonra `TAKIP_CMC_AKTIF=True`. **NOT (2026-07-18): ByteTrack/HybridSort
+artık `TAKIP_AKTIF=False` (KAPALI) — 5 FPS canlıda coast-freeze yaptığı ölçüldü (bkz THROUGHPUT
+DARBOĞAZI + tracker düzeltmesi); gyro-CMC katmanı da zaten kapalı.**
 
 Aşağıdaki teknik detay açılırsa geçerli (şimdilik referans):
 gyro-CMC (jiroskop hareket telafisi) `dedektor_dongusu`'nda `TAKIP_CMC_AKTIF` ile devreye girer.

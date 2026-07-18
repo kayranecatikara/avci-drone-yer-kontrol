@@ -56,7 +56,7 @@ class Takipci:
 
     def sifirla(self):
         # Lazy import: modul yuklenirken agir boxmot'u cekme; ilk tracker'da yukle.
-        from boxmot.trackers.bbox.hybridsort.hybridsort import HybridSort
+        from boxmot.trackers.bbox.hybridsort import HybridSort
         self._tr = HybridSort(reid_model=None, cmc_method=CMC_METHOD, **TRACKER_PARAMS)
         self.trackler = []
 

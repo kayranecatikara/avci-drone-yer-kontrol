@@ -301,7 +301,7 @@ class Cfg:
     # UYGULANMAZ (keypoint dilim-merge yok). Bizim temiz impl (gorsel_tespit._sahi_ham),
     # sahi paketi GEREKMEZ; kural 8 aciklanabilir. MALIYET: N dilim -> N x inference;
     # GPU oyunla paylasimli -> SAHI_KOSUL_CONF ile yakin hedefte dilimleme atlanir.
-    SAHI_AKTIF       = True     # False -> tek tam-kare predict (eski davranis, bit-ayni)
+    SAHI_AKTIF       = False    # False -> tek tam-kare predict (eski davranis, bit-ayni)
     SAHI_DILIM_PX    = 640      # dilim kenari (px); best.pt imgsz'ine yakin
     SAHI_ORTUSME     = 0.2      # komsu dilim ortusme orani (kenardaki hedef bolunmesin)
     SAHI_TAM_KARE    = True     # dilimlere EK tam-kare predict (yakin/buyuk hedef kesilmesin)
@@ -320,7 +320,7 @@ class Cfg:
     # --- TAKIP (ByteTrack) ANAHTARLARI (2026-07-09, canli regresyon sonrasi) ---
     # TAKIP_AKTIF=False -> tracker DEVRE DISI: ham argmax tespit dogrudan beyne
     # (ByteTrack oncesi davranisla bire bir) -> canli sorun cikarsa hizli geri-donus.
-    TAKIP_AKTIF      = True
+    TAKIP_AKTIF      = False
     # --- gyro-CMC (jiroskop hareket telafisi) ---
     # Avcinin donusu (yaw/pitch/roll) uzak hedefin goruntudeki kutusunu kaydirir;
     # CMC bu kaymayi IMU attitude'undan turetilen homografiyle ONCEDEN telafi eder
