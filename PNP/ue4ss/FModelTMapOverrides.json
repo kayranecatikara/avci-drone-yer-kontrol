@@ -1,0 +1,134 @@
+{
+   "AssetPathToHashes": {
+      "Key": "SoftObjectPath",
+      "Value": ""
+   },
+   "AttributeCurves": {
+      "Key": "AnimationAttributeIdentifier",
+      "Value": "AttributeCurve"
+   },
+   "BindingIdToReferences": {
+      "Key": "Guid",
+      "Value": ""
+   },
+   "BoneRotationOffsets": {
+      "Key": "",
+      "Value": "Quat"
+   },
+   "BoundActorComponents": {
+      "Key": "Guid",
+      "Value": ""
+   },
+   "CookedPropertyGuids": {
+      "Key": "",
+      "Value": "Guid"
+   },
+   "CurveConversionAssetMap": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "DataInterfaceStorage": {
+      "Key": "NiagaraVariableBase",
+      "Value": ""
+   },
+   "EventTracks": {
+      "Key": "",
+      "Value": "CacheEventTrack"
+   },
+   "FunctionReferences": {
+      "Key": "SoftObjectPath",
+      "Value": ""
+   },
+   "GuidToRigDeformerInstanceMap": {
+      "Key": "Guid",
+      "Value": ""
+   },
+   "HashToAssetPaths": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "Hierarchy": {
+      "Key": "MovieSceneSequenceID",
+      "Value": ""
+   },
+   "Inputs_Float": {
+      "Key": "",
+      "Value": "MovieSceneFloatChannel"
+   },
+   "KeysPressedThisTick": {
+      "Key": "",
+      "Value": "Vector"
+   },
+   "MaterialParents": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "PredefinedBSDF": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "PredefinedEDF": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "PredefinedSurfaceShaders": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "PredefinedVDF": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "ResolvedDIBindings": {
+      "Key": "NiagaraVariableBase",
+      "Value": "NiagaraVariableBase"
+   },
+   "SoftwareCursors": {
+      "Key": "",
+      "Value": "SoftClassPath"
+   },
+   "StrToVec": {
+      "Key": "",
+      "Value": "Vector"
+   },
+   "SubSectionRanges": {
+      "Key": "Guid",
+      "Value": "MovieSceneFrameRange"
+   },
+   "SubSequences": {
+      "Key": "MovieSceneSequenceID",
+      "Value": ""
+   },
+   "TrackSignatureToTrackIdentifier": {
+      "Key": "Guid",
+      "Value": "MovieSceneTrackIdentifier"
+   },
+   "Tracks": {
+      "Key": "MovieSceneTrackIdentifier",
+      "Value": ""
+   },
+   "UserDefinedEnumToPathName": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "UserDefinedStructGuidToPathName": {
+      "Key": "",
+      "Value": "SoftObjectPath"
+   },
+   "UserParameterRedirects": {
+      "Key": "NiagaraVariable",
+      "Value": "NiagaraVariable"
+   },
+   "VariableIndices": {
+      "Key": "NiagaraVariableBase",
+      "Value": ""
+   },
+   "VectorParameterValues": {
+      "Key": "",
+      "Value": "LinearColor"
+   },
+   "WorldAssetStreamingObjects": {
+      "Key": "Guid",
+      "Value": ""
+   }
+}

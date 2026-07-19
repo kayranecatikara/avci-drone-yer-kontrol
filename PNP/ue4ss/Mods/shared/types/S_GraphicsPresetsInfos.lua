@@ -1,0 +1,12 @@
+---@meta
+
+---@class FS_GraphicsPresetsInfos
+---@field GraphicOptionReference_15_14A1157445ECE46D7ACE3887C2605FF1 UWBP_EOM_SettingsMaster_C
+---@field Low_11_675285B44F233C7A8BEC809BA9D6D391 int32
+---@field Medium_12_3113683D45A39A7E553692B69382981E int32
+---@field High_13_EB95387F43BA600350F27FAFD6C77087 int32
+---@field Ultra_14_F954B7EE49C423B62D13A0A710FC8453 int32
+local FS_GraphicsPresetsInfos = {}
+
+
+

@@ -1,0 +1,1 @@
+{"status":"READY","index":1,"drone_location":{"x":-10130.59,"y":-239393.84,"z":9286.50},"drone_rotation":{"pitch":-1.86,"yaw":89.03,"roll":5.31},"camera_location":{"x":-10262.41,"y":-241968.09,"z":9355.17},"camera_rotation":{"pitch":25.00,"yaw":85.62,"roll":0.00},"camera_fov":122.07}

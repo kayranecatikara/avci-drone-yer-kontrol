@@ -1,0 +1,127 @@
+============================================================
+TALON DRONE COMPONENT & SKELETAL MESH BONE DUMP (SAFE)
+============================================================
+Talon Actor Name: BPP_AIDroneTalon_C /Game/YellowBladesLandscape/Maps/Overview/L_TeknofestSavasanIha.L_TeknofestSavasanIha:PersistentLevel.BPP_AIDroneTalon_C_2147481344
+Actor World Loc: X=1834.5875, Y=-239345.9577, Z=8525.9550
+Actor World Rot: P=-2.5990, Y=102.8752, R=35.5665
+Total components found: 15
+
+------------------------------------------------------------
+Component #1: Name=SM_Talon_WingSmall_R, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #2: Name=SM_Talon_WingSmall_L, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #3: Name=SM_Talon_Wing_R, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #4: Name=SM_Talon_Wing_L, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #5: Name=SM_Talon_Propeller, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=-91.4990
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #6: Name=SM_Talon_Body, Class=StaticMeshComponent
+  Relative Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Relative Rotation: P=-2.5920, Y=103.0075, R=35.6244
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #7: Name=SM_Talon_WingSmall_R, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #8: Name=SM_Talon_WingSmall_L, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #9: Name=SM_Talon_Wing_R, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #10: Name=SM_Talon_Wing_L, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #11: Name=Box, Class=BoxComponent
+  Relative Location: X=10.0000, Y=0.0000, Z=5.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1826.5979, Y=-239324.2453, Z=8528.9835
+  Loc Relative to Actor: X=-7.9895, Y=21.7124, Z=3.0285
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #12: Name=Arrow, Class=ArrowComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=-30.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1848.9993, Y=-239330.6438, Z=8501.0150
+  Loc Relative to Actor: X=14.4118, Y=15.3139, Z=-24.9400
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #13: Name=Audio, Class=AudioComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=0.0000
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #14: Name=SM_Talon_Propeller, Class=StaticMeshComponent
+  Relative Location: X=0.0000, Y=0.0000, Z=0.0000
+  Relative Rotation: P=0.0000, Y=0.0000, R=-91.4990
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0
+
+------------------------------------------------------------
+Component #15: Name=SM_Talon_Body, Class=StaticMeshComponent
+  Relative Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Relative Rotation: P=-2.5920, Y=103.0075, R=35.6244
+  World Location: X=1831.7254, Y=-239333.5023, Z=8525.3756
+  Loc Relative to Actor: X=-2.8621, Y=12.4554, Z=-0.5793
+  Socket Count: 0

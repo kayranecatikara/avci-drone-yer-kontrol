@@ -1,0 +1,17 @@
+==== TALON KEYPOINT TESHIS ====
+Viewport: 1920x1080
+Actor Rot: P=1.26 Y=40.22 R=6.57
+-----------------------------------------------
+nose            comp=SM_Talon_Body (mesh=?)
+   world=(-8594.2, -248515.0, 8274.2)  screen=(1156.7, 531.4) on=true
+tail            comp=SM_Talon_Body (mesh=?)
+   world=(-8678.1, -248586.0, 8271.8)  screen=(1152.0, 531.7) on=true
+left_wingtip    comp=SM_Talon_Wing_L (mesh=?)
+   world=(-8578.3, -248615.8, 8293.1)  screen=(1154.0, 531.7) on=true
+right_wingtip   comp=SM_Talon_Wing_R (mesh=?)
+   world=(-8692.1, -248480.5, 8272.6)  screen=(1154.8, 530.6) on=true
+left_tail_fin   comp=SM_Talon_WingSmall_L (mesh=?)
+   world=(-8647.3, -248590.8, 8288.0)  screen=(1152.7, 531.3) on=true
+right_tail_fin  comp=SM_Talon_WingSmall_R (mesh=?)
+   world=(-8679.5, -248552.3, 8282.4)  screen=(1152.9, 531.0) on=true
+===============================================

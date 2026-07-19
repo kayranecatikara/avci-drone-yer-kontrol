@@ -1,0 +1,378 @@
+$script = @"
+local CAPTURES_PER_SPOT = 8
+local STATUS_FILE_PATH = "c:\\Users\\Zeylo\\Desktop\\talon_dataset\\status.txt"
+local TICK_INTERVAL_MS = 250
+
+local state = "INIT"
+local talonActor = nil
+local anchorLocation = nil
+local originalCamActor = nil
+local originalCamLocation = nil
+local originalViewTarget = nil
+local visualsRestored = false
+local uiHidden = false
+
+local currentCombo = nil
+local currentCamX = nil
+local currentCamY = nil
+local currentCamZ = nil
+local currentLookRot = nil
+
+math.randomseed(os.time())
+
+local function CalculateLookAtRotation(startPos, targetPos)
+    local dx = targetPos.X - startPos.X
+    local dy = targetPos.Y - startPos.Y
+    local dz = targetPos.Z - startPos.Z
+    
+    local dist2D = math.sqrt(dx * dx + dy * dy)
+    local yaw = math.deg(math.atan(dy, dx))
+    local pitch = math.deg(math.atan(dz, dist2D))
+    
+    if yaw > 180 then yaw = yaw - 360 elseif yaw < -180 then yaw = yaw + 360 end
+    if pitch > 180 then pitch = pitch - 360 elseif pitch < -180 then pitch = pitch + 360 end
+    
+    return { Pitch = pitch, Yaw = yaw, Roll = 0.0 }
+end
+
+local function RunConsoleCmd(cmd)
+    local ok = pcall(function() ExecuteConsoleCommand(cmd) end)
+    if not ok then
+        pcall(function()
+            local PC = FindFirstOf("DebugCameraController")
+            if not PC or not PC:IsValid() then PC = FindFirstOf("PlayerController") end
+            if PC and PC:IsValid() then PC:ConsoleCommand(cmd, true) end
+        end)
+    end
+end
+
+local function GetActiveController()
+    local PC = FindFirstOf("DebugCameraController")
+    if not PC or not PC:IsValid() then
+        local controllers = FindAllOf("PlayerController") or {}
+        for _, c in ipairs(controllers) do
+            if c:IsValid() then
+                local s, n = pcall(function() return c:GetClass():GetName() end)
+                if s and n and not n:find("DebugCameraController") then
+                    PC = c
+                    break
+                end
+            end
+        end
+    end
+    if not PC or not PC:IsValid() then PC = FindFirstOf("PlayerController") end
+    return PC
+end
+
+local function GetCameraActor(PC)
+    if not PC or not PC:IsValid() then return nil end
+    local viewTarget = PC:GetViewTarget()
+    if viewTarget and viewTarget:IsValid() then
+        if not talonActor or viewTarget:GetAddress() ~= talonActor:GetAddress() then
+            return viewTarget
+        end
+    end
+    local possessed = PC:K2_GetPawn()
+    if possessed and possessed:IsValid() then
+        if not talonActor or possessed:GetAddress() ~= talonActor:GetAddress() then
+            return possessed
+        end
+    end
+    return nil
+end
+
+local function RestoreCameraActor(PC)
+    pcall(function()
+        if originalViewTarget and originalViewTarget:IsValid() then
+            pcall(function() PC:SetViewTarget(originalViewTarget) end)
+        end
+    end)
+    originalViewTarget = nil
+    
+    local isStillValid = false
+    pcall(function()
+        if originalCamActor and originalCamActor:IsValid() then
+            local activeCam = GetCameraActor(PC)
+            if activeCam and activeCam:IsValid() and activeCam:GetAddress() == originalCamActor:GetAddress() then
+                isStillValid = true
+            end
+        end
+    end)
+    
+    if isStillValid then
+        pcall(function()
+            originalCamActor:K2_SetActorLocation(originalCamLocation, false, {}, true)
+        end)
+    end
+    originalCamActor = nil
+    originalCamLocation = nil
+end
+
+local function SetCameraTransform(x, y, z, pitch, yaw, roll)
+    pcall(function()
+        local PC = GetActiveController()
+        if PC and PC:IsValid() then
+            PC.ControlRotation = { Pitch = pitch, Yaw = yaw, Roll = roll }
+            PC:ConsoleCommand('FOV 125.0', true)
+            
+            -- THE BULLETPROOF TELEPORT
+            local teleportCmd = string.format("BugItGo %f %f %f %f %f %f", x, y, z, pitch, yaw, roll)
+            PC:ConsoleCommand(teleportCmd, true)
+            
+            local function ForceMoveActor(actorToMove)
+                if actorToMove and actorToMove:IsValid() then
+                    pcall(function()
+                        local root = actorToMove.RootComponent
+                        if root and root:IsValid() then
+                            if root.SetSimulatePhysics then root:SetSimulatePhysics(false) end
+                            if root.SetCollisionEnabled then root:SetCollisionEnabled(0) end
+                            if root.SetEnableGravity then root:SetEnableGravity(false) end
+                        end
+                        actorToMove:K2_SetActorLocation({ X = x, Y = y, Z = z }, false, {}, true)
+                        actorToMove:K2_SetActorRotation({ Pitch = pitch, Yaw = yaw, Roll = roll }, true)
+                    end)
+                end
+            end
+            
+            local CamPawn = GetCameraActor(PC)
+            if not CamPawn or not CamPawn:IsValid() then CamPawn = PC.Pawn end
+            if not CamPawn or not CamPawn:IsValid() then CamPawn = FindFirstOf("DebugCameraPawn") end
+            if not CamPawn or not CamPawn:IsValid() then CamPawn = FindFirstOf("SpectatorPawn") end
+            
+            ForceMoveActor(CamPawn)
+            ForceMoveActor(PC:GetViewTarget())
+        end
+    end)
+end
+
+local function HideAllWidgetsSafe()
+    pcall(function()
+        local Controllers = FindAllOf("PlayerController")
+        if Controllers then
+            for i = 1, #Controllers do
+                local c = Controllers[i]
+                if c and c:IsValid() then
+                    if c.MyHUD and c.MyHUD:IsValid() then
+                        c.MyHUD.bShowHUD = false
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function ConfigureCleanVisuals()
+    RunConsoleCmd("ShowFlag.HUD 0")
+    RunConsoleCmd("ShowFlag.LUI 0")
+    RunConsoleCmd("ShowFlag.Slate 0")
+    RunConsoleCmd("ShowFlag.WidgetComponents 0")
+    RunConsoleCmd("r.MotionBlurQuality 0")
+    RunConsoleCmd("r.DepthOfFieldQuality 0")
+    RunConsoleCmd("r.FilmGrain 0")
+    HideAllWidgetsSafe()
+end
+
+local function RestoreVisuals()
+    RunConsoleCmd("ShowFlag.HUD 1")
+    RunConsoleCmd("ShowFlag.LUI 1")
+    RunConsoleCmd("ShowFlag.Slate 1")
+    RunConsoleCmd("ShowFlag.WidgetComponents 1")
+    RunConsoleCmd("r.MotionBlurQuality 4")
+    RunConsoleCmd("r.FilmGrain 1")
+    pcall(function()
+        local Controllers = FindAllOf("PlayerController")
+        if Controllers then
+            for i = 1, #Controllers do
+                local c = Controllers[i]
+                if c and c:IsValid() then
+                    if c.MyHUD and c.MyHUD:IsValid() then
+                        c.MyHUD.bShowHUD = true
+                    end
+                end
+            end
+        end
+    end)
+end
+
+local function ReadStatus()
+    local file = io.open(STATUS_FILE_PATH, "r")
+    if file then
+        local content = file:read("*all")
+        file:close()
+        if content then return content:match("^%s*(.-)%s*$") end
+    end
+    return nil
+end
+
+local function WriteStatus(statusText)
+    local file, err = io.open(STATUS_FILE_PATH, "w")
+    if file then
+        file:write(statusText)
+        file:close()
+    else
+        print("[TalonDataset] Error writing status: " .. tostring(err))
+    end
+end
+
+-- CDO AVOIDANCE LOGIC - ONLY FINDS THE REAL TALON
+local function FindActiveTalon()
+    local drones = FindAllOf("BPP_AIDroneTalon_C") or {}
+    for i = 1, #drones do
+        local drone = drones[i]
+        if drone and drone:IsValid() then
+            local name = ""
+            pcall(function() name = drone:GetName() end)
+            if name and not name:find("Default__") then
+                local isDestroying = false
+                pcall(function() isDestroying = drone.bActorIsBeingDestroyed end)
+                local isHidden = false
+                pcall(function() isHidden = drone:IsHidden() end)
+                if not isDestroying and not isHidden then
+                    local s, _ = pcall(function() return drone:K2_GetActorLocation() end)
+                    if s then
+                        return drone
+                    end
+                end
+            end
+        end
+    end
+    return nil
+end
+
+local function ProcessStateMachine()
+    if state == "INIT" then
+        WriteStatus("OFFLINE")
+        state = "WAITING_FOR_DRONE"
+        
+    elseif state == "WAITING_FOR_DRONE" then
+        local status = ReadStatus()
+        if status == "WAITING_START" or (status and status:sub(1, 5) == "READY") or (status and status:sub(1, 4) == "DONE") then
+            visualsRestored = false
+            local found = FindActiveTalon()
+            if found then
+                talonActor = found
+                state = "FREEZE_AND_PREPARE"
+            end
+        else
+            if not visualsRestored then
+                pcall(function()
+                    -- THIS MUST FIND THE ACTIVE TALON TO UNFREEZE IT
+                    local found = FindActiveTalon()
+                    if found and found:IsValid() then
+                        found.CustomTimeDilation = 1.0
+                    end
+                end)
+                local PC = GetActiveController()
+                if PC and PC:IsValid() then RestoreCameraActor(PC) end
+                RestoreVisuals()
+                talonActor = nil
+                visualsRestored = true
+                uiHidden = false
+            end
+        end
+        
+    elseif state == "FREEZE_AND_PREPARE" then
+        local activeTalon = FindActiveTalon()
+        if activeTalon then
+            talonActor = activeTalon
+        else
+            talonActor = nil
+            state = "WAITING_FOR_DRONE"
+            uiHidden = false
+            return
+        end
+        
+        anchorLocation = talonActor:K2_GetActorLocation()
+        
+        local PC = GetActiveController()
+        if PC and PC:IsValid() then
+            originalViewTarget = PC:GetViewTarget()
+            local camActor = GetCameraActor(PC)
+            if camActor and camActor:IsValid() then
+                originalCamActor = camActor
+                originalCamLocation = camActor:K2_GetActorLocation()
+                pcall(function() PC:SetViewTarget(originalCamActor) end)
+            end
+        end
+        
+        talonActor.CustomTimeDilation = 0.0
+        
+        if not uiHidden then
+            ConfigureCleanVisuals()
+            uiHidden = true
+        end
+        
+        local dist = 400 + math.random(-50, 50)
+        local pitch = math.random(-25, 25)
+        local yaw = math.random(0, 360)
+        local roll = math.random(-5, 5)
+        
+        local radPitch = math.rad(pitch)
+        local radYaw = math.rad(yaw)
+        
+        local camX = anchorLocation.X - (dist * math.cos(radPitch) * math.cos(radYaw))
+        local camY = anchorLocation.Y - (dist * math.cos(radPitch) * math.sin(radYaw))
+        local camZ = anchorLocation.Z - (dist * math.sin(radPitch))
+        
+        local lookRot = CalculateLookAtRotation({X=camX, Y=camY, Z=camZ}, anchorLocation)
+        lookRot.Roll = roll
+        
+        SetCameraTransform(camX, camY, camZ, lookRot.Pitch, lookRot.Yaw, lookRot.Roll)
+        
+        currentCamX = camX
+        currentCamY = camY
+        currentCamZ = camZ
+        currentLookRot = lookRot
+        
+        state = "WAIT_FOR_RENDER"
+        
+    elseif state == "WAIT_FOR_RENDER" then
+        if not talonActor or not talonActor:IsValid() then
+            state = "WAITING_FOR_DRONE"
+            uiHidden = false
+            return
+        end
+        
+        local PC = GetActiveController()
+        if not PC or not PC:IsValid() then
+            state = "WAITING_FOR_DRONE"
+            uiHidden = false
+            return
+        end
+        
+        SetCameraTransform(currentCamX, currentCamY, currentCamZ, currentLookRot.Pitch, currentLookRot.Yaw, currentLookRot.Roll)
+        
+        local droneRot = talonActor:K2_GetActorRotation()
+        local readySignal = string.format([[{"status":"READY","drone_location":{"x":%.2f,"y":%.2f,"z":%.2f},"drone_rotation":{"pitch":%.2f,"yaw":%.2f,"roll":%.2f},"camera_location":{"x":%.2f,"y":%.2f,"z":%.2f},"camera_rotation":{"pitch":%.2f,"yaw":%.2f,"roll":%.2f},"camera_fov":125.0}]],
+            anchorLocation.X, anchorLocation.Y, anchorLocation.Z,
+            droneRot.Pitch, droneRot.Yaw, droneRot.Roll,
+            currentCamX, currentCamY, currentCamZ,
+            currentLookRot.Pitch, currentLookRot.Yaw, currentLookRot.Roll)
+        
+        WriteStatus(readySignal)
+        state = "WAIT_FOR_PYTHON"
+        
+    elseif state == "WAIT_FOR_PYTHON" then
+        if not talonActor or not talonActor:IsValid() then
+            state = "WAITING_FOR_DRONE"
+            uiHidden = false
+            return
+        end
+        
+        SetCameraTransform(currentCamX, currentCamY, currentCamZ, currentLookRot.Pitch, currentLookRot.Yaw, currentLookRot.Roll)
+        
+        local status = ReadStatus()
+        if status and status:sub(1, 4) == "DONE" then
+            state = "FREEZE_AND_PREPARE"
+        elseif status == "OFFLINE" then
+            talonActor.CustomTimeDilation = 1.0
+            state = "WAITING_FOR_DRONE"
+        end
+    end
+end
+
+LoopAsync(TICK_INTERVAL_MS, function()
+    pcall(ProcessStateMachine)
+end)
+"@
+$script | Out-File -FilePath "C:\Users\Zeylo\Desktop\Drones of War Teknofest\DronesOfWar\Binaries\Win64\ue4ss\Mods\TalonDatasetGenerator\Scripts\main.lua" -Encoding UTF8

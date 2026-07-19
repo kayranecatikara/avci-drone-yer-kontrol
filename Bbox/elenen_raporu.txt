@@ -1,0 +1,5 @@
+Elenen ciftler (kaynak klasor | dosya | sebep)
+============================================================
+4 | far_3374 | K3: sadece 3/3 nokta kare içinde
+4 | far_3389 | K4: talon yazıların arkasında (kutuda 44 px OSD yazısı)
+4 | far_3395 | K4: talon yazıların arkasında (kutuda 65 px OSD yazısı)

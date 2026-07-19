@@ -1,0 +1,1 @@
+Talon Actor: BPP_AIDroneTalon_C /Game/YellowBladesLandscape/Maps/Overview/L_TeknofestSavasanIha.L_TeknofestSavasanIha:PersistentLevel.BPP_AIDroneTalon_C_2147481344

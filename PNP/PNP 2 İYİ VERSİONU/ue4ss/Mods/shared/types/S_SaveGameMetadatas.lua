@@ -1,0 +1,13 @@
+---@meta
+
+---@class FS_SaveGameMetadatas
+---@field SaveDisplayName_36_18991BD04E8FC0F0034FB1B06D2BF712 FText
+---@field SaveUniqueName_32_F76D285A455F5984A36006A9CE953A07 FString
+---@field Date_11_C942CDDC43FF8C7B85491C815B4213E0 FDateTime
+---@field Level_21_695CD24945849F1ACCE62C89B973AEA9 FName
+---@field PlayTime_33_4424113E400047248CBD949D157F9D6D int32
+---@field GameVersion_39_79F2C7634FB7C0B64F52C4ABF6DC38C8 FString
+local FS_SaveGameMetadatas = {}
+
+
+

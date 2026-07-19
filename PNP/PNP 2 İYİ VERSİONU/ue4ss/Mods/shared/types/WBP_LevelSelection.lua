@@ -1,0 +1,55 @@
+---@meta
+
+---@class UWBP_LevelSelection_C : UUserWidget
+---@field UberGraphFrame FPointerToUberGraphFrame
+---@field ScrollBox_Attack UScrollBox
+---@field ScrollBox_Fiber UScrollBox
+---@field ScrollBox_Race UScrollBox
+---@field ScrollBox_Training UScrollBox
+---@field WBP_EGUI_CommonHeader UWBP_EGUI_CommonHeader_C
+---@field WBP_MapCard_AcroArea UWBP_MenuCard_C
+---@field WBP_MapCard_Beach UWBP_MenuCard_C
+---@field WBP_MapCard_Jungle UWBP_MenuCard_C
+---@field WBP_MapCard_KartingCircuits UWBP_MenuCard_C
+---@field WBP_MapCard_MilitaryAirport UWBP_MenuCard_C
+---@field WBP_MapCard_NetRural UWBP_MenuCard_C
+---@field WBP_MapCard_Peak UWBP_MenuCard_C
+---@field WBP_MapCard_Pole UWBP_MenuCard_C
+---@field WBP_MapCard_RuinedCity UWBP_MenuCard_C
+---@field WBP_MapCard_Rural UWBP_MenuCard_C
+---@field WBP_MapCard_Teknofest UWBP_MenuCard_C
+---@field WBP_MapCard_Trench UWBP_MenuCard_C
+---@field WidgetSwitcher UWidgetSwitcher
+---@field ['HUD Main Menu'] AHUD_MainMenu_C
+---@field ['BP Game Instance'] UBP_GameInstance_C
+---@field OnClickAnyButton FWBP_LevelSelection_COnClickAnyButton
+---@field OnClickAnyScoreButton FWBP_LevelSelection_COnClickAnyScoreButton
+---@field ChildCardElements TArray<UWBP_MenuCard_C>
+local UWBP_LevelSelection_C = {}
+
+function UWBP_LevelSelection_C:ShowGlitchEffect() end
+function UWBP_LevelSelection_C:Construct() end
+---@param TabIndex int32
+---@param TabName FText
+---@param TabCultureInvariantName FString
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_EGUI_CommonHeader_K2Node_ComponentBoundEvent_3_NewTabSelected__DelegateSignature(TabIndex, TabName, TabCultureInvariantName) end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_K2Node_ComponentBoundEvent_0_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_1_K2Node_ComponentBoundEvent_1_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_2_K2Node_ComponentBoundEvent_2_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_3_K2Node_ComponentBoundEvent_4_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_4_K2Node_ComponentBoundEvent_5_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_5_K2Node_ComponentBoundEvent_6_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_6_K2Node_ComponentBoundEvent_7_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_7_K2Node_ComponentBoundEvent_8_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_8_K2Node_ComponentBoundEvent_9_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_9_K2Node_ComponentBoundEvent_10_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_10_K2Node_ComponentBoundEvent_11_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:BndEvt__WBP_LevelSelection_WBP_MapCard_11_K2Node_ComponentBoundEvent_12_OnClicked__DelegateSignature() end
+function UWBP_LevelSelection_C:SetSelectedButton() end
+function UWBP_LevelSelection_C:CreateMenuCardList() end
+---@param EntryPoint int32
+function UWBP_LevelSelection_C:ExecuteUbergraph_WBP_LevelSelection(EntryPoint) end
+function UWBP_LevelSelection_C:OnClickAnyScoreButton__DelegateSignature() end
+function UWBP_LevelSelection_C:OnClickAnyButton__DelegateSignature() end
+
+

@@ -1,0 +1,313 @@
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_Date | METIN=29/12/25
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_DateTime | METIN=21:59
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_FailCrash | METIN=21
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_SuccessScore | METIN=22
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_TotalCrash | METIN=50
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardItem.WBP_ScoreboardItem_C:WidgetTree.TextBlock_TotalTime | METIN=29:18
+VIS=false | TextBlock /Game/Game/Widget/Kill/WBP_KillFeedItem.WBP_KillFeedItem_C:WidgetTree.TextBlock_Enemy | METIN=Soldier
+VIS=false | TextBlock /Game/Game/Widget/Kill/WBP_KillFeedItem.WBP_KillFeedItem_C:WidgetTree.TextBlock_EnemyCount | METIN=FText: 00000241D82309E8
+VIS=false | TextBlock /Game/Game/Widget/Kill/WBP_KillFeedItem.WBP_KillFeedItem_C:WidgetTree.TextBlock_PlayerName | METIN=hod
+VIS=false | TextBlock /Game/Game/Widget/WBP_SettingsRows.WBP_SettingsRows_C:WidgetTree.RowName | METIN=Text Block
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_WarningInfo.WBP_WarningInfo_C:WidgetTree.Text_Warning | METIN=WARNING!
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_WarningInfo.WBP_WarningInfo_C:WidgetTree.TextBlock_Info | METIN=INFORMATION
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsOption.WBP_SettingsOption_C:WidgetTree.SelectionText | METIN=Text Block
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsOption.WBP_SettingsOption_C:WidgetTree.TextBlock | METIN=>
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsOption.WBP_SettingsOption_C:WidgetTree.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Game/EasyGameUI/Core/CommonWidgets/WBP_EGUI_CommonText.WBP_EGUI_CommonText_C:WidgetTree.TextWidget | METIN=Default
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date | METIN=Date
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date_1 | METIN=Hour
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date_2 | METIN=Success
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date_3 | METIN=Fail
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date_4 | METIN=Crash
+VIS=false | TextBlock /Game/Game/Widget/Scoreboard/WBP_ScoreboardBase.WBP_ScoreboardBase_C:WidgetTree.TextBlock_Date_5 | METIN=Time
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_Spectator.WBP_Spectator_C:WidgetTree.TextBlock_59 | METIN=To spawn the drone: Press "E" key
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_CompletedLevel.WBP_CompletedLevel_C:WidgetTree.Text_MissionCompleted | METIN=MISSION COMPLETED
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_CompletedLevel.WBP_CompletedLevel_C:WidgetTree.Text_MissionFailed | METIN=MISSION FAILED
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.Text_MapName | METIN=Beach
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.TextBlock_1 | METIN=Type:
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.TextBlock_112 | METIN=Map:
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.TextBlock_3 | METIN=UAV:
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.TextBlock_Type | METIN=Training
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SelectedOptions.WBP_SelectedOptions_C:WidgetTree.TextBlock_UAV | METIN=Skydagger Toyca
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_LoadingScreenSelf.WBP_LoadingScreenSelf_C:WidgetTree.Text_LoadingPercent | METIN=100%
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_LoadingScreenSelf.WBP_LoadingScreenSelf_C:WidgetTree.TextBlock_355 | METIN=LOADING
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_LoadingScreenSelf.WBP_LoadingScreenSelf_C:WidgetTree.TextBlock_MapName | METIN=MAP NAME
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.Text_CalibrationAssigned | METIN=ASSIGNED!
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.Text_CalibrationInfo | METIN=Start Calibration
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.Text_CalibrationNotAssigned | METIN=NOT ASSIGNED!
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.Text_CalibrationSaved | METIN=SAVED
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.Text_CalibrationTimer | METIN=0.0
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock | METIN=Roll
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_1 | METIN=Respawn
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_10 | METIN=Pitch
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_11 | METIN=Throttle
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_112 | METIN=Roll
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_12 | METIN=Yaw
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_13 | METIN=Flight Mode
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_14 | METIN=Lock Kit
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_2 | METIN=Arm
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_281 | METIN=Reverse
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_3 | METIN=Spawn
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_4 | METIN=Impact
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_5 | METIN=Thermal
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_6 | METIN=Trigger
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_7 | METIN=Yaw
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_8 | METIN=Throttle
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_ControlMenu.WBP_ControlMenu_C:WidgetTree.TextBlock_9 | METIN=Pitch
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.Text | METIN=Pitch Axis Speed
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.Text_1 | METIN=Yaw Axis Speed
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.Text_Brightness | METIN=BRIGHTNESS
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.Text_FOV | METIN=Field of View
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.Text_FOV_1 | METIN=Deadzone
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock | METIN=RC Expo Roll
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_1 | METIN=Roll Axis Speed
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_2 | METIN=MUSIC VOLUME
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_25 | METIN=SFX VOLUME
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_26 | METIN=OVERALL GRAPHICS QUALITY
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_27 | METIN=ANTI ALIASING
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_28 | METIN=SHADOWS
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_29 | METIN=TEXTURES
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_30 | METIN=SHADERS
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_31 | METIN=VIEW DISTANCE
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_32 | METIN=VSYNC
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_34 | METIN=POST PROCESSING
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_35 | METIN=FOLIAGE
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_36 | METIN=GLOBAL ILLUMINATION
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_37 | METIN=REFLECTIONS
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_38 | METIN=EFFECTS
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_4 | METIN=WINDOW MODE
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_5 | METIN=RESOLUTION
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_7 | METIN=RC Expo Pitch
+VIS=false | TextBlock /Game/Game/Widget/Menu/WBP_SettingsMenu.WBP_SettingsMenu_C:WidgetTree.TextBlock_8 | METIN=RC Expo Yaw
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_AIDrone | METIN=Drone
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Controller | METIN=Controller Name
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_ControllerName | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_ControllerType | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_Drone | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_FixedGun | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_Heavy | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_Helicopter | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_Soldier | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Count_Vehicle | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Crash | METIN=Total Crash
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Crash_1 | METIN=Controller
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_CrashC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Drone | METIN=Drone
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_DroneType | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_EnemyKilled | METIN=Enemy Killed
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_EnemyKilledC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_EnemyLeft | METIN=Enemy Left
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_EnemyLeftC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Explosive | METIN=Explosive
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_ExplosiveType | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Fail | METIN=Fail Kamikaze
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_FailC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Fixed_Gun | METIN=Fixed Gun Battery
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Heavy | METIN=Heavy
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Helicopter | METIN=Helicopter
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Map | METIN=Map
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_MapMode | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_MapName | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Mode | METIN=Mode
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Soldier | METIN=Soldier
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Success | METIN=Success Kamikaze
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_SuccessC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_TotalEnemy | METIN=Total Enemy
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_TotalEnemyC | METIN=Null
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.Text_Vehicle | METIN=Vehicle
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.TextBlock_279 | METIN=INFORMATION BOARD
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.TextBlock_CurrentTime | METIN=Elapsed Time
+VIS=false | TextBlock /Game/Game/Widget/WBP_ScoreBoard.WBP_ScoreBoard_C:WidgetTree.TextBlock_MapType | METIN=Game Informations
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_AirSpeed | METIN=109kmh
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_AirSpeed_1 | METIN=A
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_AirSpeed_2 | METIN=S
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_ALTValue | METIN=00
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Arm_Notice | METIN=Set throttle to correct position to arm
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Battery_1 | METIN=4.20v
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Battery_2 | METIN=25.2v
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Current1 | METIN=26.3A
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Current2 | METIN=17.7A
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Distance | METIN=-10
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_DistanceInitial | METIN=DIST
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_DistanceValue | METIN=0m
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_FlightMode | METIN=Mode: ANGL AIR
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_GroundSpeed | METIN=97kmh
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_GroundSpeedG | METIN=G
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_GroundSpeeds | METIN=S
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Heading | METIN=260°
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Hover | METIN=8.00A
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_LOW_VOLTAGE | METIN=LOW VOLTAGE
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_LQ | METIN=2:100
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_LQ_1 | METIN=LQ
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Navigation | METIN=>
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_RaceCheckpoint | METIN=0/64
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_RaceTimer | METIN=00:00.00
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_RX_LOSS | METIN=RX LOSS
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_SPD | METIN=SPD
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Speed | METIN=0kmh
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_ThrottlePercent | METIN=100%
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Timer_ | METIN=:
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Timer_Mİnutes | METIN=00
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.Text_Timer_Seconds | METIN=00
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.TextBlock_0 | METIN=FINISH
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.TextBlock_ALT | METIN=ALT
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.TextBlock_Arm | METIN=DISARMED
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.TextBlock_FLYMIN | METIN=fly min
+VIS=false | TextBlock /Game/Game/Widget/Game/WBP_MainUAV.WBP_MainUAV_C:WidgetTree.TextBlock_Trigger | METIN=TRIGGER:NOT READY
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.TextBlock_279 | METIN=INFORMATION BOARD
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_ControllerType | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_ControllerName | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_ExplosiveType | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_DroneType | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_MapName | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_MapMode | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Crash_1 | METIN=Controller
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Controller | METIN=Controller Name
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Explosive | METIN=Explosive
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Drone | METIN=Drone
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Map | METIN=Map
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Mode | METIN=Mode
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_Drone | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_FixedGun | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_Helicopter | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_Heavy | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_Soldier | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Count_Vehicle | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_AIDrone | METIN=Drone
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Fixed_Gun | METIN=Fixed Gun Battery
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Helicopter | METIN=Helicopter
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Heavy | METIN=Heavy
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Soldier | METIN=Soldier
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Vehicle | METIN=Vehicle
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_CrashC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_FailC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_SuccessC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_EnemyLeftC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_EnemyKilledC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_TotalEnemyC | METIN=Null
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Crash | METIN=Total Crash
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Fail | METIN=Fail Kamikaze
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_Success | METIN=Success Kamikaze
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_EnemyLeft | METIN=Enemy Left
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_EnemyKilled | METIN=Enemy Killed
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.Text_TotalEnemy | METIN=Total Enemy
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.TextBlock_CurrentTime | METIN=Elapsed Time
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_ScoreBoard_C_2147481347.WidgetTree_2147481346.TextBlock_MapType | METIN=Game Informations
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Btn_APPLY.WidgetTree_2147481363.ButtonText.WidgetTree_2147481362.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Btn_Reset.WidgetTree_2147481365.ButtonText.WidgetTree_2147481364.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Btn_MENU.WidgetTree_2147481367.ButtonText.WidgetTree_2147481366.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Btn_CONFIRM.WidgetTree_2147481369.ButtonText.WidgetTree_2147481368.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WBP_EGUI_CommonHeader.WidgetTree_2147481373.TitleText.WidgetTree_2147481370.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ViewDistanceSettingsOption.WidgetTree_2147481376.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ViewDistanceSettingsOption.WidgetTree_2147481376.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ViewDistanceSettingsOption.WidgetTree_2147481376.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadersSettingsOption.WidgetTree_2147481379.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadersSettingsOption.WidgetTree_2147481379.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadersSettingsOption.WidgetTree_2147481379.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.FoliageSettingsOption.WidgetTree_2147481382.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.FoliageSettingsOption.WidgetTree_2147481382.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.FoliageSettingsOption.WidgetTree_2147481382.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.EffectsSettingsOption.WidgetTree_2147481385.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.EffectsSettingsOption.WidgetTree_2147481385.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.EffectsSettingsOption.WidgetTree_2147481385.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TexturesSettingsOption.WidgetTree_2147481388.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TexturesSettingsOption.WidgetTree_2147481388.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TexturesSettingsOption.WidgetTree_2147481388.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ReflectionsSettingsOption.WidgetTree_2147481391.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ReflectionsSettingsOption.WidgetTree_2147481391.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ReflectionsSettingsOption.WidgetTree_2147481391.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.IlluminationSettingsOption.WidgetTree_2147481394.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.IlluminationSettingsOption.WidgetTree_2147481394.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.IlluminationSettingsOption.WidgetTree_2147481394.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadowsSettingsOption.WidgetTree_2147481397.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadowsSettingsOption.WidgetTree_2147481397.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ShadowsSettingsOption.WidgetTree_2147481397.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.PostProcessingSettingsOption.WidgetTree_2147481400.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.PostProcessingSettingsOption.WidgetTree_2147481400.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.PostProcessingSettingsOption.WidgetTree_2147481400.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.AntiAliasingSettingsOption.WidgetTree_2147481403.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.AntiAliasingSettingsOption.WidgetTree_2147481403.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.AntiAliasingSettingsOption.WidgetTree_2147481403.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.OverallGraphicsSettingsOption.WidgetTree_2147481406.SelectionText | METIN=Low
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.OverallGraphicsSettingsOption.WidgetTree_2147481406.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.OverallGraphicsSettingsOption.WidgetTree_2147481406.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.V-SYNCOption.WidgetTree_2147481409.SelectionText | METIN=On
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.V-SYNCOption.WidgetTree_2147481409.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.V-SYNCOption.WidgetTree_2147481409.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ResolutionMode.WidgetTree_2147481412.SelectionText | METIN=Text Block
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ResolutionMode.WidgetTree_2147481412.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.ResolutionMode.WidgetTree_2147481412.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeOption.WidgetTree_2147481415.SelectionText | METIN=Windowed Fullscreen
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeOption.WidgetTree_2147481415.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeOption.WidgetTree_2147481415.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeSettingsOption_1.WidgetTree_2147481418.SelectionText | METIN=Text Block
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeSettingsOption_1.WidgetTree_2147481418.TextBlock | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WindowModeSettingsOption_1.WidgetTree_2147481418.TextBlock_79 | METIN=<
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.WBP_SettingsRows.WidgetTree_2147481419.RowName | METIN=Text Block
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_2 | METIN=MUSIC VOLUME
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_25 | METIN=SFX VOLUME
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Text_FOV_1 | METIN=Deadzone
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Text_FOV | METIN=Field of View
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Text_1 | METIN=Yaw Axis Speed
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Text | METIN=Pitch Axis Speed
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_1 | METIN=Roll Axis Speed
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_8 | METIN=RC Expo Yaw
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_7 | METIN=RC Expo Pitch
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock | METIN=RC Expo Roll
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_31 | METIN=VIEW DISTANCE
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_30 | METIN=SHADERS
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_35 | METIN=FOLIAGE
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_38 | METIN=EFFECTS
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_29 | METIN=TEXTURES
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_37 | METIN=REFLECTIONS
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_36 | METIN=GLOBAL ILLUMINATION
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_28 | METIN=SHADOWS
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_34 | METIN=POST PROCESSING
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_27 | METIN=ANTI ALIASING
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_26 | METIN=OVERALL GRAPHICS QUALITY
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.Text_Brightness | METIN=BRIGHTNESS
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_32 | METIN=VSYNC
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_5 | METIN=RESOLUTION
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_SettingsMenu_C_2147481421.WidgetTree_2147481420.TextBlock_4 | METIN=WINDOW MODE
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_RaceCheckpoint | METIN=0/64
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_RaceTimer | METIN=00:00.00
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.TextBlock_0 | METIN=FINISH
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Arm_Notice | METIN=Set throttle to correct position to arm
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.TextBlock_Trigger | METIN=TRIGGER:NOT READY
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.TextBlock_Arm | METIN=DISARMED
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_LOW_VOLTAGE | METIN=LOW VOLTAGE
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_RX_LOSS | METIN=RX LOSS
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_FlightMode | METIN=Mode: ANGL AIR
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_LQ_1 | METIN=LQ
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_LQ | METIN=2:100
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Distance | METIN=-10
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Heading | METIN=9°
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Hover | METIN=8.00A
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Current2 | METIN=12.00A
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Current1 | METIN=50.00A
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_GroundSpeed | METIN=0kmh
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Navigation | METIN=>
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_GroundSpeeds | METIN=S
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_GroundSpeedG | METIN=G
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_AirSpeed_2 | METIN=S
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_AirSpeed_1 | METIN=A
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_AirSpeed | METIN=0kmh
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Battery_1 | METIN=4.20v
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_ThrottlePercent | METIN=50%
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Battery_2 | METIN=25.2v
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Timer_Seconds | METIN=00
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Timer_ | METIN=:
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Timer_Mİnutes | METIN=00
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.TextBlock_FLYMIN | METIN=fly min
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_DistanceValue | METIN=0m
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_DistanceInitial | METIN=DIST
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_Speed | METIN=0kmh
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_SPD | METIN=SPD
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.Text_ALTValue | METIN=0m
+VIS=true | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_MainUAV_C_2147481435.WidgetTree_2147481434.TextBlock_ALT | METIN=ALT
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_Spectator_C_2147481438.WidgetTree_2147481437.TextBlock_59 | METIN=To spawn the drone: Press "E" key
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_CompletedLevel_C_2147481444.WidgetTree_2147481443.Btn_PlayAgain.WidgetTree_2147481440.ButtonText.WidgetTree_2147481439.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_CompletedLevel_C_2147481444.WidgetTree_2147481443.Btn_MENU.WidgetTree_2147481442.ButtonText.WidgetTree_2147481441.TextWidget | METIN=Default
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_CompletedLevel_C_2147481444.WidgetTree_2147481443.Text_MissionFailed | METIN=MISSION FAILED
+VIS=false | TextBlock /Engine/Transient.GameEngine_2147482618:BP_GameInstance_C_2147482572.WBP_CompletedLevel_C_2147481444.WidgetTree_2147481443.Text_MissionCompleted | METIN=MISSION COMPLETED
+VIS=false | RichTextBlock /Game/EasyGameUI/Core/CommonWidgets/WBP_EGUI_CommonRichText.WBP_EGUI_CommonRichText_C:WidgetTree.RichText | METIN=FText: 00000241D82309E8

@@ -1,0 +1,27 @@
+Selam Claude, ben Talon (İHA) için YOLO pose estimation veri seti oluşturuyorum.
+Bunun için Unreal Engine oyun motoru içindeki Talon dronunu çeşitli açılardan çekip 6 adet kritik nokta (burun, kuyruk, kanat uçları vs.) çıkartıyorum.
+
+Oyun içindeki drone objemiz standart `RAW_CAD_DATA` koordinatlarına sahip, ancak bu drone oyunda **1.422 kat büyütülmüş** (scale = 1.422) olarak kullanılıyor. 
+Orijinal (Scale EDİLMEMİŞ) CAD datası şuydu:
+      "nose": {"x": 69.13, "y": 0.19, "z": -2.77},
+      "left_wingtip": {"x": 1.65, "y": -99.93, "z": 5.81},
+      "right_wingtip": {"x": 1.65, "y": 99.93, "z": 5.81},
+      "tail": {"x": -55.38, "y": 0.10, "z": 0.10},
+      "left_tail_fin": {"x": -43.17, "y": -28.25, "z": 16.98},
+      "right_tail_fin": {"x": -43.17, "y": 28.25, "z": 16.98}
+
+`draw_keypoints.py` isimli görselleştirme scriptimiz, bu noktaları okuyup içerde **1.422 ile çarparak** 2D (u,v) piksellerine çeviriyordu ve **sonuçlar çektiğimiz fotoğrafların üzerinde kusursuz görünüyordu.** 
+
+Ancak çok büyük bir hata fark ettik:
+Fotoğraf çekildiği anda JSON dosyalarını üreten `capture_controller.py` isimli ana script, **1.422 ile ÇARPMADAN** (veya yanlış scale edilmiş verilerle) işlem yapıp, 49.476 gibi hatalı oluşan yanlış 2D noktaları JSON içine kaydediyormuş!
+Yani resimlerin üstüne draw_keypoints ile çizdirince noktalar harika duruyor (çünkü draw_keypoints 1.422'yi uyguluyor), ancak YOLO eğitiminde direkt koordinatlar okunacağı için, JSON içindeki 2D eğitim seti baştan aşağı kayık ve hatalıymış!
+
+Bunu fark ettiğimiz anda, AI asistanım Antigravity şu adımları attı:
+1. `capture_controller_yeni.py` ve `keypoint_editor.py` içindeki lokal keypointleri doğrudan 1.422 ile çarpılmış (draw_keypoints ile birebir aynı olan) gerçek Burun x = koordinatlarla güncelledi (Örn: 69.13 * 1.422 = 98.30).
+2. Bugüne kadar çekilmiş ve `FİNİSH\jsonlar` klasöründe bulunan bütün **hatalı JSON dosyalarını onarmak için** bir script yazdı.
+3. Bu onarım script'i; hatalı JSON dosyalarını tek tek açıyor, içindeki doğru olan `drone_location`, `drone_rotation`, `camera_location` ve Sonra bizim o `camera_rotation` verilerini alıyor. 1.422 katı alınmış kusursuz CAD verilerini kullanarak 2D projection'ı baştan matematiksel olarak tekrar hesaplıyor ve JSON içindeki o hatalı `keypoints_2d` array'ini onarılmış haliyle **üzerine yazıyor (overwrite)** (Öncesinde yedek alarak).
+
+**Senden İsteğim:**
+Antigravity'nin uyguladığı bu "hatalı JSON dosyalarını geriye dönük olarak 1.422 scale edilmiş doğru koordinatlarla ve JSON içindeki baştan hesaplama (recalculate) orijinal kamera pozisyonlarıyla işlemi" YOLO veri seti pipeline'ımız için %100 mantıklı ve hayat kurtarıcı bir müdahale midir? `draw_keypoints.py`'nin çizimlerinde kusursuz sonuç veren bu noktaların (1.422 scale edilmiş halinin), direkt olarak jsonlara da aynı kalibrasyonla gömülmesi doğru bir hareket midir?
+
+Lütfen bu süreci matematiksel ve veri seti bütünlüğü açısından kontrol edip, bana Zeylo olarak Antigravity'ye onay verip bir geri bildirim vermemem gerektiği konusunda ver.

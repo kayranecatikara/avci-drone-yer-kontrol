@@ -1,0 +1,8 @@
+Lua tick started. Status: WAITING_START_12
+Step 1: Drone found
+Lua tick started. Status: WAITING_START_25
+Step 1: Drone found
+Lua tick started. Status: WAITING_START
+Step 1: Drone found
+Lua tick started. Status: WAITING_START
+Step 1: Drone found

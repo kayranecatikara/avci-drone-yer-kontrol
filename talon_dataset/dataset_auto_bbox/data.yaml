@@ -1,0 +1,6 @@
+path: C:\Users\Zeylo\Desktop\talon_dataset\dataset_auto_bbox
+train: images
+val: images
+
+names:
+  0: talon

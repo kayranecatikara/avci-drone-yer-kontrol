@@ -1,0 +1,22 @@
+CheatManagerEnablerMod : 1
+ConsoleCommandsMod : 1
+ConsoleEnablerMod : 1
+SplitScreenMod : 0
+LineTraceMod : 0
+BPML_GenericFunctions : 1
+BPModLoaderMod : 1
+zMapGenBP : 1
+
+TalonControl : 0
+
+; Built-in keybinds, do not move up!
+Keybinds : 1
+
+TalonDatasetGenerator : 1
+TalonAutoCapture : 0
+HideHUDMod : 0
+
+AvciFOVReader : 1
+TalonRearShot : 1
+
+KeypointDrawer : 1

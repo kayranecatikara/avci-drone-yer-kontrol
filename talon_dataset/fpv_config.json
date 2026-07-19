@@ -1,0 +1,50 @@
+{
+    "global_degradation_probability": 0.8,
+    "bloom": {
+        "enabled": true,
+        "threshold": 200,
+        "blur_sigma_min": 10.0,
+        "blur_sigma_max": 25.0,
+        "intensity_min": 0.3,
+        "intensity_max": 0.8
+    },
+    "chromatic_aberration": {
+        "enabled": true,
+        "max_shift_px": 3.0
+    },
+    "softening": {
+        "enabled": true,
+        "blur_sigma_min": 0.3,
+        "blur_sigma_max": 1.2
+    },
+    "vignette": {
+        "enabled": true,
+        "intensity_min": 0.2,
+        "intensity_max": 0.6
+    },
+    "color_grade": {
+        "enabled": true,
+        "saturation_min": 0.5,
+        "saturation_max": 0.9,
+        "contrast_min": 0.8,
+        "contrast_max": 1.1,
+        "wb_shift_min": -15,
+        "wb_shift_max": 15
+    },
+    "scanline": {
+        "enabled": true,
+        "amplitude_min": 0.03,
+        "amplitude_max": 0.08,
+        "frequency": 1.5
+    },
+    "noise": {
+        "enabled": true,
+        "sigma_min": 3.0,
+        "sigma_max": 12.0
+    },
+    "jpeg_compression": {
+        "enabled": true,
+        "quality_min": 60,
+        "quality_max": 90
+    }
+}

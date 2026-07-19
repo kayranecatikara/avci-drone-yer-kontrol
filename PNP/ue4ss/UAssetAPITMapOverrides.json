@@ -1,0 +1,134 @@
+{
+   "AssetPathToHashes": [
+      "SoftObjectPath",
+      null
+   ],
+   "AttributeCurves": [
+      "AnimationAttributeIdentifier",
+      "AttributeCurve"
+   ],
+   "BindingIdToReferences": [
+      "Guid",
+      null
+   ],
+   "BoneRotationOffsets": [
+      null,
+      "Quat"
+   ],
+   "BoundActorComponents": [
+      "Guid",
+      null
+   ],
+   "CookedPropertyGuids": [
+      null,
+      "Guid"
+   ],
+   "CurveConversionAssetMap": [
+      null,
+      "SoftObjectPath"
+   ],
+   "DataInterfaceStorage": [
+      "NiagaraVariableBase",
+      null
+   ],
+   "EventTracks": [
+      null,
+      "CacheEventTrack"
+   ],
+   "FunctionReferences": [
+      "SoftObjectPath",
+      null
+   ],
+   "GuidToRigDeformerInstanceMap": [
+      "Guid",
+      null
+   ],
+   "HashToAssetPaths": [
+      null,
+      "SoftObjectPath"
+   ],
+   "Hierarchy": [
+      "MovieSceneSequenceID",
+      null
+   ],
+   "Inputs_Float": [
+      null,
+      "MovieSceneFloatChannel"
+   ],
+   "KeysPressedThisTick": [
+      null,
+      "Vector"
+   ],
+   "MaterialParents": [
+      null,
+      "SoftObjectPath"
+   ],
+   "PredefinedBSDF": [
+      null,
+      "SoftObjectPath"
+   ],
+   "PredefinedEDF": [
+      null,
+      "SoftObjectPath"
+   ],
+   "PredefinedSurfaceShaders": [
+      null,
+      "SoftObjectPath"
+   ],
+   "PredefinedVDF": [
+      null,
+      "SoftObjectPath"
+   ],
+   "ResolvedDIBindings": [
+      "NiagaraVariableBase",
+      "NiagaraVariableBase"
+   ],
+   "SoftwareCursors": [
+      null,
+      "SoftClassPath"
+   ],
+   "StrToVec": [
+      null,
+      "Vector"
+   ],
+   "SubSectionRanges": [
+      "Guid",
+      "MovieSceneFrameRange"
+   ],
+   "SubSequences": [
+      "MovieSceneSequenceID",
+      null
+   ],
+   "TrackSignatureToTrackIdentifier": [
+      "Guid",
+      "MovieSceneTrackIdentifier"
+   ],
+   "Tracks": [
+      "MovieSceneTrackIdentifier",
+      null
+   ],
+   "UserDefinedEnumToPathName": [
+      null,
+      "SoftObjectPath"
+   ],
+   "UserDefinedStructGuidToPathName": [
+      null,
+      "SoftObjectPath"
+   ],
+   "UserParameterRedirects": [
+      "NiagaraVariable",
+      "NiagaraVariable"
+   ],
+   "VariableIndices": [
+      "NiagaraVariableBase",
+      null
+   ],
+   "VectorParameterValues": [
+      null,
+      "LinearColor"
+   ],
+   "WorldAssetStreamingObjects": [
+      "Guid",
+      null
+   ]
+}

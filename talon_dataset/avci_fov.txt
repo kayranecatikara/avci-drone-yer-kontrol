@@ -1,0 +1,11 @@
+=== AVCI DRONE FOV ===
+Pawn (avci drone sinifi) : ?
+View target              : ?
+Camera component         : ?
+--------------------------------------------
+EFEKTIF FOV (GetFOVAngle): 131.5445 derece   <-- DATASETTE BUNU KULLAN
+TASARIM FOV (FieldOfView): 131.5445 derece
+--------------------------------------------
+Ikisi farkliysa EFEKTIF olan gercek render edilen acidir.
+Bu FOV ile dataset cek: debug kamerada konsola 'FOV 131.5' yazarak
+serbest kamerayi ayni acya sabitleyebilirsin.

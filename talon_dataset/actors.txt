@@ -1,0 +1,13 @@
+--- DUMPING INTERESTING ACTORS ---
+
+[PlayerControllers]:
+
+[Pawns]:
+
+[CameraActors]:
+
+[PlayerController Components]:
+
+[Pawn Components]:
+
+[All Actors with interesting names]:

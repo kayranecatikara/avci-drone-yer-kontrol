@@ -1,0 +1,68 @@
+---@meta
+
+---@class UDA_EGUI_GlobalConfig_C : UPrimaryDataAsset
+---@field StylingDataAsset UDA_EGUI_GlobalStyling_C
+---@field ['AddInputMappingContextsOnLevelLoad?'] boolean
+---@field GameplayInputMappingContexts TMap<UInputMappingContext, int32>
+---@field KeybindMappingsContexts TMap<UInputMappingContext, FText>
+---@field KeybindMappingsGroupingType E_MappingsGroupingType::Type
+---@field ['SaveOperationsAllowed?'] boolean
+---@field ['LoadOperationsAllowed?'] boolean
+---@field OperationsManagerInitDelay float
+---@field LoadingScreenHideDelay double
+---@field MainMenuLevel TSoftObjectPtr<UWorld>
+---@field ['EnableAutoSaves?'] boolean
+---@field AutoSavesInterval float
+---@field MaxSlotsForAutoSaves int32
+---@field DisallowedLevelsForAutoSaves TArray<TSoftObjectPtr<UWorld>>
+---@field NewGameLevel TSoftObjectPtr<UWorld>
+---@field ['SavePlayerTranform?'] boolean
+---@field ['EnablePhotoModeInGame?'] boolean
+---@field ['PauseGameForPhotoMode?'] boolean
+---@field MaxCameraRange double
+---@field ScreenshotDirectoryType E_ScreenshotsSaveLocation::Type
+---@field ScreenshotsDirectory FString
+---@field ['CaptureThumbnailForPhotoMode?'] boolean
+---@field SlowBatchSize int32
+---@field MediumBatchSize int32
+---@field ExpensiveBatchSize int32
+---@field ['CaptureThumbnailForSaves?'] boolean
+---@field ['DisplayDLSS?'] boolean
+---@field ['DisplayFSR?'] boolean
+---@field ['DisplayXESS?'] boolean
+---@field ['DisplayFramerateCounterToggle?'] boolean
+---@field ['HideBackgroundForGraphicsOptions?'] boolean
+---@field ['EnableVSyncInputLagMitigation?'] boolean
+---@field ['IncludeAntiAliasingQualityInPreset?'] boolean
+---@field GraphicPresetToApplyOnFirstGameLaunch int32
+---@field ['DisplayGameVersionInMenus?'] boolean
+---@field CurrentGameVersion FString
+---@field ['EnableSaveFilesVersioning?'] boolean
+---@field CompatibleGameVersions TArray<FString>
+---@field GameAudioClasses TMap<E_AudioClasses::Type, TSoftObjectPtr<USoundClass>>
+---@field ['EnableGameBenchmarkingTool?'] boolean
+---@field ['EnableGameBenchmarkingToolInShippingBuild?'] boolean
+---@field ScreenshotsCaptureMethod E_ScreenshotCaptureMethod::Type
+---@field LoadingScreenBackgrounds TArray<TSoftObjectPtr<UTexture2D>>
+---@field LoadingScreenTips TArray<FText>
+---@field GameBenchmarkingLevel TSoftObjectPtr<UWorld>
+---@field ['UseDedicatedInputForGameBenchmark?'] boolean
+---@field ['DisplayGameCreditsButtonInMenus?'] boolean
+---@field GameCreditsContexts TMap<FString, FS_CreditsPresetInfos>
+---@field HudModulesDefinitionDataAsset TSoftObjectPtr<UPrimaryDataAsset>
+---@field DefaultHudContext E_HudContexts::Type
+---@field DefaultHudContextsOverrideForLevels TMap<TSoftObjectPtr<UWorld>, E_HudContexts::Type>
+---@field InteractionInputsDefinition TArray<FS_InputActionDef>
+---@field MaxInteractionDistance double
+---@field InteractionRadius float
+---@field ['SphereTraceOriginFromCamera?'] boolean
+---@field InteractableObjectTypes TArray<EObjectTypeQuery>
+---@field BlockingObjectTypes TArray<EObjectTypeQuery>
+---@field ['EnableDebug?'] boolean
+---@field ['HideHudInMainMenuLevel?'] boolean
+---@field ['HideHudInBenchmarkLevel?'] boolean
+---@field MainHudWidgetZOrder int32
+local UDA_EGUI_GlobalConfig_C = {}
+
+
+
