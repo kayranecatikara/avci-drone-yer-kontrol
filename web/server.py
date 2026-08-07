@@ -23,6 +23,12 @@ import time
 from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# OpenBLAS thread tamponlarini kisitla: varsayilani cekirdek sayisi kadar thread acip
+# her birine buyuk tampon ayirmak; 16GB makinede oyun+CUDA yaninda acilis "OpenBLAS:
+# Memory allocation failed" ile cokuyordu. Filtre matrisleri kucuk (EKF 4x4-6x6) ->
+# 1 thread hem daha hizli hem kucuk. numpy'i ceken TUM importlardan ONCE set edilmeli.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 from sdk import drone_sdk as drone
 from guidance.ana_kontrol import AvciKontrol, Cfg
 from fusion.inovasyonlu_j_v2 import GNSSDuzeltici as JFiltre  # Inovasyonlu J: TEK uretim filtresi (sapma olcumu de bununla)
@@ -307,8 +313,6 @@ TUNE_ALLOW = {
     "VIS_CONF_MIN",      # tespit guven esigi
     "VIS_LOST_TO_GPS_S", # kayipta GPS'e donmeden once bekleme (hover) suresi
     "VIS_KOPRU_S",       # goruntu-duzlemi kopru (olu-hesap) suresi; 0 = kapali
-    "VZ_MAX",            # GPS-yaklasma DIKEY hiz TAVANI (cm/s) — cascade overshoot sinirlayici
-    "KV_Z",              # GPS-yaklasma DIKEY ic-dongu hiz-izleme kazanci (cascade)
 }
 
 # ----------------------------------------------------------
@@ -929,9 +933,17 @@ def dedektor_dongusu():
     global dedektor, _son_tespit_ui, poz_dedektor, poz_cozucu, _poz_sira, _son_poz_ui
     from detection.gorsel_tespit import HedefDedektor   # import-guard modul icinde (ultralytics opsiyonel)
     from detection.poz_tespit import PozDedektor        # ayni desen (hazir=False zarif bozulma)
-    from detection.takip import Takipci                  # ByteTrack: ID surekliligi + coast + FP filtresi
+    from detection.takip import Takipci                  # HybridSort adaptoru: ID surekliligi + FP filtresi
     from detection import kamera_model                   # gyro-CMC homografisi (kendi donusumuz telafi)
-    takipci = Takipci()                                  # zamansal takip (guduma dokunmaz; secim katmani)
+    # boxmot kurulu degilse Takipci() ModuleNotFoundError firlatir; guard olmadan TUM
+    # dedektor thread'i gorev baslamadan olur (0 tespit, sessiz). Kurulamazsa None ->
+    # asagidaki ham argmax yolu (TAKIP_AKTIF=False davranisi) devreye girer.
+    takipci = None
+    if bool(getattr(Cfg, "TAKIP_AKTIF", True)):
+        try:
+            takipci = Takipci()                          # zamansal takip (guduma dokunmaz; secim katmani)
+        except Exception as e:
+            print("[TAKIP] Takipci kurulamadi (%s) -> tracker DEVRE DISI, ham argmax tespit." % e)
     onceki_att = None                                    # onceki tur drone rotasyonu (CMC icin)
     onceki_takip_t = None                                # onceki takip guncelleme ani (Kalman dt)
     poz_sayac = 0                                        # POZ_HER_N seyreklestirme sayaci
@@ -941,7 +953,7 @@ def dedektor_dongusu():
     while True:
         # Sadece OTONOM gorev sirasinda tespit yap (manuel/pasifken bosuna donme).
         if not (drone.is_connected() and gorev_aktif and not manuel_aktif):
-            if takipci.trackler:                         # yeni gorev bayat track/ID ile baslamasin
+            if takipci is not None and takipci.trackler:  # yeni gorev bayat track/ID ile baslamasin
                 takipci.sifirla()
             onceki_att = onceki_takip_t = None
             time.sleep(0.05)
@@ -1004,7 +1016,7 @@ def dedektor_dongusu():
             # ACAMAZ ama mevcut izi yasatir (zayif karede ID kopmaz). Tracker kapaliysa
             # (TAKIP_AKTIF=False) eski esik davranisi (dusuk-conf kutulara gerek yok).
             # Slider VIS_CONF_MIN'i daha da dusururse predict onu izler (canli-tune).
-            takip_aktif = bool(getattr(Cfg, "TAKIP_AKTIF", True))
+            takip_aktif = bool(getattr(Cfg, "TAKIP_AKTIF", True)) and takipci is not None
             if takip_aktif:
                 dedektor.conf = min(UI_CONF_MIN, float(Cfg.VIS_CONF_MIN), takipci.cfg.CONF_DUSUK)
             else:
@@ -1038,7 +1050,7 @@ def dedektor_dongusu():
         # (ByteTrack oncesi davranis; canli sorunda hizli geri-donus anahtari).
         det = None
         if bgr is not None and not takip_aktif:
-            if takipci.trackler:
+            if takipci is not None and takipci.trackler:
                 takipci.sifirla()                     # kapaliyken bayat iz birikmesin
             det = dets[0] if dets else None           # tespit_hepsi conf-azalan -> [0] = argmax
         elif bgr is not None:

@@ -1,0 +1,4 @@
+# Yasanin kendi ucus CSV'si her koşuda yeniden uretilir (calisma zamani ciktisi,
+# ~19 MB). Kok .gitignore'daki "veri/" kuralinin ayni gerekcesi: log repoya konmaz.
+# Olcum SONUCLARI 03_OLCUMLER.md'de sayi olarak duruyor.
+gazebo_kaynak/logs/

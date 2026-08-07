@@ -59,6 +59,7 @@ def _dedektor(boxes, W=1000, H=1000):
     d = HedefDedektor.__new__(HedefDedektor)   # __init__'i atla (YOLO yukleme yok)
     d.hazir = True
     d.imgsz = 1280; d.conf = 0.25; d.device = "cpu"
+    d.sahi = False; d._fp16_kwargs = {}        # SAHI/FP16 sonrasi tespit_hepsi bunlari okur
     d.model = _FakeModel(_FakeRes(boxes, W, H))
     return d
 

@@ -8,14 +8,17 @@ GIRIS NOKTASI: main.py -> web.server.main() -> beyin = AvciKontrol(drone),
 cagirir (J olcumu akar, ucus komutu uretilmez). Ayrinti: guidance/GUDUM_HARITA.md
 
 FAZLAR / FSM (self.durum):
-  ARAMA  -> GPS yaklasma: bozuk GNSS'i J (fusion/inovasyonlu_j_v2) temizler
-            (+2sn lead), PD + EMA-turev + mesafeye gore hiz tavani (speed_cap
-            FRENLEME profili) + STANDOFF nisan noktasi ile hedefe yaklasir.
-            YALNIZ bu fazda calisan mekanikler: kalkis kapisi, loiter/dropout,
-            APPROACH_STANDOFF/ALT_OFFSET (kamera kadraji icin hedefin 5 m alti),
-            speed_cap/fren. GORSEL fazda BUNLARIN HICBIRI CALISMAZ (erken return).
-  KILIT  -> ayni GPS yaklasma; d_h < HANDOFF_RANGE histerezisiyle isaretlenir
-            (gorsel faz devralmaya hazir).
+  KALKIS -> AGL kapili tirmanis (kopru/entegre.py). Zemin, gorev basinda aracin
+            irtifasindan alinir; KOPRU_KALKIS_AGL'e ulasinca yasa devreye girer.
+  ARAMA  -> GPS yaklasma: GAZEBO'DAN TASINAN YASA (control/guidance/gps_guidance.py,
+            DEGISMEZ) hiz komutu uretir; KOPRU (kopru/dow_kopru.py) bunu DoW
+            stick'ine cevirir — kopru ArduCopter'in yerini alir. Bozuk hedef GPS'i
+            koprude CT-EKF'ten (fusion/inovasyonlu_j_v2) gecer. Istasyon: hedefin
+            RANGE_SET slant menzilinde, hiz yonunun gerisi + alti.
+            Denetim/olcumler: docs/kopru_denetim.md
+  KILIT  -> ayni hat; yasanin d_h < 20 m esigi (gorsel faz devralmaya hazir).
+  NOT (2026-08-07): eski PD/standoff/speed_cap GPS yasasi kullanici karariyla
+  SILINDI (~300 satir). Gerekirse git gecmisinde: eca3b4a.
   GORSEL_GUDUM -> yonelim YALNIZCA kameradan: YOLO bbox (server dedektor thread
             -> set_gorsel_tespit) -> _gorsel_guduum -> guidance/ibvs_gorsel.py
             (BASIT IBVS: goruntu merkezi -> bbox merkezi cizgisi; acisi+buyuklugu
@@ -102,8 +105,9 @@ _LOG_COLS = [
 # ==========================================================
 # CONFIG — FAZ BANTLARINA AYRILMISTIR (hangi sabit hangi fazda calisir):
 #   [ORTAK]         : her fazda gecerli (birim/isaret/dongu/komut tavani/log)
-#   [GPS-YAKLASMA]  : YALNIZ durum != GORSEL_GUDUM iken (kalkis, standoff,
-#                     fren/speed_cap, PD, None yonetimi). Gorsel faza KARISMAZ.
+#   [GPS-YAKLASMA]  : YALNIZ durum != GORSEL_GUDUM iken. Yasanin KENDI kazanclari
+#                     gps_guidance.Cfg'de (DONDURULDU); burada yalniz KOPRU_*
+#                     baglama parametreleri var. Gorsel faza KARISMAZ.
 #   [GORSEL]        : basit IBVS (ibvs_gorsel.py) + kilit isteri sayaci + kayip yonetimi.
 # Canli-tune: web arayuzu /api/tune ile TUNE_ALLOW listesindekileri degistirir.
 # ==========================================================
@@ -125,106 +129,37 @@ class Cfg:
 
     # ================= [GPS-YAKLASMA] (durum != GORSEL_GUDUM) =================
     # --- KALKIS / ARAMA IRTIFASI ---
-    SEARCH_ALT = 5000.0         # cm; arama irtifasi (TUNE). Kalkis ayrı katmanda ise TAKEOFF=False.
-    TAKEOFF = True
-    ALT_TOL = 200.0             # cm; irtifa ulasma tolerasi
-    TAKEOFF_THR = 0.6           # tirmanma throttle
 
     # --- HANDOFF (histerezisli) ---
-    HANDOFF_RANGE = 4000.0      # cm; tespit menziline gore TUNE et (genis tut)
-    HANDOFF_EXIT  = 5000.0      # bu mesafenin disina cikinca handoff iptal
-    # OTOMATIK GORSEL DEVRI (YOLO kilidi + yakinlik -> GORSEL_GUDUM).
-    # ACIK (2026-07-06): gorsel faz olgunlasti (PNG carpisma-rotasi + kamera-menzil).
-    # Yakinlik (d_h<HANDOFF_RANGE) + ard arda VIS_N_LOCK gecerli tespit saglaninca
-    # saldiri KAMERAYA devredilir -> otonom angajman/vurus zinciri (Ister 9/10).
-    # Manuel GORSEL switch (set_vis_mode "GORSEL") bu bayraktan BAGIMSIZ calisir.
     AUTO_VISUAL_HANDOFF = True
+
+    # --- GPS HATTI: Gazebo yasasi + DoW koprusu (2026-08-07) ---
+    # GPS yaklasmasi Gazebo'dan tasinan yasayla yapilir (gps_guidance.py DEGISMEZ);
+    # hiz komutu kopru (kopru/dow_kopru.py) tarafindan DoW stick'ine cevrilir —
+    # kopru ArduCopter'in yerini alir. Denetim: docs/kopru_denetim.md.
+    # KALKIS da bu hatta (AGL kapili). Eski PD/standoff yasasi 2026-08-07'de
+    # kullanici karariyla SILINDI; gerekirse git gecmisinde: eca3b4a.
+    KOPRU_RANGE_SET    = 6.9    # m; istasyon slant menzili (kilit bandi turetmesi:
+                                # kutu orani 0.4472/R -> 6.9 m'de %6.5, esik %5)
+    KOPRU_V_MAX        = 22.0   # m/s; onaylanmis TEK yasa istisnasi (olcumle)
+    KOPRU_IC_KAYMA     = 0.0    # m; ic-daire kaymasi KAPALI (14 m istasyonu hedeften
+                                # 13.8 m uzaga itip kilit bandini imkansiz kiliyordu)
+    KOPRU_GNSS_FILTRE  = True   # bozuk hedef GPS'i CT-EKF'ten gecir (fusion/inovasyonlu_j_v2)
+    KOPRU_KALKIS_AGL   = 40.0   # m AGL; gorev basi tirmanis (eski dunya-Z kapisi silindi)
+    # Istasyonun LOS yukselisi. Dikey ayrim = RANGE_SET * sin(ELEV):
+    #     15 deg -> 1.79 m alt (olculen 1.71) — Talon kanat acikligi 1.718 m
+    #               kadar; carpisma payi YOK (bir kosuda 1.4 m'de carpti)
+    #     25 deg -> 2.92 m alt (+%63 pay) + hedef kamera merkezine oturur
+    #               (kamera tilt'i de 25 deg) + kutu orani DEGISMEZ (yalniz R'ye bagli)
+    # Gazebo'da ORIJINALI 25'ti; 15'e inis sebebi ArduPilot'un WP_ACC_Z=1 m/s^2
+    # dikey rampasiydi (terminalde 4.65 m'yi kapatmaya sure yetmiyordu). DoW'da
+    # dikey kanal KOPRUNUN kendisi ve ~1.3 m/s^2 olculdu -> o kisit YOK.
+    # KALICI (2026-08-07, W kosusu + kullanici onayi). Geri donus: 15.0.
+    KOPRU_ISTASYON_ELEV = 25.0
 
     # NOT (2026-07-06 temizligi): Eski "GPS terminal vurus/ram" blogu (GPS_TERMINAL_STRIKE
     # + STRIKE_* sabitleri) SILINDI — gorev mimarisinde saldiri KAMERA verisiyle yapilir
     # (gorsel PNG fazi). Ihtiyac olursa git gecmisinde: adim() 10b blogu.
-
-    # --- YAKLASMA HIZI PROFILI / FRENLEME (overshoot guard) ---
-    # speed_cap(): hedefe BRAKE_DIST altinda yaklastikca hiz tavani V_CAP_FAR'dan
-    # V_CAP_NEAR'a kademeli iner; hiz tavani asilirsa pitch sonumlenir (fren).
-    # YALNIZ GPS-yaklasma fazinda calisir; gorsel fazda devrede DEGIL. Etkisi:
-    # gorsel handoff ANINDAKI hizi/geometriyi bu profil belirler (V_CAP_NEAR
-    # dusukse handoff yavas ama kontrollu baslar).
-    V_CAP_FAR  = 2500.0         # cm/s uzakta (120km/h = 3333 cm/s'in altinda)
-    V_CAP_NEAR = 500.0          # cm/s handoff yakininda
-    BRAKE_DIST = 7000.0         # cm; bu mesafe altinda hizi kademeli dusur
-
-    # --- ANTI-OVERSHOOT STANDOFF (B) ---
-    # GPS hedefin USTUNE ucup GECMESIN diye pozisyon komutu hedefe DEGIL, hedeften
-    # APPROACH_STANDOFF kadar GERIDEKI noktaya surulur -> drone standoff'ta durur/paceler,
-    # hedef HEP ONDE (FOV'da) kalir; gorsel faz devralana kadar gorsel temas korunur
-    # (nose_off ~180 flip'leri biter). KISA lead (APPROACH_LEAD_S), 2sn tam lead'in
-    # manevrada nisan noktasini savurup drone'u hedefin KARSISINA atmasini onler.
-    APPROACH_STANDOFF = 500.0   # cm (5 m) KOMUT; EFEKTIF takip mesafesi bunun USTUNDE cikar:
-                               # hareketli hedefi kovalarken PD gecikmesi (pursuit lag) fazladan
-                               # mesafe ekler -> komut ~2x'i efektif olur. Sim gozlemi: komut 10m ->
-                               # efektif ~20m; efektifi ~10m'ye indirmek icin komut 5m'ye cekildi.
-                               # TUNE (sim): hala uzaksa dusur / KP_H veya V_CAP_NEAR ile kapanisi guclendir.
-                               # (sim-tune 2026-07-03: 30m -> 10m; 2026-07-04: efektif ~20m -> komut 5m)
-    APPROACH_LEAD_S   = 0.5     # s; yaklasma nisan noktasi icin KISA lead (tam 2sn overshoot yapiyordu)
-    # KAMERA CERCEVELEME (dikey): drone hedefin bu kadar ALTINDA ucar -> kamera 25 derece
-    # YUKARI tilt'li oldugundan hedef kadrajin MERKEZININ BIRAZ USTUNDE durur (net gorunur,
-    # gorsel kilide hazir). Geometri (~10 m standoff'ta): ~466 cm hedefi tam ortalar; "biraz
-    # ustu" icin biraz fazlasi. TUNE (sim): kadrajda hedefi istedigin yukseklige getir.
-    # BILINEN GERILIM (6 Tem log analizi): bu ofset yuzunden gorsel handoff hedefin
-    # ~5-8 m ALTINDA baslar -> PNG'nin endgame'de kapatmasi gereken dikey acik.
-    # Kucultmek kadraji bozabilir; degistirirken kamera cerceveleme ile birlikte tune et.
-    APPROACH_ALT_OFFSET = 500.0  # cm (5 m); drone hedefin ALTINDA kalacagi ASGARI dikey ofset
-                                 # (LOOKUP_ELEV_DEG menzil-olcekli offset bunun UZERINE cikar)
-
-    # --- LOOK-UP GEOMETRISI (asagi-bakma/clutter cozumu) ---
-    # PROBLEM: avci hedefin USTUNDEN takip edince kamera ASAGI bakar; hedef arazi
-    # dokusu (clutter) onunde dusuk kontrast -> YOLO tespiti kopar. ALTTAN (look-up)
-    # bakista arka plan GOKYUZU -> siluet, yuksek kontrast + planform izdusumu maksimum.
-    # COZUM: avci hedefin ALTINDA kalsin, LOS YUKSELIS acisi her an >= LOOKUP_ELEV_DEG.
-    # SABIT irtifa farki YETMEZ: ayni dh uzak menzilde kucuk aci verir -> menzil-olcekli:
-    #   GPS fazi: z_ref = z_hedef - max(APPROACH_ALT_OFFSET, tan(eps)*d_h)  [aci >= eps garanti]
-    #   Gorsel faz (PNG): asin(u_hat[2]) < eps iken alcalma bias'i (u_hat[2]=sin(elev)).
-    LOOKUP_ELEV_DEG   = 6.0      # eps; LOS yukselis aci SETPOINT'i (deg). 0 = look-up KAPALI.
-                                # Gorsel faz dikeyi bu aciyi TUTAR (alt->alcal, ust->tirman).
-                                # 5-8 tavsiye (kucuk=zayif siluet, buyuk=cok alttan; 7 Tem: 8->6
-                                # cunku v1 tek-yon bias hedefi ust kenara atiyordu, ey_ort -0.19)
-    LOOKUP_MIN_ALT_CM = 800.0   # cm; alcalma TABAN irtifasi (yere cakilma korumasi; taban
-                                # altinda ALCALMA dayatilmaz ama tirmanisa izin var)
-
-    # --- PD GAINS (hata cm cinsinden) — DEGISTIRME ---
-    KP_H = 0.00025              # yatay konum -> komut
-    KD_H = 0.00060             # yatay turev -> sonumleme (modest; filtre zaten lead'liyor)
-    # --- DIKEY: KADEMELI (CASCADE) HIZ KONTROLU (2026-07-09 v2 — anti-overshoot+salinim) ---
-    # ESKI P+I+D+damping dikey law SALINIYORDU: drone hedefin ~10-15 m USTUNE firlayip sonra
-    # ~20 m DALIYORDU (gercek-GPS log 172038/171620). VERI kok nedeni verdi:
-    # corr(vz,throttle)=+0.7 (throttle vz'yi KONTROL EDIYOR) AMA ort thr=-0.45 iken ort vz=+80
-    # (climb) -> guclu TIRMANMA-BIAS'i (ileri-ucus tasimasi + oyun dikey fizigi). Saf konum
-    # P/D bu bias etrafinda salindi; saf hiz-damping (eski KV_Z<=0.001) bastiramadi.
-    # YENI: konum -> HEDEF hiz (VZ_MAX tavanli, mesafeyle orantili) -> throttle o hizi izler.
-    #   Setpoint'e yaklasinca hedef hiz 0'a iner (trapez profil) => MOMENTUM ASMASI YAPISAL YOK.
-    #   Integral tirmanma-bias'in DC'sini kapatir. Girdi yalniz kendi irtifa/hiz -> kural OK.
-    VZ_MAX    = 350.0          # cm/s; izin verilen tirmanma/alcalma hiz TAVANI (asil overshoot
-                              #   sinirlayici) [SLIDER]. Cok yavas cikiyorsa ARTIR; overshoot
-                              #   donuyorsa DUSUR. Decel bolgesi genisligi = VZ_MAX/KP_Z_POS.
-    KP_Z_POS  = 1.5           # konum hatasi ez(cm) -> hedef dikey hiz (cm/s). 1.5 -> son ~2.3 m'de
-                              #   (VZ_MAX/KP_Z_POS) hedef hiz 0'a rampalanir (yumusak durus).
-    KV_Z      = 0.00220       # IC DONGU hiz-izleme kazanci: hiz hatasi (cm/s) -> throttle [SLIDER].
-                              #   (Eski "damping" rolu; artik vz_err=vz_hedef-vz uzerinden calisir.)
-                              #   Alcalma/tirmanma tepkisi zayifsa ARTIR; titriyorsa DUSUR.
-    KI_Z_VEL  = 0.00150       # hiz hatasi INTEGRALI -> throttle: kalici climb-bias'i (thr=0'da bile
-                              #   tirmanma) kapatir -> drone hedef irtifasinda oturur, surekli yukselmez.
-    INT_Z_AUTH= 0.60          # integral throttle YETKI tavani (+-; anti-windup, salinim sigortasi)
-    INT_Z_BAND = 2500.0       # cm; integrali SADECE |ez|<25 m iken biriktir (buyuk manevrada windup yok)
-    INT_Z_MAX  = 8000.0       # integral state clamp (yetki INT_Z_AUTH ile ayrica sinirli)
-    # NOT: eski KP_Z/KD_Z/KI_Z dikeyde ARTIK KULLANILMIYOR (cascade devraldi). Yatay PD (KP_H/KD_H)
-    # ve derive (de[0..1]) aynen yasar. Eski degerler tarih/geri-donus icin altta korunur.
-    KP_Z = 0.00040            # (DEPRECATED-dikey) eski konum->throttle P
-    KD_Z = 0.00100            # (DEPRECATED-dikey) eski turev
-    KI_Z = 0.00020            # (DEPRECATED-dikey) eski konum integrali
-    KP_YAW = 1.3               # yaw hatasi (rad) -> yaw komutu (sim-tune 2026-07-03: 1.0->1.3, burun hizli)
-
-    # --- KOMUT TAVANLARI ---
     PITCH_MAX = 0.75
     ROLL_MAX  = 0.75
     THR_UP    = 0.70
@@ -240,9 +175,6 @@ class Cfg:
     MAX_DELTA = 0.05           # komut/tik max degisim
 
     # --- FILTRELEME / DEADBAND ---
-    DERIV_EMA = 0.20
-    POS_DEADBAND = 150.0       # cm; yakinda jitter onle
-    YAW_DEADBAND = math.radians(3)
 
     # --- None YONETIMI (tik @50Hz) ---
     # SIM v0.0.5: hedef GPS NOMINAL 5 Hz (yarisma kosulu; eskiden 1 Hz'di) ve
@@ -251,7 +183,6 @@ class Cfg:
     # 6 sn'lik tutma penceresi 2 sn'lik kesintileri bol marjla kapatir; filtre
     # kestirimi lead'li oldugundan tasimak guvenli. Loiter yalnizca GERCEK uzun
     # kesintide devreye girer.
-    HOLD_TICKS = 300           # ~6s: bu sureye kadar son kestirimi tut; otesi dropout -> loiter
 
     # ================= [ORTAK] =================
     # --- TESHIS (irtifa kacma sorununu cozmek icin gecici) ---
@@ -506,31 +437,9 @@ def wrap_pi(a):
 def clamp(x, lo, hi):
     return lo if x < lo else hi if x > hi else x
 
-def deadband(x, db):
-    return 0.0 if abs(x) < db else x
-
 def rate_limit(target, prev, max_delta):
     return prev + clamp(target - prev, -max_delta, max_delta)
 
-def world_to_body(ex, ey, yaw_rad):
-    """World yatay hatayi govde cercevesine cevirir.
-    Varsayim: RH, z-up, yaw CCW, burun=+x. Yanlissa Cfg.*_SIGN ile duzelt."""
-    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
-    e_fwd   = ex * c + ey * s
-    e_right = ex * s - ey * c
-    return e_fwd, e_right
-
-def speed_cap(d_horiz):
-    """[GPS-YAKLASMA] Mesafeye gore yaklasma hizi tavani (cm/s) — FRENLEME profili.
-    adim() icinde hiz tavani asilirsa pitch sonumlenir. GORSEL fazda CALISMAZ
-    (adim gorsel yolda erken doner); handoff ANINDAKI hizi bu profil belirler."""
-    if d_horiz >= Cfg.BRAKE_DIST:
-        return Cfg.V_CAP_FAR
-    t = d_horiz / Cfg.BRAKE_DIST                      # 0..1
-    return Cfg.V_CAP_NEAR + (Cfg.V_CAP_FAR - Cfg.V_CAP_NEAR) * t
-
-
-# Guduum kaynagi -> filtre fabrikasi. "gercek" filtre kullanmaz (truth'a gider).
 def _filtre_uret(kaynak):
     if kaynak == "gercek":
         return None                # Gercek GPS: filtre yok, truth'a git (sim/test)
@@ -552,18 +461,11 @@ class AvciKontrol:
 
         # --- FAZ-1 guduum durumu (faz1_gnss_yaklasma.Faz1Guidance'tan) ---
         self.prev = {'thr': 0.0, 'pitch': 0.0, 'roll': 0.0, 'yaw': 0.0}
-        self.e_prev = None
-        self.t_prev = None
-        self.de = [0.0, 0.0, 0.0]       # EMA-filtreli hata turevi (cm/s)
-        self._ez_int = 0.0              # dikey INTEGRAL birikimi (cm*s) - kalici irtifa hatasini kapatir
         # kendi YATAY hiz vektoru (temiz konum sonlu-fark, EMA) - terminal vurus icin
         self._own_pxy = None            # onceki kendi yatay konum (cm)
         self._own_tv = None             # onceki olcum zamani
         self._own_v = np.zeros(2)       # kendi yatay hiz (cm/s, dunya)
         # kendi DIKEY hiz (drone_z sonlu-fark, EMA) - dikey overshoot sonumleme (anti-firlama)
-        self._own_z = None              # onceki kendi irtifa (cm)
-        self._own_zt = None             # onceki olcum zamani (dikey)
-        self._own_vz = 0.0              # kendi dikey hiz (cm/s, +yukari)
         # GERCEK modda hedef hizi (truth konum sonlu-fark) - carpisma-rotasi icin
         self._gt_prev_p = None          # onceki truth hedef konum (cm)
         self._gt_prev_t = None
@@ -572,7 +474,6 @@ class AvciKontrol:
         self.last_est = None
         self.handoff = False
         self.handoff_announced = False
-        self._kalkis_done = (not Cfg.TAKEOFF)
 
         # debug olcum birikimi
         self.debug_olc = debug_olc
@@ -605,10 +506,10 @@ class AvciKontrol:
         self.kilit_ok = False           # LATCH: pencere isteri (>=WIN_NEED_S) saglandi
         self.kilit_boyut = None         # bu tik bbox eksen orani max(w/W, h/H) (telemetri)
 
-    # ----------------------------------------------------------------
-    #  Guduum kaynagini CANLI degistir (v2/Gercek butonlari)
-    #  Yeni filtre taze baslar; FAZ-1 durumu da sifirlanir (temiz soft-start).
-    # ----------------------------------------------------------------
+        # --- GPS HATTI (yasa + kopru) — lazy kurulur, ilk GPS tikinde baslar ---
+        self.kopru_gudum = None         # KopruGudum | None (kurulamazsa eski yasa)
+        self.kopru_durum = {}           # yasanin durumu (arayuz/telemetri; salt okuma)
+
     def set_kaynak(self, kaynak):
         if kaynak == self.kaynak and (self.filtre is not None or kaynak == "gercek"):
             return                          # zaten o kaynak -> dokunma
@@ -621,22 +522,14 @@ class AvciKontrol:
         self._fresh = False
         # FAZ-1 durumunu sifirla: komutlar 0'dan rate-limit'lensin, turev/handoff temiz.
         self.prev = {'thr': 0.0, 'pitch': 0.0, 'roll': 0.0, 'yaw': 0.0}
-        self.e_prev = None
-        self.t_prev = None
-        self.de = [0.0, 0.0, 0.0]
-        self._ez_int = 0.0              # dikey integrali taze baslat
         self._own_pxy = None            # kendi yatay hiz kestirimini taze baslat
         self._own_tv = None
         self._own_v = np.zeros(2)
-        self._own_z = None              # kendi dikey hiz kestirimini de taze basla
-        self._own_zt = None
-        self._own_vz = 0.0
         self.none_count = 0
         self.last_est = None
         self.handoff = False
         self.handoff_announced = False
         self.durum = "ARAMA"
-        self._kalkis_done = (not Cfg.TAKEOFF)
         # GORSEL GUDUM: yeni gorev -> gorsel kilit/kopru durumunu da taze basla
         self.son_tespit = None
         self.son_tespit_t = None
@@ -655,29 +548,25 @@ class AvciKontrol:
         self.kilit_anlik = False
         self.kilit_ok = False
         self.kilit_boyut = None
+        # YENI GPS HATTI: yeni gorev -> yasa thread'ini TAZE basla (yeni gps_guidance
+        # CSV'si, temiz filtre/istasyon durumu). Sonraki GPS tikinde yeniden kurulur.
+        if self.kopru_gudum is not None:
+            try: self.kopru_gudum.durdur()
+            except Exception: pass
+            self.kopru_gudum = None
+            self.kopru_durum = {}
         # ucus logu: yeni gorev -> yeni dosya (sonraki tik taze zaman-damgali acar).
         # NOT: ayni kaynak ust uste secilirse bu metod erken doner (yukarida) -> dosya
         # donmez; server "Gorev Baslat"ta log_dondur()'u AYRICA kosulsuz cagirir
         # (her gorev = ayri ucus_log dosyasi = veri/tune_parametreler/ucus_N klasoru).
         self.log_dondur()
 
-    # ----------------------------------------------------------------
-    #  UCUS LOGUNU DONDUR (gudum-disi; salt dosya yasam dongusu): acik log
-    #  dosyasini kapatir; sonraki tik taze zaman-damgali dosya acar. Server
-    #  her "Gorev Baslat"ta cagirir -> her gorev kendi ucus_log dosyasini
-    #  (dolayisiyla kendi tune_parametreler/ucus_N klasorunu) alir.
-    # ----------------------------------------------------------------
     def log_dondur(self):
         if self._log_f is not None:
             try: self._log_f.close()
             except Exception: pass
             self._log_f = self._log_w = None
 
-    # ----------------------------------------------------------------
-    #  J: bozuk hedef konumu temizle (sadece YENI telemetri gelince).
-    #  self._fresh: bu cagride J'den YENI gecerli kestirim geldi mi? FAZ-1
-    #  None yonetimi (hold vs dropout) bunu kullanir.
-    # ----------------------------------------------------------------
     def _hedef_temizle(self):
         # GERCEK GPS modu: filtreyi atla, oyunun GERCEK hedef konumunu hedef al.
         if self.kaynak == "gercek":
@@ -721,26 +610,6 @@ class AvciKontrol:
             self._fresh = False               # ratelimit ile donmus kare (yeni bilgi yok)
         return self.son_temiz                  # None olabilir (isinma)
 
-    # ----------------------------------------------------------------
-    #  EMA-filtreli hata turevi (degisken update-rate'e dayanikli)
-    # ----------------------------------------------------------------
-    def _derivative(self, e, t):
-        if self.e_prev is None:
-            self.e_prev, self.t_prev = e, t
-            return self.de
-        dt = t - self.t_prev
-        if dt > 1e-3:
-            a = Cfg.DERIV_EMA
-            for i in range(3):
-                raw = (e[i] - self.e_prev[i]) / dt
-                self.de[i] = (1.0 - a) * self.de[i] + a * raw
-            self.e_prev, self.t_prev = e, t
-        return self.de
-
-    # ----------------------------------------------------------------
-    #  Kendi YATAY hiz vektoru (cm/s, dunya): temiz konum sonlu-fark + EMA.
-    #  Terminal vurus (carpisma-rotasi) hiz-izleme icin kullanir.
-    # ----------------------------------------------------------------
     def _own_hiz(self, pxy, t):
         if self._own_pxy is None or self._own_tv is None:
             self._own_pxy = pxy.copy(); self._own_tv = t
@@ -754,27 +623,6 @@ class AvciKontrol:
             self._own_pxy = pxy.copy(); self._own_tv = t
         return self._own_v
 
-    def _own_dikey_hiz(self, z, t):
-        # Kendi DIKEY hizimiz (cm/s, +yukari) — drone_z sonlu-fark + EMA (yatay _own_hiz
-        # emsali). Dikey overshoot sonumleme (-KV_Z*vz) icin; adim() basinda HER tik
-        # cagrilir -> her yolda taze kalir (bayat dt >= 0.5 s ise kestirim resetlenir).
-        if self._own_z is None or self._own_zt is None:
-            self._own_z = z; self._own_zt = t
-            return self._own_vz
-        dt = t - self._own_zt
-        if 1e-3 < dt < 0.5:
-            raw = (z - self._own_z) / dt
-            self._own_vz = 0.7 * self._own_vz + 0.3 * raw
-            self._own_z = z; self._own_zt = t
-        elif dt >= 0.5:                                # bayat -> resetle
-            self._own_z = z; self._own_zt = t
-        return self._own_vz
-
-    # ----------------------------------------------------------------
-    #  GERCEK modda hedef hizi (cm/s, 3B): truth konum sonlu-fark + EMA.
-    #  Carpisma-rotasi (v_des = v_hedef + V_CLOSE*LOS) icin gerekli; truth temiz
-    #  oldugundan sonlu-fark guvenli.
-    # ----------------------------------------------------------------
     def _gercek_hedef_hiz(self, p):
         now = time.perf_counter()
         if self._gt_prev_p is None or self._gt_prev_t is None:
@@ -789,9 +637,6 @@ class AvciKontrol:
             self._gt_prev_p = p.copy(); self._gt_prev_t = now
         return self._gt_vel
 
-    # ----------------------------------------------------------------
-    #  Komut gonder (rate-limit + atomik set_control_surfaces)
-    # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
         thr   = rate_limit(thr,   self.prev['thr'],   Cfg.MAX_DELTA)
         pitch = rate_limit(pitch, self.prev['pitch'], Cfg.MAX_DELTA)
@@ -800,12 +645,6 @@ class AvciKontrol:
         self.prev = {'thr': thr, 'pitch': pitch, 'roll': roll, 'yaw': yaw}
         self.drone.set_control_surfaces(thr, pitch, roll, yaw, True)
 
-    # ----------------------------------------------------------------
-    #  UCUS LOGU: her tik zengin teshis satiri (Cfg.LOG_ENABLE). Lazy-open,
-    #  zaman-damgali dosya. Truth + drone/hedef rotasyon + nose_off_true burada
-    #  hesaplanir (loglama modu; her tik birkac SDK cagrisi kabul edilir).
-    #  d: cagri yerinden gelen alanlar (+ 'drone_pos','drone_yaw' -> nose_off_true icin).
-    # ----------------------------------------------------------------
     def _log(self, phase, d):
         if not Cfg.LOG_ENABLE:
             return
@@ -866,23 +705,6 @@ class AvciKontrol:
             "drone_pos": drone_pos, "drone_yaw": drone_yaw,
         })
 
-    def _loiter(self):
-        # dropout / veri yok: agresifligi kes, hover (thr=0 -> irtifa korunur), seviyelen
-        self._send(0.0, 0.0, 0.0, 0.0)
-
-    # ----------------------------------------------------------------
-    #  GORSEL TESPIT KOPRUSU (thread-guvenli): server.dedektor_dongusu AGIR YOLO
-    #  inference'i beyin_lock DISINDA kosar, sonucu beyin_lock ICINDE buraya yazar;
-    #  adim() ayni kilit altinda _gorsel_tespit_oku ile okur -> inference tik'ten
-    #  DECOUPLE (kontrol dongusu 50Hz akici kalir).
-    #  det: {cx,cy,w,h,conf,W,H,t} | None  (gorsel_tespit.HedefDedektor.tespit_et)
-    # ----------------------------------------------------------------
-    # ----------------------------------------------------------------
-    #  GUDUM PIPELINE SWITCH (test icin): hangi yol aktif?
-    #    "OTO"    -> otomatik: N_LOCK tespitte gorsel kilitlenir, kayipta GPS'e doner
-    #    "GPS"    -> ZORLA GPS: gorsel yol kapali (gorseldeysen GPS'e doner)
-    #    "GORSEL" -> ZORLA GORSEL: kilidi atla, hemen gorsel; kayipta GPS'e DONMEZ
-    # ----------------------------------------------------------------
     def set_vis_mode(self, mode):
         m = str(mode).upper()
         if m not in ("OTO", "GPS", "GORSEL"):
@@ -970,11 +792,6 @@ class AvciKontrol:
                 return d2
         return None
 
-    # ----------------------------------------------------------------
-    #  GORSEL_GUDUM logu (phase="VISUAL"): meta+drone+uygulanan komut + normalize
-    #  gorsel hata (vis_ex/ey), gordu/conf/area. _LOG_COLS'daki vis_* kolonlarini
-    #  doldurur; digerleri bos kalir (sema-guvenli; analiz_ucus.py etkilenmez).
-    # ----------------------------------------------------------------
     def _log_gorsel(self, t, drone_pos, yaw_m, drone_yaw, v_own, tespit):
         if not Cfg.LOG_ENABLE:
             return
@@ -1025,15 +842,6 @@ class AvciKontrol:
             d["ibvs_boyut"] = it.get("boyut")     # kilit-tut: EMA'li bbox eksen orani
         self._log("VISUAL", d)
 
-    # ----------------------------------------------------------------
-    #  KILITLENME PENCERESI (sartname 6.1.4): her gorsel tikte kilit kosulunu
-    #  degerlendir + 10 sn kayan penceredeki KUMULATIF kilit suresini guncelle.
-    #  Kilit kosulu: hedef MERKEZI AV icinde (yatay %25-%75, dikey %10-%90) VE
-    #  bbox EN AZ BIR eksende >= VIS_LOCK_PCT. Kesintili kilit sayilir (sartname
-    #  ornegi: 1+2+2 sn = 5 sn -> gecerli). VIS_WIN_NEED_S dolunca kilit_ok
-    #  LATCH'lenir -> arayuz ANGAJMAN cipi / kirmizi dortgen / olay kaydi.
-    #  SALT GOZLEM: sonucu hicbir kontrol komutuna GIRMEZ (basit IBVS tek yasa).
-    # ----------------------------------------------------------------
     def _kilit_degerlendir(self, tespit, t):
         kilit = False
         self.kilit_boyut = None                      # bu tik bbox eksen orani (telemetri)
@@ -1067,17 +875,6 @@ class AvciKontrol:
                   "(sartname 6.1.4: >= %.0f sn)." % (Cfg.VIS_WIN_S, sure, Cfg.VIS_WIN_NEED_S))
         return kilit
 
-    # ----------------------------------------------------------------
-    #  GORSEL GUDUM (basit IBVS) — YONELIM YALNIZCA KAMERADAN.
-    #  Gorsel temas VARKEN GPS/filtre YONELIMI KULLANILMAZ (yarisma kurali;
-    #  ibvs_gorsel.hesapla'ya zaten YALNIZ bbox pikselleri girer — konum/hiz
-    #  parametresi imzada bile yok, kural yapisal olarak saglanir).
-    #  tespit VAR -> ibvs.hesapla (merkez->bbox cizgisi -> thr/pitch/roll/yaw).
-    #  tespit YOK -> HOVER (server son tespiti VIS_STALE_S boyunca sunar; buraya
-    #  dusen gercek kayiptir) -> VIS_LOST_TO_GPS_S asilirsa (yalniz OTO) GPS'e
-    #  GERI DON: durum=ARAMA, None dondur -> adim() GPS yoluna duser.
-    #  return: (throttle,pitch,roll,yaw) | None (=GPS'e don). _send rate-limit'ler.
-    # ----------------------------------------------------------------
     def _gorsel_guduum(self, tespit, t, revert_izin=True, own_roll_rad=None,
                        own_pitch_rad=None):
         # revert_izin=False (manuel GORSEL switch): kayipta GPS'e DONME, hover'da kal.
@@ -1128,9 +925,47 @@ class AvciKontrol:
         self.kilit_anlik = False
         return None                              # -> adim() GPS yoluna DUSER (bu tik)
 
-    # ----------------------------------------------------------------
-    #  Debug olcum: J gercekten ham'dan iyi mi?
-    # ----------------------------------------------------------------
+    def _kopru_tik(self, t, drone_pos, yaw_m, drone_yaw, v_own):
+        if self.kopru_gudum is None:
+            try:
+                from kopru.entegre import KopruGudum
+            except Exception as e:
+                if not getattr(self, "_kopru_hata_ilan", False):
+                    self._kopru_hata_ilan = True
+                    print("[KOPRU] entegre modul YUKLENEMEDI -> ucus YOK:", repr(e))
+                self._send(0.0, 0.0, 0.0, 0.0)
+                return False
+            self.kopru_gudum = KopruGudum(
+                self.drone, range_set=Cfg.KOPRU_RANGE_SET, v_max=Cfg.KOPRU_V_MAX,
+                ic_kayma=Cfg.KOPRU_IC_KAYMA, gnss_duzeltici=Cfg.KOPRU_GNSS_FILTRE,
+                kalkis_agl=Cfg.KOPRU_KALKIS_AGL,
+                istasyon_elev=Cfg.KOPRU_ISTASYON_ELEV,
+                # HEDEF KAYNAGI arayuzun kaynak secicisine BAGLI:
+                #   "Gercek GPS (test)" butonu -> truth (bozuk kanal okunmaz)
+                #   "v2" (Inovasyonlu J)       -> bozuk kanal + CT-EKF
+                # set_kaynak() kopruyu yikip yeniden kurdugundan canli gecis calisir.
+                hedef_truth=(self.kaynak == "gercek"))
+            if not self.kopru_gudum.baslat():
+                if not getattr(self, "_kopru_hata_ilan", False):
+                    self._kopru_hata_ilan = True
+                    print("[KOPRU] kurulum BASARISIZ -> ucus YOK")
+                self._send(0.0, 0.0, 0.0, 0.0)
+                return False
+        tani = self.kopru_gudum.adim()
+        if tani is None:
+            return False
+        # Arayuz/telemetri: yasanin durumunu ve uygulanan komutu yansit.
+        self.kopru_durum = self.kopru_gudum.durum()
+        d = self.kopru_durum.get("durum")
+        if d in ("ARAMA", "KILIT", "KALKIS", "DROPOUT", "WARMUP"):
+            self.durum = d
+            self.handoff = (d == "KILIT")
+        k = self.kopru_gudum.komut
+        if k:
+            self.prev = dict(k)                  # "uygulanan komut" karti dogru kalsin
+        self._log_early("KOPRU", t, drone_pos, yaw_m, drone_yaw, v_own)
+        return True
+
     def _debug_olc(self):
         dbg = self.drone.get_debug_truth()
         if not dbg.get("available") or self.son_temiz is None: return
@@ -1141,9 +976,6 @@ class AvciKontrol:
         for ad in self.drone.get_active_corruption():
             self.bozukluk_sayac[ad] = self.bozukluk_sayac.get(ad, 0) + 1
 
-    # ----------------------------------------------------------------
-    #  TEK kontrol adimi (donguude bir kez cagrilir) — FAZ-1 guduum
-    # ----------------------------------------------------------------
     def adim(self):
         drone_pos = np.array(self.drone.get_drone_location())   # TEMIZ (cm)
         # Oyun yaw'i DERECE verir; guduum RADYAN bekler -> cevir.
@@ -1152,20 +984,14 @@ class AvciKontrol:
         drone_yaw = math.radians(yaw_m) if Cfg.ROT_IN_DEGREES else yaw_m
         t = time.perf_counter()
         v_own = self._own_hiz(drone_pos[:2], t)                 # kendi yatay hiz (cm/s, dunya)
-        vz = self._own_dikey_hiz(float(drone_pos[2]), t)        # kendi dikey hiz (cm/s; overshoot sonumleme)
 
         # 1) J ile bozuk hedefi temizle (self._fresh: yeni kestirim geldi mi?)
         self._hedef_temizle()
         if self.debug_olc: self._debug_olc()
 
-        # 2) KALKIS (non-blocking): arama irtifasina tirman, sonra yaklasmaya gec.
-        if not self._kalkis_done:
-            if drone_pos[2] >= Cfg.SEARCH_ALT - Cfg.ALT_TOL:
-                self._kalkis_done = True
-            else:
-                self._send(Cfg.TAKEOFF_THR, 0.0, 0.0, 0.0)      # tirman, seviye
-                self._log_early("TAKEOFF", t, drone_pos, yaw_m, drone_yaw, v_own)
-                return
+        # 2) KALKIS: artik KOPRU hattinda (AGL kapili, kopru/entegre.py).
+        #    Eski dunya-Z kapisi (SEARCH_ALT) 2026-08-07'de silindi — DoW spawn
+        #    zemini 48.4 m oldugundan fiilen hic calismiyordu.
 
         # 2.5) GUDUM PIPELINE SECIMI (switch: self.vis_mode) + GORSEL kesme.
         #      OTO   : conf>=VIS_CONF_MIN kareler ard arda VIS_N_LOCK olunca GORSEL'e kilitlenir;
@@ -1227,194 +1053,11 @@ class AvciKontrol:
                 return
             # sonuc None (yalnizca OTO) -> gorsel UZUN kayip -> GPS yolu BU tik calisir
 
-        # ==================== [GPS-YAKLASMA YOLU] ====================
-        # Buradan asagisi YALNIZ durum != GORSEL_GUDUM iken calisir (gorsel yol
-        # yukarida return etti): None yonetimi, standoff nisan, PD, speed_cap/
-        # fren, alcalma onceligi, dikey PID, yaw. Gorsel guduume KARISMAZ.
-        # 3) None yonetimi: normal donmus kare (hold) vs dropout (loiter)
-        if not self._fresh:
-            self.none_count += 1
-            if self.none_count <= Cfg.HOLD_TICKS and self.son_temiz is not None:
-                est = self.son_temiz                            # son 2sn-lead kestirimi tut
-            else:
-                self._loiter()                                  # uzun None -> dropout -> bekle
-                self._log_early("DROPOUT", t, drone_pos, yaw_m, drone_yaw, v_own)
-                return
-        else:
-            self.none_count = 0
-            est = self.son_temiz
-
-        if est is None:                                          # isinma: henuz kestirim yok
-            self._loiter()
-            self._log_early("WARMUP", t, drone_pos, yaw_m, drone_yaw, v_own)
-            return
-        self.last_est = est
-
-        # YATAY nisan noktasi: B) ANTI-OVERSHOOT STANDOFF -> hedefi GECMEDEN onunde
-        #     dur. KISA lead (APPROACH_LEAD_S) ile nisan (savrulmayi onler); pozisyon KOMUTU
-        #     hedefe DEGIL, APPROACH_STANDOFF kadar GERIYE surulur -> drone standoff'ta paceler.
-        #     ex/ey/d_h ONCE hesaplanir: dikey look-up nisan noktasi d_h'ye (menzile) baglidir.
-        if self.son_xy_anlik is not None and self.son_hiz is not None:
-            tx = float(self.son_xy_anlik[0]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[0])  # kisa lead
-            ty = float(self.son_xy_anlik[1]) + Cfg.APPROACH_LEAD_S * float(self.son_hiz[1])
-        else:
-            tx, ty = float(est[0]), float(est[1])                 # fallback: 2sn lead
-        ex = tx - float(drone_pos[0])                             # HEDEFE hata (yaw/handoff/FOV/log)
-        ey = ty - float(drone_pos[1])
-        d_h = math.hypot(ex, ey)
-
-        # DIKEY nisan (LOOK-UP geometrisi): avci hedefin ALTINDA kalsin, LOS yukselis
-        # acisi her an >= LOOKUP_ELEV_DEG olsun -> hedef GOKYUZUNE karsi siluet, YOLO
-        # tespiti kopmaz (asagi-bakma/clutter cozumu). SABIT ofset yetmez (ayni dh uzak
-        # menzilde kucuk aci) -> MENZIL-OLCEKLI: dh_off = tan(eps)*d_h; asgari
-        # APPROACH_ALT_OFFSET (kadraj icin). z_ref taban LOOKUP_MIN_ALT_CM'e clamp'lenir
-        # (hedef cok alcaksa nisanin yere sokulmasini onler). DIKEY: lead'siz anlik irtifa.
-        z_tgt = self.son_z_anlik if self.son_z_anlik is not None else float(est[2])
-        dh_off = (math.tan(math.radians(Cfg.LOOKUP_ELEV_DEG)) * d_h
-                  if Cfg.LOOKUP_ELEV_DEG > 0.0 else 0.0)
-        alt_off = max(Cfg.APPROACH_ALT_OFFSET, dh_off)            # aci >= eps garanti + kadraj tabani
-        z_ref = max(z_tgt - alt_off, Cfg.LOOKUP_MIN_ALT_CM)       # yere cakilma korumasi
-        ez = float(z_ref - drone_pos[2])
-        # POZISYON KOMUT hatasi (PD bunu surer): standoff noktasina git.
-        if d_h > 1e-6:
-            _ux, _uy = ex / d_h, ey / d_h
-            _dcmd = d_h - Cfg.APPROACH_STANDOFF              # +: yaklas, 0: dur, -: cok yakin -> geri cekil
-            ex_cmd, ey_cmd = _ux * _dcmd, _uy * _dcmd
-        else:
-            ex_cmd = ey_cmd = 0.0
-
-        # ZORUNLU None-init (ucus logu icin): alc blogu calismazsa bile bu degiskenler
-        # log dict'inde referanslanir -> NameError'i onle (yoksa beyin_lock'taki
-        # try/except o log satirini sessizce yutar). (strike kolonlari log semasi
-        # icin sabit kalir, hep None/bos yazilir.)
-        d_s = v_close = vdx = vdy = ax = ay = a_fwd = a_right = None   # eski strike kolonlari (bos)
-        alc_oncelik = None
-
-        # 4) HANDOFF (histerezisli) -> durum: ARAMA / KILIT
-        if not self.handoff and d_h < Cfg.HANDOFF_RANGE:
-            self.handoff = True
-        elif self.handoff and d_h > Cfg.HANDOFF_EXIT:
-            self.handoff = False
-            self.handoff_announced = False
-        self.durum = "KILIT" if self.handoff else "ARAMA"
-
-        # 5) turev (EMA) — YATAY komut hatasi (standoff'lu) uzerinden; dikey ez uzerinden
-        de = self._derivative((ex_cmd, ey_cmd, ez), t)
-
-        # 6) yatay: KOMUT hatasini (standoff) ve turevini govde cercevesine cevir
-        e_fwd, e_right = world_to_body(ex_cmd, ey_cmd, drone_yaw)
-        de_fwd, de_right = world_to_body(de[0], de[1], drone_yaw)
-
-        pitch_raw = Cfg.PITCH_SIGN * (Cfg.KP_H * e_fwd   + Cfg.KD_H * de_fwd)
-        roll_raw  = Cfg.ROLL_SIGN  * (Cfg.KP_H * e_right + Cfg.KD_H * de_right)
-
-        # 7) mesafe-tabanli hiz tavani -> komut buyuklugunu kisitla (overshoot guard)
-        vcap = speed_cap(d_h)
-        spd = self.drone.get_drone_speed()                      # skaler cm/s (yaklasik)
-        if spd > vcap:                                          # tavandan hizliysa ileri itiyi fren et
-            brake = clamp((spd - vcap) / max(vcap, 1.0), 0.0, 1.0)
-            pitch_raw *= (1.0 - 0.8 * brake)
-        mag_scale = clamp(vcap / Cfg.V_CAP_FAR, 0.15, 1.0)      # yakinda kucuk tavan
-
-        pitch_raw = clamp(pitch_raw, -Cfg.PITCH_MAX, Cfg.PITCH_MAX) * mag_scale
-        roll_raw  = clamp(roll_raw,  -Cfg.ROLL_MAX,  Cfg.ROLL_MAX)  * mag_scale
-
-        # 7b) DIKEY-YATAY AYRISTIRMA DUZELTMESI (tani verisiyle kanitlandi):
-        #     Drone hedefin irtifasini ASTIGINDA (ez<0) hizli ileri-ucus YUKARI TASIMA
-        #     uretip alcalmayi engelliyordu (THR=-0.40'a ragmen +3 m/s tirmanis). Cozum:
-        #     ne kadar ustteyse kovalamayi (pitch/roll) o kadar KIS -> tasima dussun ->
-        #     drone alcalabilsin. Hedef irtifasina donunce tam kovalama geri gelir.
-        if ez < 0.0:
-            alc_oncelik = clamp(1.0 + ez / 800.0, 0.15, 1.0)   # ez=-8 m'de %15'e iner
-            pitch_raw *= alc_oncelik
-            roll_raw  *= alc_oncelik
-
-        # 8) irtifa — KADEMELI (CASCADE) HIZ KONTROLU (2026-07-09 v2; anti-overshoot+salinim).
-        #    ESKI P+I+D+damping law SALINIYORDU: hedefin ~10-15 m ustune firlayip sonra ~20 m
-        #    daliyordu (gercek-GPS log 172038/171620). VERI kok nedeni verdi: corr(vz,thr)=+0.7
-        #    (throttle vz'yi kontrol EDIYOR) AMA ort thr=-0.45 iken ort vz=+80 (climb) -> guclu
-        #    tirmanma-BIAS'i (ileri-ucus tasimasi + oyun fizigi); saf konum P/D bias etrafinda
-        #    salinima giriyordu, saf hiz-damping (KV_Z<=0.001) bastiramadi.
-        #    COZUM (standart, aciklanabilir):
-        #      DIS DONGU: konum hatasi -> HEDEF dikey hiz, VZ_MAX'a clamp -> momentum SINIRLI,
-        #                 setpoint'e yaklasinca hedef hiz 0'a iner (trapez) => OVERSHOOT YOK.
-        #      IC DONGU : throttle olculen vz'yi hedef hiza surer (P: KV_Z). Bias'i otomatik
-        #                 yener (hangi throttle gerekiyorsa onu bulur).
-        #      INTEGRAL : kalici hiz hatasini (climb-bias DC'si) kapatir; yetki INT_Z_AUTH'la sinirli.
-        #    Girdi yalniz kendi irtifa/hiz -> GPS-yaklasma fazi, kural OK. (de[2]/KP_Z/KD_Z/KI_Z
-        #    artik dikeyde KULLANILMIYOR; de[0..1] yatay pitch/roll KD'sinde yasar.)
-        vz_hedef = clamp(Cfg.KP_Z_POS * ez, -Cfg.VZ_MAX, Cfg.VZ_MAX)   # dis dongu: hedef vz (cm/s)
-        vz_err = vz_hedef - vz                                          # ic dongu: hiz hatasi (cm/s)
-        # Anti-windup: hiz hatasi integralini SADECE hedefe makul yakinken (|ez|<band) biriktir.
-        if abs(ez) < Cfg.INT_Z_BAND:
-            self._ez_int = clamp(self._ez_int + vz_err * Cfg.DT, -Cfg.INT_Z_MAX, Cfg.INT_Z_MAX)
-        else:
-            self._ez_int = 0.0
-        i_term = clamp(Cfg.KI_Z_VEL * self._ez_int, -Cfg.INT_Z_AUTH, Cfg.INT_Z_AUTH)
-        thr_raw = clamp(Cfg.Z_SIGN * (Cfg.KV_Z * vz_err + i_term), Cfg.THR_DN, Cfg.THR_UP)
-
-        # 9) yaw: nazikce burnu hedefe cevir (handoff'ta kamera ortalansin)
-        bearing = math.atan2(ey, ex)
-        yaw_err = deadband(wrap_pi(bearing - drone_yaw), Cfg.YAW_DEADBAND)
-        yaw_raw = Cfg.YAW_SIGN * clamp(Cfg.KP_YAW * yaw_err, -Cfg.YAW_MAX, Cfg.YAW_MAX)
-
-        # 10) deadband (cok yakinda yatay jitter onle)
-        if d_h < Cfg.POS_DEADBAND:
-            pitch_raw = 0.0
-            roll_raw = 0.0
-
-        # (2026-07-06 temizligi: eski "10b) GPS TERMINAL VURUS/RAM" blogu SILINDI.
-        #  Saldiri/vurus KAMERA verisiyle gorsel PNG fazinda yapilir; GPS yalnizca
-        #  yaklasir + kadrajlar. Eski blok git gecmisinde.)
-
-        # --- TESHIS: irtifa kacma sorununu olcmek icin (Cfg.DEBUG_Z=False ile kapat) ---
-        if Cfg.DEBUG_Z:
-            self._dbgz = getattr(self, "_dbgz", 0) + 1
-            if self._dbgz % 25 == 0:                         # ~2 Hz
-                dbg = self.drone.get_debug_truth()
-                ztrue = (dbg["target"]["position"][2] if dbg.get("available") else None)
-                raw_z = (self.son_ham[2] if self.son_ham is not None else None)
-                ztrue_s = f"{ztrue:8.0f}" if ztrue is not None else "    NA  "
-                raw_s   = f"{raw_z:8.0f}" if raw_z is not None else "    NA  "
-                corr = ",".join(self.drone.get_active_corruption()) or "-"
-                print(f"[Z] dz={drone_pos[2]:8.0f} zref={z_ref:8.0f} ztrue={ztrue_s} "
-                      f"rawz={raw_s} ez={ez:+7.0f} vz={vz:+6.0f} vzhed={vz_hedef:+6.0f} "
-                      f"thr={thr_raw:+.2f} i={i_term:+.2f} spd={spd:6.0f} pit={pitch_raw:+.2f} dh={d_h:7.0f} "
-                      f"{self.durum} corr=[{corr}]")
-
-        if self.handoff and not self.handoff_announced:
-            self.handoff_announced = True
-
-        self._send(thr_raw, pitch_raw, roll_raw, yaw_raw)
-
-        # --- UCUS LOGU: ana yol (APPROACH) tam teshis satiri ---
-        if Cfg.LOG_ENABLE:
-            mod = "APPROACH"
-            sh = self.son_hiz; sx = self.son_xy_anlik; sm = self.son_ham
-            self._log(mod, {
-                "t_perf": t, "kaynak": self.kaynak, "durum": self.durum,
-                "handoff": int(self.handoff), "fresh": int(self._fresh), "none_count": self.none_count,
-                "drone_x": drone_pos[0], "drone_y": drone_pos[1], "drone_z": drone_pos[2],
-                "drone_yaw_deg": yaw_m, "drone_yaw_rad": drone_yaw, "drone_speed": spd,
-                "vown_x": v_own[0], "vown_y": v_own[1],
-                "est_x": est[0], "est_y": est[1], "est_z": est[2], "z_ref": z_ref,
-                "xy_anlik_x": (sx[0] if sx is not None else None),
-                "xy_anlik_y": (sx[1] if sx is not None else None),
-                "son_z_anlik": self.son_z_anlik,
-                "son_hiz_x": (sh[0] if sh is not None else None),
-                "son_hiz_y": (sh[1] if sh is not None else None),
-                "son_hiz_z": (sh[2] if sh is not None else None),
-                "son_ham_x": (sm[0] if sm is not None else None),
-                "son_ham_y": (sm[1] if sm is not None else None),
-                "son_ham_z": (sm[2] if sm is not None else None),
-                "ex": ex, "ey": ey, "ez": ez, "d_h": d_h, "e_fwd": e_fwd, "e_right": e_right,
-                "vcap": vcap, "mag_scale": mag_scale, "alc_oncelik": alc_oncelik, "ez_int": self._ez_int,
-                "d_s": d_s, "v_close": v_close, "vdx": vdx, "vdy": vdy, "ax": ax, "ay": ay,
-                "a_fwd": a_fwd, "a_right": a_right,
-                "bearing": bearing, "yaw_err": yaw_err,
-                "thr_raw": thr_raw, "pitch_raw": pitch_raw, "roll_raw": roll_raw, "yaw_raw": yaw_raw,
-                "thr_cmd": self.prev['thr'], "pitch_cmd": self.prev['pitch'],
-                "roll_cmd": self.prev['roll'], "yaw_cmd": self.prev['yaw'],
-                "drone_pos": drone_pos, "drone_yaw": drone_yaw,   # _log: truth + nose_off_true icin
-            })
-
+        # ==================== [GPS FAZI: yasa + kopru] ====================
+        # GPS yaklasmasi Gazebo'dan tasinan yasayla yapilir
+        # (control/guidance/gps_guidance.py — DEGISMEZ), hiz komutu koprude
+        # (kopru/dow_kopru.py) DoW stick'ine cevrilir. Kopru ArduCopter'in
+        # yerini alir; denetim: docs/kopru_denetim.md. KALKIS da bu hatta
+        # (AGL kapili, kopru/entegre.py). Eski PD/standoff yasasi 2026-08-07'de
+        # SILINDI (kullanici karari) — git gecmisinde: eca3b4a.
+        self._kopru_tik(t, drone_pos, yaw_m, drone_yaw, v_own)
