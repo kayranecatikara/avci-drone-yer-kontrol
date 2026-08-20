@@ -1,37 +1,35 @@
-# --- Oyun dosyalari (cok buyuk + yarisma materyali; repoya KONMAZ) ---
+# ============ Oyun dosyalari ============
+# Cok buyuk + yarisma materyali; repoya KONMAZ (README'deki gibi elle cikartilir).
 Drones of War Teknofest/
 
-# --- Buyuk model ---
-# pose modeli 123 MB > GitHub 100 MB siniri (push REDDEDILIR). Aktif model best.pt (50 MB).
-bestpose.pt
-models/bestpose.pt
-# ham Colab ciktisi 126 MB (optimizer dahil) > 100 MB siniri. Calisan kopyasi
-# models/talon_pose.pt optimizer'i temizlenmis halde (42 MB) REPODA.
-talon_yolo11m_pose_2_best.pt
-
-# --- Calisma zamani ciktilari (log/json/png hepsi veri/ altinda uretilir) ---
-veri/
-kiyas_log.csv
-gorsel_log.csv
-# duz-yapi calistirmalarindan kok dizine dusen loglar (analiz_ucus.py / tani_irtifa.py)
-ucus_log*.csv
-ucus_metrikler.csv
-tani_log.csv
-*.log
-
-# --- Python ---
+# ============ Python ============
 __pycache__/
-*.pyc
-*.pyo
+*.py[cod]
+*.egg-info/
+
+# ============ Sanal ortam (yerelde kalir) ============
 .venv/
 venv/
+env/
 
-# --- Isletim sistemi / editor ---
-Thumbs.db
-desktop.ini
-.DS_Store
+# ============ Model yapi ciktilari ============
+# TensorRT engine / ONNX uretildigi GPU + surucu + TRT surumune KILITLIDIR;
+# baska makinede yuklenmez -> her makinede yerelde uretilir. .pt depoda KALIR.
+*.engine
+*.onnx
+
+# ============ Calisma ciktilari ============
+veri/
+*.log
+*.csv
+
+# ============ Editor / OS ============
+*.swp
 .vscode/
 .idea/
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Yanlislikla olusan cift uzantili kopya (dogrusu: omer_filtre.py)
-omer_filtre.py.py
+# ============ Claude Code ============
+.claude/

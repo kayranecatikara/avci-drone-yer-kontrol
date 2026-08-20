@@ -1,5 +1,13 @@
+# --- Simulasyon I/O + guduum ---
+numpy
+
+# --- Kare yakalama (oyun ekrani) ---
 mss
 Pillow
-pygetwindow; platform_system == "Windows"
+
+# --- Gorsel tespit / takip ---
+# torch: CUDA'li kurulum icin https://pytorch.org (CPU wheel ~16x yavas kosar)
+torch
 ultralytics
 opencv-python
+boxmot

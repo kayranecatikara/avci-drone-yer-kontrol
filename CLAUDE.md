@@ -1,99 +1,88 @@
-# Avcı Drone — Bozuk GNSS Kullanımı (CLAUDE.md)
+# Avcı Drone — Proje Notları (CLAUDE.md)
 
-Bu dosya, projeyi **yalnızca şartname Kural 2 — "Bozuk GNSS verisinin kullanımı"**
-ekseninde tanımlar. Sistem **GPS-only**'dir: hedef uçağın bozuk GNSS verisiyle otonom
-yaklaşma yapılır; **görsel takibe geçilmez** (kilitleme/handoff yoktur).
+## KAPSAM (2026-08-20 sadeleştirmesi)
+Proje **yalnızca iki şeyden** ibarettir: **GPS takip** (bozuk GNSS ile yaklaşma)
+ve **görsel takip** (kamera ile IBVS güdüm). Web arayüzü, poz/PnP kestirimi, tune
+raporu, kilit sayacı, görüntü-düzlemi köprüsü, gyro-CMC, analiz araçları, testler
+ve arşiv **kaldırıldı** (kullanıcı kararı; git geçmişinde `main` branch'inde durur).
+Sistem terminalden çalışır: `python3 -m control.main`.
 
-Kural 2'nin dört maddesi, ilgili kod dosyalarıyla birlikte aşağıda açıklanır.
+Simülasyon ortamı bir **Unreal Engine oyunudur** (Drones of War). Gazebo, MAVLink,
+ArduPilot SITL gibi katmanlar bu projede **YOKTUR** ve eklenmez; araç I/O'su
+`sdk/drone_sdk.py` (resmi yarışma SDK'sı, TCP) üzerinden gider.
 
-## İLGİLİ DOSYALAR (bozuk GNSS zinciri)
-- `sdk/drone_sdk.py`      → simülasyon I/O. Bozuk GNSS buradan **okunur**
-  (`get_target_location`). Sim-gerçek/kıyas alanları: `get_debug_truth`, `get_active_corruption`.
-- `fusion/gnss_filtre.py` → `GNSSFiltre` (bozuk GNSS'i **temizler/değerlendirir**):
-  v1 z-spike + v2 x/y-spike + gecikme telafisi. Nedensel (yalnız geçmişe bakar).
-- `guidance/gps_takip.py` → `GPSTakip`. Bozuk GNSS'i **hangi aşamada kullandığımız**:
-  kalkış → GNSSFiltre ile temizleme → sürekli yaklaşma (güdüm girdisi budur).
-- `web/gps_server.py`     → kontrol döngüsü + telemetri + **sapma/kesinti değerlendirmesi**
-  (ham vs temiz hata penceresi, GNSS kesinti izleyici, olay günlüğü).
-- `web/gps_index.html`    → arayüz: BOZUK GNSS GİRDİSİ paneli, sapma, kesinti rozeti,
-  kuşbakışı harita (ham-bozuk hedef ↔ temiz hedef izleri).
+## DOKUNULMAZ
+- `Drones of War Teknofest/` — oyun paketi (gitignore'lu, repoya konmaz).
+- `sdk/` — resmi yarışma SDK'sı. **Değiştirilmez.**
 
----
+## MİMARİ (modül → görev)
+```
+control/main.py        → görev gözetmeni: 50 Hz döngü, GPS ↔ GÖRSEL faz devri
+control/gps_approach.py→ GPSTakip: kalkış + bozuk GNSS ile yaklaşma (Faz 1)
+control/gorsel_takip.py→ GorselTakip: basit IBVS görsel güdüm (Faz 2)
+control/common.py      → skaler yardımcılar + KomutGonderici (TEK komut çıkışı)
+fusion/gnss_filtre.py  → GNSSFiltre: spike temizleme + hız kestirimi + gecikme telafisi
+perception/camera.py   → ekran yakalama (mss) → tespit → takip → detection_state
+perception/detector.py → YOLO (models/best.pt) + pervane maskesi
+perception/tracking.py → HybridSort (boxmot) kimlik sürekliliği
+perception/detection_state.py → kamera thread'i ↔ güdüm döngüsü köprüsü
+scripts/start_game.sh  → oyunu Wine ile başlatır (TEK başlatma scripti)
+```
 
-## 1) Hedef uçağa ait bozuk GNSS verisinin nasıl OKUNDUĞU
-- Kaynak: `sdk/drone_sdk.get_target_location()` → hedefin **(x, y, z)** konumu, santimetre.
-  Bu akış **bozuktur** (spoof/sıçrama/gecikme/kayıp içerebilir); ana hedef sinyalimizdir.
-- Okuma noktası: kontrol döngüsü (`web/gps_server.kontrol_dongusu`, ~50 Hz) her tikte
-  `guidance/gps_takip.GPSTakip._hedef_temizle()` çağırır; o da `get_target_location()`'ı okur.
-- **Yeni-paket tespiti:** `ham != self.son_ham` karşılaştırmasıyla yeni telemetri paketi
-  ayırt edilir (rate-limit ile donmuş kareler yeni bilgi saymaz → `_fresh=False`).
-- Bozulma bilgisi: `get_active_corruption()` aktif bozulma adlarını (ör. `FLAG_DELAY`,
-  `FLAG_SPIKE`) verir; arayüzde "Aktif bozulma" olarak gösterilir.
-- **Yalnızca sim/debug** için gerçek (bozulmamış) konum `get_debug_truth()` ile alınır;
-  bu **güdüme girmez**, sadece hatayı ölçmek/kıyaslamak içindir (madde 3).
+## ⛔ KATI KURAL — GÖRSEL FAZDA GPS/GNSS YASAK (diskalifiye sebebi)
+Görsel temas **sağlandıktan sonra** hareket komutu **yalnızca görsel veriden**
+türetilir. Kural **yapısal** sağlanır: `GorselTakip.hesapla(det, own_pitch_rad)`
+imzasında hedefe ait tek veri **bbox pikselleri**dir — konum/hız/GNSS kestirimi
+parametre olarak bile geçmez. `own_pitch_rad` **kendi IMU pitch'imizdir**
+(ego-motion telafisi), hedef verisi değildir → kurala uygun.
+`control/main.py` görsel fazda yalnızca `gps._hedef_temizle()` çağırır; bu
+**hiçbir komuta girmez**, sadece faz geri dönerse filtre ısınmış olsun diyedir.
+**Görsel güdüm için ASLA GPS/filtre tabanlı bir çözüm önerme.**
 
-## 2) Bu verinin hangi AŞAMADA kullanıldığı
-- **Kalkış (ilk aşama):** bozuk GNSS güdüme **girmez**. Drone bulunduğu yerden
-  `TAKEOFF_ALT_AGL` (~10 m, kalkış noktası referanslı) kadar **dikey tırmanır**.
-  Kalkışta **yumuşatma (rate-limit) ve frenleme (settle/momentum sönümü) YOKTUR**:
-  tam `TAKEOFF_THR` komutu doğrudan uygulanır (`_send_ham`), hedef irtifaya varınca
-  anında yaklaşmaya geçilir. Yalnız dikey; yatay/yaw yok.
-- **GPS takip (yaklaşma):** kalkıştan sonra **tek güdüm girdisi temizlenmiş GNSS'tir.**
-  Bu temiz kestirim **gecikme-telafilidir** (lead'li): ham GNSS ~`GECIKME_SN` eski
-  konum verir; filtre `pos + hız·gecikme` ile ileri-tahmin yapar, böylece nişan geçmiş
-  değil **güncel (gerçek) konuma** yapılır. Bu yüzden ham (bozuk/geciken) hedef ile
-  temiz hedef arasında ~`gecikme·hız` kadar bir mesafe farkı görülür — bu farkın olması
-  beklenir ve doğrudur. `GPSTakip.adim()` her tik bu temiz kestirimden şunları sürer:
-  - **Yatay:** gecikme-telafili konum (`son_xy_anlik`) ile nişan; hedefi geçmemek için
-    `APPROACH_STANDOFF` kadar geride pace (anti-overshoot). Kesintide `son_hiz·dr_dt`
-    ile ölü-hesap devam eder.
-  - **Dikey:** gecikme-telafili irtifa (`son_z_anlik`) üzerinden irtifa PID (anti-windup).
-  - **Yaw:** burnu hedefe çevir (hedefi kadrajda tut).
-- Bu sistemde başka güdüm fazı yoktur; bozuk-sonra-temizlenmiş GNSS **görev boyunca**
-  kullanılır (sürekli yaklaşma + standoff'ta paceleme).
+## GPS GÜDÜMÜNÜN ROLÜ (net sınır)
+GPS fazı öldürücü faz değildir. Görevi: (1) bozuk GNSS'i temizle ve hedef hızını
+kestir, (2) araca yönel, (3) hedefle kesintisiz görsel temas kur (kadrajda tut),
+(4) görsel faza temiz devret. Terminal takip görsel fazın işidir.
 
-## 3) Hatalı ölçümlerin nasıl DEĞERLENDİRİLDİĞİ
-Değerlendirme iki katmanlıdır: (a) **temizleme** (güdüme temiz veri ver), (b) **ölçme**
-(temizlemenin gerçekten iyileştirdiğini kanıtla). Güdüme yalnız (a) girer.
+## FAZ DEVİR KAPISI
+İki koşul **birlikte**: (1) yakınlık — `Cfg.HANDOFF_RANGE` (40 m) altı ya da GNSS
+bayat; (2) görsel kilit — ard arda `N_LOCK`(5) karede güdüme girebilecek kutu.
+Kutu kapısı **tek yerde**: `control.gorsel_takip.nisan_kutusu`. Gözetmen ve görsel
+faz **aynı kapıyı** kullanır — iki katmana ayrı eşik yazmak, görsel fazın aynı
+karede reddettiği kutuyla devir yapılmasına ve fazın sürekli sekmesine yol açar.
+Görsel fazda tespit `LOST_S`(0.8 s) gelmezse GPS'e dönülür (yeniden kilitlenme).
 
-**(a) Temizleme — `fusion/gnss_filtre.GNSSFiltre` (nedensel, yalnız geçmişe bakar):**
-- **z-spike (v1, dikey):** ardışık değişim eşiği aşarsa spike; ölçümü atıp "son geçerli
-  konum + son hız·dt" ile **sürdür** (dondurma değil → plato/sıçrama olmaz). `max_vz` ile
-  hız kırpılır (uzun logda ıraksamayı önler).
-- **x/y-spike (v2, yatay):** **iki kriter birlikte** aranır — (1) hız-tutarsızlık (adım
-  hızı son-N hızdan çok saparsa) VE (2) konum sapması (beklenen konumdan uzaksa). İkisi de
-  tetiklenirse spike → egimle devam. Gerçek dönüş konumda sapmaz → korunur; spike ikisinde
-  de sapar → temizlenir. `max_hiz` ile egim kırpılır.
-- **Gecikme telafisi:** sim bozuk GNSS'i ~`GECIKME_SN` (≈1 s) eski konum verir. Çıktı
-  ileri-tahminle kapatılır (`pos + vel·gecikme_sn`); güdüme lead'li kestirim verilir.
-- **Kayıp/boşluk yönetimi:** `dt > 5 s` felaket boşlukta ekstrapolasyon yapılmaz, ölçüm
-  kabul edilir. Paket donması/dropout'ta (`_fresh=False`) son kestirim `HOLD_TICKS` (~6 s)
-  tutulur; aşılırsa loiter (hover) — hatalı veriyle savrulma önlenir.
+## ÇALIŞMA İLKELERİ (değişmez)
+- **Sadece üzerinde çalıştığımız, açıklayabildiğimiz şeyi kullan** (yarışma kuralı 8:
+  her bileşeni açıklayabilmeliyiz). Bakmadığımız yabancı modüller entegre EDİLMEZ.
+  Bilinen istisna: `boxmot` HybridSort (kullanıcı riski bilerek onayladı).
+- **Hazır güdüm yazılımı doğrudan kullanılmaz** (kural 6). Filtre ve IBVS yasası
+  bizim temiz implementasyonumuzdur.
+- Senaryoya aşırı-uydurulmuş sabitler (örn. "lock 5.2 sn") kullanılmaz.
+- Yeni özellik eklerken **kapsamı büyütme**: proje bilinçli olarak sadeleştirildi.
 
-**(b) Ölçme/gösterge — `web/gps_server.py` + arayüz:**
-- **Sapma (ham vs temiz):** her yeni pakette, ham ve temiz(anlık) kestirimin **gerçeğe**
-  (truth) hatası ölçülür; son ~80 paketlik pencerede ortalama/std/max hesaplanır ("filtre
-  iyi mi?" göstergesi). Arayüz: BOZUK GNSS GİRDİSİ → "Ham hata" vs "Temiz hata".
-- **J düzeltme (anlık):** truth gerektirmeden, ham ↔ temiz(anlık) farkının büyüklüğü
-  (filtrenin o an ne kadar düzelttiği).
-- **GNSS kesinti izleyici:** paket yaşı `GNSS_KESINTI_S`'i aşarsa **KESİNTİ** olayı/rozeti;
-  paket geri gelince "kesinti bitti". Gerçek yarışmada truth olmadan da çalışır.
-- Ayrıca `veri/gps_takip_sapma.json` (bozuk+gerçek konum) ve `gps_takip_*.csv` uçuş logu
-  offline analiz için yazılır.
+## GÖRSEL YASA — KORUNAN DÜZELTMELER (uçuş verisinden; silme)
+- **Dikey nişan (tilt-farkında):** `ey_ref = NISAN·tan(TILT)/tan(VFOV_yarı)`.
+  `DIKEY_NISAN=-0.25` negatiftir: hedefi merkezin ÜSTÜNDE tut → araç hedefin
+  ALTINDA kalır, hedef gökyüzü arka planında (zemin clutter'ında tespit ölmez).
+- **Ego-pitch telafisi (`EGO_PITCH_GAIN=0.4`):** ileri itki gövdeyi öne yatırır,
+  gövdeye sabit kamera düşer, hedef görüntüde sahte YUKARI zıplar → yasa "tırman"
+  sanıyordu. 1.0 aşırıydı (kalıcı yatıklığı da siliyordu, sürekli alçalış); 0.4
+  uçuş verisinden seçildi.
+- **Alçalma freni (`ALCAL_FREN`) + yaklaşma-ağırlıklı bypass (`yak`):** iki fren
+  çarpımsal binince ileri itki eziliyordu (hedefe hiç yaklaşılamıyordu). Frenler
+  yalnız istasyon bandında devrede; uzakta baypas.
+- **Yumuşak geçiş (`HANDOFF_S=1.0`):** devir tikinde ileri itki tavana doyup tam
+  lunge veriyordu (gövde yatar, hedef kadrajın üstünden kaçar). İleri itki ve
+  dikey nişan 1 sn'de 0'dan açılır; yaw + dikey ortalama ilk tikten tam güçte.
+- **Pervane maskesi (`detector.PROP_MASKE`):** avcının KENDİ pervanesi kadrajda
+  sabit konumda "uçak" olarak algılanıyordu; merkezi maskede olan kutular seçim
+  ÖNCESİ elenir.
 
-## 4) Görsel takip başladıktan sonra GNSS bağımlılığının azaltılması / sonlandırılması
-- **Bu sistemde görsel takip YOKTUR ve asla başlatılmaz** (kilitleme/handoff kaldırıldı).
-  Dolayısıyla görsel faza devir ve "GNSS bağımlılığını azaltma/sonlandırma" adımı **kapsam
-  dışıdır.** GPS takip görev boyunca temizlenmiş GNSS ile **sürekli yaklaşma** yapar.
-- Yaklaşma sonu davranışı: hedefi geçmez; `APPROACH_STANDOFF` mesafesinde önünde pace eder
-  (kilit/terminal vuruş/görsel devir yok).
-- Görsel faz (kamera-tabanlı takip) ileride eklenirse, GNSS bağımlılığının azaltılması bu
-  belgeye ayrı bir madde olarak eklenecektir; mevcut mimaride tanımlı değildir.
-
----
-
-## DEĞİŞMEZ İLKE
-Bozuk GNSS zincirinin her parçası (okuma, temizleme, değerlendirme) **bizim temiz,
-açıklanabilir implementasyonumuzdur** (yarışma kuralı: her bileşeni açıklayabilmeliyiz).
-Hazır güdüm/filtre yazılımı doğrudan kullanılmaz; senaryoya aşırı-uydurulmuş sabitler
-konmaz. Temizleme eşikleri gerçek loglardan kalibre edilmiştir ve takımca açıklanabilir.
+## CANLI DOĞRULAMA BEKLEYEN
+- **İŞARET DOĞRULAMASI (ilk uçuşta İLK İŞ):** yaw ters tepki verirse
+  `gorsel_takip.Cfg.SIGN_YAW=-1`, dikey ters tepkiyse `SIGN_DIKEY=-1`.
+- `ILERI` (yaklaşma hızı), `K_YAW`/`K_DIKEY` (merkezleme), `MERKEZ_FREN` (taşma),
+  `HANDOFF_S` (0.6–1.5 s) canlı tune edilir.
+- `K_BOYUT=0` → sabit ileri itkiyle hedefe kapanır (takip/vuruş). İstasyon tutmak
+  (kilitlenme isterini doldurmak) gerekirse `K_BOYUT>0` yapılır.

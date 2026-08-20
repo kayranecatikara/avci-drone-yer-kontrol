@@ -1,14 +1,25 @@
+# -*- coding: utf-8 -*-
+"""
+control/gps_approach.py — BOZUK GNSS ile yaklasma (Faz 1).
+
+Gorev zincirindeki yeri: kalkis -> GNSSFiltre ile bozuk hedef GNSS'ini temizle
+-> hedefe surekli yaklas ve BURNU hedefe cevir (hedefi kadrajda tut) -> gorsel
+temas kurulunca gozetmen (control/main.py) komutu gorsel faza devreder.
+
+GPS guduumu OLDURUCU FAZ DEGILDIR: gorevi bozuk GNSS'i optimize etmek, araca
+yonelmek ve kamera icin kesintisiz gorsel temas hazirlamaktir. Terminal takip
+gorsel fazin isidir (control/gorsel_takip.py).
+
+Girdi: sdk.drone_sdk.get_target_location() (BOZUK GNSS) -> fusion.gnss_filtre.
+Cikis: (throttle, pitch, roll, yaw) -> control.common.KomutGonderici.
+"""
 import math
-import os
 import time
+
 import numpy as np
 
-try:
-    from fusion.gnss_filtre import GNSSFiltre
-except ImportError:
-    import sys
-    sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    from fusion.gnss_filtre import GNSSFiltre
+from control.common import (clamp, deadband, wrap_pi, world_to_body)
+from fusion.gnss_filtre import GNSSFiltre
 
 
 class GPSCfg:
@@ -29,12 +40,6 @@ class GPSCfg:
     THR_UP    = 0.70
     THR_DN    = -1.00
     YAW_MAX   = 0.45
-
-    # --- KOMUT/TICK DEGISIMI LIMITI ---
-    MAX_DELTA_THR   = 0.12      # dikey
-    MAX_DELTA_PITCH = 0.08      # yatay
-    MAX_DELTA_ROLL  = 0.08
-    MAX_DELTA_YAW   = 0.08
 
     # --- BURUN -> HEDEF YAW ---
     KP_YAW = 1.3
@@ -69,43 +74,17 @@ class GPSCfg:
     GECIKME_SN = 1.0            # simulasyon ham GNSS gecikme suresi
 
 
-# ==========================================================
-# HELPERS
-# ==========================================================
-def wrap_pi(a):         # Aciyi -pi..+pi araligina alir
-    return (a + math.pi) % (2.0 * math.pi) - math.pi
-
-
-def clamp(x, lo, hi):   # Degeri [lo, hi] araligina alir
-    return lo if x < lo else hi if x > hi else x
-
-
-def deadband(x, db):    # Kucuk degerleri (|x|<db) sifirlar -> jitter onler
-    return 0.0 if abs(x) < db else x
-
-
-def rate_limit(target, prev, max_delta):    # Tick basi degisimi +-max_delta ile sinirlar
-    return prev + clamp(target - prev, -max_delta, max_delta)
-
-
-def world_to_body(ex, ey, yaw_rad):         # Simulasyon dunyasının yatay hatasini govde (ileri/sag) cercevesine cevirir
-    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
-    e_fwd   = ex * c + ey * s
-    e_right = ex * s - ey * c
-    return e_fwd, e_right
-
-
-# ==========================================================
-# GPS TAKIP KONTROLU
-# ==========================================================
 class GPSTakip:
-    def __init__(self, drone):
+    """Bozuk GNSS ile yaklasma guduumu. Her tik `adim()` cagrilir (50 Hz)."""
+
+    def __init__(self, drone, gonderici):
         self.drone = drone
+        self.gonderici = gonderici
         self.filtre = None
         self.sifirla()
 
     # ----------------------------------------------------------------
-    #  Yeni gorev icin durumu sıfırla
+    #  Yeni gorev icin durumu sifirla
     # ----------------------------------------------------------------
     def sifirla(self):
         self.filtre = GNSSFiltre(gecikme_sn=GPSCfg.GECIKME_SN)
@@ -120,7 +99,6 @@ class GPSTakip:
         self._son_fresh_t = None
 
         # kontrol durumu
-        self.prev = {'thr': 0.0, 'pitch': 0.0, 'roll': 0.0, 'yaw': 0.0}
         self.e_prev = None
         self.t_prev = None
         self.de = [0.0, 0.0, 0.0]    # EMA-filtreli hata turevi (cm/s)
@@ -130,23 +108,21 @@ class GPSTakip:
         self._kalkis_done = (not GPSCfg.TAKEOFF)
         self._zemin_z = None         # kalkis noktasi
 
+        # gozetmen/konsol icin durum (guduume GIRMEZ)
+        self.d_h = None              # cm; yatay hedef mesafesi (handoff kapisi okur)
+        self.faz = "KALKIS" if GPSCfg.TAKEOFF else "YAKLASMA"
+
     # ----------------------------------------------------------------
-    #  Komut gonder
+    #  Komut gonder (TEK kapi: control.common.KomutGonderici)
     # ----------------------------------------------------------------
     def _send(self, thr, pitch, roll, yaw):
-        thr   = rate_limit(thr,   self.prev['thr'],   GPSCfg.MAX_DELTA_THR)
-        pitch = rate_limit(pitch, self.prev['pitch'], GPSCfg.MAX_DELTA_PITCH)
-        roll  = rate_limit(roll,  self.prev['roll'],  GPSCfg.MAX_DELTA_ROLL)
-        yaw   = rate_limit(yaw,   self.prev['yaw'],   GPSCfg.MAX_DELTA_YAW)
-        self.prev = {'thr': thr, 'pitch': pitch, 'roll': roll, 'yaw': yaw}
-        self.drone.set_control_surfaces(thr, pitch, roll, yaw, True)
+        self.gonderici.gonder(thr, pitch, roll, yaw)
 
     def _send_ham(self, thr, pitch, roll, yaw):
-        self.prev = {'thr': thr, 'pitch': pitch, 'roll': roll, 'yaw': yaw}
-        self.drone.set_control_surfaces(thr, pitch, roll, yaw, True)
+        self.gonderici.gonder_ham(thr, pitch, roll, yaw)
 
     def _loiter(self):
-        self._send(0.0, 0.0, 0.0, 0.0)
+        self.gonderici.loiter()
 
     # ----------------------------------------------------------------
     #  GNSS Temizleme
@@ -194,8 +170,9 @@ class GPSTakip:
         drone_yaw = math.radians(yaw_m) if GPSCfg.ROT_IN_DEGREES else yaw_m
         t = time.perf_counter()
         self._hedef_temizle()
-        
+
         if not self._kalkis_done:
+            self.faz = "KALKIS"
             if self._zemin_z is None:
                 self._zemin_z = float(drone_pos[2])
             hedef_z = self._zemin_z + GPSCfg.TAKEOFF_ALT_AGL
@@ -203,6 +180,7 @@ class GPSTakip:
                 self._send_ham(GPSCfg.TAKEOFF_THR, 0.0, 0.0, 0.0)
                 return
             self._kalkis_done = True
+        self.faz = "YAKLASMA"
 
         # -- Veri Kesintisi --
         if self._fresh:
@@ -213,7 +191,7 @@ class GPSTakip:
             self._loiter()
             return
 
-        # -- Dead-reckoning süresi --
+        # -- Dead-reckoning suresi --
         dr_dt = 0.0
         if (not self._fresh) and self._son_fresh_t is not None:
             dr_dt = clamp(t - self._son_fresh_t, 0.0, GPSCfg.DR_MAX_S)
@@ -235,6 +213,7 @@ class GPSTakip:
         ex = tx - float(drone_pos[0])
         ey = ty - float(drone_pos[1])
         d_h = math.hypot(ex, ey)
+        self.d_h = d_h                      # gozetmen (handoff kapisi) okur
 
         # -- Takip mesafesi --
         if d_h > 1e-6:
