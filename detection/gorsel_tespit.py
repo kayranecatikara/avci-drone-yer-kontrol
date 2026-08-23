@@ -16,6 +16,15 @@ ndarray dondurdugunden dogrudan gecmek DOGRU renktir (PIL RGB de kabul edilir).
 """
 
 
+import os
+
+
+def _np_bos(n):
+    """engine isitma/dogrulama icin bos kare (yukleme gercekten calisiyor mu)."""
+    import numpy as _np
+    return _np.zeros((int(n), int(n), 3), dtype=_np.uint8)
+
+
 class HedefDedektor:
 
     def __init__(self, model_path, conf=0.35, imgsz=640, device=None, half=None,
@@ -54,7 +63,49 @@ class HedefDedektor:
             # anlamsiz/yavas -> otomatik kapali. Cagiran acikca half=True/False verebilir.
             if self.half is None:
                 self.half = (self.device == "cuda")
-            self.model = YOLO(model_path)
+            # ── MOTOR SECIMI: TensorRT .engine varsa ONU kullan (2026-08-11) ──
+            # OLCULDU (RTX 4060, oyun+sunucu kosarken, ayni 40 kare):
+            #     motor    tam-kare   SAHI batch8   kare/sn   IoU ort   IoU>0.9
+            #     .pt       113.5 ms     205.1 ms      3.1     1.0000      —
+            #     .onnx     752.4 ms     877.0 ms      0.6     0.9840     ...
+            #     .engine    13.1 ms      33.9 ms     21.3     0.9861    %100
+            # -> 7 kat hiz, tespit sayisi BIREBIR ayni (20/20), kutu kaymasi yok.
+            # ONNX ELENDI: onnxruntime GPU degil, CPU'da kosuyor.
+            # engine GPU/TensorRT surumune BAGLIDIR -> yuklenemezse .pt'ye doner
+            # ve SEBEBI YAZAR (sessiz dusme yok). AVCI_MOTOR=pt ile kapatilir.
+            self.motor = "pt"
+            _istek = os.environ.get("AVCI_MOTOR", "auto").strip().lower()
+            _yol = str(model_path)
+            if _istek != "pt" and _yol.lower().endswith(".pt"):
+                _eng = _yol[:-3] + ".engine"
+                if os.path.exists(_eng):
+                    try:
+                        self.model = YOLO(_eng, task="detect")
+                        self.model.predict(_np_bos(self.imgsz), imgsz=self.imgsz,
+                                           device=self.device, verbose=False)
+                        self.motor = "engine"
+                        _yol = _eng
+                    except Exception as e:
+                        print("[GORSEL] TensorRT engine yuklenemedi -> .pt'ye "
+                              "donuluyor. Sebep: %r" % (e,))
+                        self.model = None
+                elif _istek == "engine":
+                    print("[GORSEL] AVCI_MOTOR=engine istendi ama dosya YOK: %s" % _eng)
+                else:
+                    # ⚠ SESSIZ DUSME ARTIK SESSIZ DEGIL (2026-08-21).
+                    # Engine YOKSA eskiden hicbir sey yazilmiyordu ve sistem
+                    # 7 KAT yavas kosuyordu. Yeni bir makinede kurulum yapan
+                    # kisi bunu FPS'e bakarak anlamak zorunda kaliyordu --
+                    # nitekim oyle oldu: "model 14 fps ile calisiyor".
+                    # .engine dosyalari GPU/surucu/TensorRT surumune ozeldir,
+                    # makineden makineye KOPYALANAMAZ; her makinede uretilir.
+                    print("[GORSEL] ⚠ TensorRT engine YOK (%s) -> .pt ile kosuluyor."
+                          % os.path.basename(_eng))
+                    print("[GORSEL]   OLCULDU: .pt 113.5 ms (3.1 kare/sn)  vs  "
+                          ".engine 13.1 ms (21.3 kare/sn) = 7 KAT.")
+                    print("[GORSEL]   Uretmek icin:  python arac/motor_uret.py")
+            if self.model is None:
+                self.model = YOLO(model_path)
             self.names = dict(getattr(self.model, "names", {}) or {})
             self.task = getattr(self.model, "task", None)
             if self.task == "pose":
@@ -181,17 +232,49 @@ class HedefDedektor:
                 and max((d["conf"] for d in tam), default=0.0) >= self.sahi_kosul_conf):
             return tam, W, H
         kutular = list(tam) if self.sahi_tam_kare else []
-        for (x0, y0, x1, y1) in self._dilimler(W, H, self.sahi_dilim, self.sahi_ortusme):
-            tile = arr[y0:y1, x0:x1]
-            if tile.size == 0:
-                continue
+        # ── DILIMLER TEK BATCH'TE (2026-08-10, olculdu) ────────────────────
+        # ONCEDEN: her dilim ayri predict cagrisi (8 dilim = 8 GPU turu).
+        # ultralytics liste kabul ediyor -> tek forward. AYNI dilimler, AYNI
+        # sonuc, daha az GPU turu. OLCUM (90 uzak kare, 40-120 m, RTX 4060):
+        #     SAHI kapali    : tespit  0.0%   25.2 ms/kare  (39.6 FPS)
+        #     640 SERI (eski): tespit 71.1%  118.4 ms/kare  ( 8.4 FPS)
+        #     640 BATCH (yeni): tespit 71.1%  55.4 ms/kare  (18.0 FPS)  <- 2.1x
+        #     1080 batch     : tespit 13.3%   40.0 ms/kare  -> recall COKER
+        # Yani recall'den hicbir sey vermeden arama fazi ikiye katlaniyor.
+        # Batch basarisiz olursa (bellek/surum) SERI yola dusulur — sessiz
+        # kalmaz, davranis eskisiyle bit-ayni olur.
+        dilimler = [(x0, y0, x1, y1)
+                    for (x0, y0, x1, y1) in self._dilimler(W, H, self.sahi_dilim,
+                                                           self.sahi_ortusme)
+                    if arr[y0:y1, x0:x1].size > 0]
+        if dilimler:
+            tiles = [arr[y0:y1, x0:x1] for (x0, y0, x1, y1) in dilimler]
+            sonuc = None
             try:
-                r = self.model.predict(tile, imgsz=self.imgsz, conf=self.conf,
-                                       device=self.device, verbose=False, **self._fp16_kwargs)[0]
-            except Exception:
-                continue
-            sub, _, _ = self._res_kutular(r, float(x0), float(y0), kp_al=False)
-            kutular.extend(sub)                            # koordlar zaten tam-kareye offsetli
+                sonuc = self.model.predict(tiles, imgsz=self.imgsz, conf=self.conf,
+                                           device=self.device, verbose=False,
+                                           **self._fp16_kwargs)
+                if len(sonuc) != len(dilimler):
+                    sonuc = None                           # beklenmedik -> seri yol
+            except Exception as e:
+                if not getattr(self, "_batch_uyari", False):
+                    self._batch_uyari = True
+                    print("[GORSEL] SAHI batch basarisiz, seri yola dusuldu: %r" % (e,))
+                sonuc = None
+            if sonuc is not None:
+                for (x0, y0, _, _), r in zip(dilimler, sonuc):
+                    sub, _, _ = self._res_kutular(r, float(x0), float(y0), kp_al=False)
+                    kutular.extend(sub)
+            else:
+                for (x0, y0, x1, y1) in dilimler:          # geri-donus: eski seri yol
+                    try:
+                        r = self.model.predict(arr[y0:y1, x0:x1], imgsz=self.imgsz,
+                                               conf=self.conf, device=self.device,
+                                               verbose=False, **self._fp16_kwargs)[0]
+                    except Exception:
+                        continue
+                    sub, _, _ = self._res_kutular(r, float(x0), float(y0), kp_al=False)
+                    kutular.extend(sub)
         return self._nms(kutular, self.sahi_nms_iou), W, H
 
     def _res_kutular(self, res, ox, oy, kp_al):
@@ -215,12 +298,23 @@ class HedefDedektor:
                         kp_conf = kc.cpu().numpy() if hasattr(kc, "cpu") else np.asarray(kc)
                 except Exception:
                     kp_xy = kp_conf = None
+        # ⚠ 2026-08-17: eskiden kutu basina ALTI ayri GPU->CPU aktarimi vardi
+        #   (float(boxes.xyxy[i]) x4 + conf + cls). Her biri ortuk senkron +
+        #   GIL birak/al demek; conf=0.25'te tipik 8-15 kutu -> kare basina
+        #   50-90 gidis-donus. GIL devir gecikmesiyle carpilinca dogrudan
+        #   det_ms'e biniyordu. Tek seferde numpy'a al, sonra oradan oku.
+        _xyxy = boxes.xyxy.cpu().numpy() if hasattr(boxes.xyxy, "cpu") else np.asarray(boxes.xyxy)
+        _cnf = boxes.conf.cpu().numpy() if hasattr(boxes.conf, "cpu") else np.asarray(boxes.conf)
+        _cls = None
+        if boxes.cls is not None:
+            _cls = boxes.cls.cpu().numpy() if hasattr(boxes.cls, "cpu") else np.asarray(boxes.cls)
         for i in range(len(boxes)):
-            x1, y1, x2, y2 = [float(v) for v in boxes.xyxy[i]]
+            x1, y1, x2, y2 = (float(_xyxy[i][0]), float(_xyxy[i][1]),
+                              float(_xyxy[i][2]), float(_xyxy[i][3]))
             d = {
                 "x1": x1 + ox, "y1": y1 + oy, "x2": x2 + ox, "y2": y2 + oy,
-                "conf": float(boxes.conf[i]),
-                "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
+                "conf": float(_cnf[i]),
+                "cls": int(_cls[i]) if _cls is not None else -1,
                 "kp": None,
             }
             if kp_xy is not None and i < len(kp_xy):

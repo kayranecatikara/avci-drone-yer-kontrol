@@ -35,3 +35,10 @@ desktop.ini
 
 # Yanlislikla olusan cift uzantili kopya (dogrusu: omer_filtre.py)
 omer_filtre.py.py
+
+# --- TensorRT motorlari: MAKINEYE OZEL, repoya KONMAZ ---
+# .engine dosyasi GPU mimarisine + surucu + TensorRT surumune gore derlenir.
+# Baska makineden kopyalanan ya yuklenmez ya yanlis calisir.
+# Her makinede uretilir:  python arac/motor_kur.py   (bkz. FPS_VE_MODEL.md)
+models/*.engine
+*.engine
