@@ -1,3 +1,6 @@
 # .sh dosyalari bash icin HER ZAMAN LF ile checkout edilsin
 # (CRLF'li shebang '\r' yuzunden Linux'ta calismaz)
 *.sh text eol=lf
+
+# .ps1 dosyalari PowerShell icin CRLF ile checkout edilsin
+*.ps1 text eol=crlf

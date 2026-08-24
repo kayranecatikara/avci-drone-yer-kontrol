@@ -2,9 +2,10 @@
 # ============================================================
 #  DRONES OF WAR - simulasyon oyununu Wine ile baslatir (Linux)
 # ------------------------------------------------------------
-#  Oyun bir Windows .exe oldugu icin Wine uzerinden calisir.
-#  Oyun acilinca PLAY moduna gec, sonra AYRI bir terminalde:
-#      python3 -m control.main
+#  Bu script YALNIZCA oyunu acar. Gorev baslatma isi bu scriptin
+#  isi degildir; yer kontrol arayuzunden yapilir (web/).
+#
+#  Oyun acilinca PLAY moduna gecmeyi unutma.
 #
 #  PENCERE MODU: kamera hatti (perception/camera.py) EKRANI yakalar
 #  (mss). Oyun penceresi GORUNUR/ONDE kalmali; KENARLIKSIZ PENCERE
@@ -60,7 +61,6 @@ echo "============================================================"
 echo "  DRONES OF WAR - Wine ile baslatiliyor..."
 echo "  Calistirilan: $EXE $ARGS"
 echo "  Oyun acilinca PLAY moduna gecmeyi unutma."
-echo "  Ardindan:  python3 -m control.main"
 echo "============================================================"
 
 cd "$(dirname "$EXE")"

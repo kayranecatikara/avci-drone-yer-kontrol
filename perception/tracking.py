@@ -8,13 +8,13 @@ eslesmesiyle degerlendirir (use_byte + low_thresh) ve tek-kare parazitin izi
 kapmasini engeller (min_hits).
 
 Bu sarmalayici tek-hedef sozlesmesi sunar:
-    Takipci().guncelle(tespitler, frame) -> en iyi (en guvenli) iz | None
+    Tracker().update(detections, frame) -> en iyi (en guvenli) iz | None
 
 Cikti yalnizca O KARDE OLCULEN izleri icerir (coast/tahmin kutusu yayinlanmaz):
 guduum ancak gercek gorsel temasla komut uretsin; tespit deliklerini gorsel faz
-kendi bayatlik esigiyle (control.gorsel_takip.Cfg.STALE_S) yonetir.
+kendi bayatlik esigiyle (control.visual_tracking.Cfg.STALE_S) yonetir.
 
-DAYANIKLILIK: boxmot kurulu degilse hazir=False -> guncelle() ham argmax kutusunu
+DAYANIKLILIK: boxmot kurulu degilse ready=False -> update() ham argmax kutusunu
 dondurur (takip katmani devre disi, sistem calismaya devam eder).
 """
 import numpy as np
@@ -33,21 +33,40 @@ TRACKER_PARAMS = {
     "longterm_reid_weight": 0.0, "with_longterm_reid_correction": True,
     "longterm_reid_correction_thresh": 0.4, "longterm_reid_correction_thresh_low": 0.4,
 }
-CMC_METHOD = "ecc"      # kamera-hareket telafisi (HybridSort kendi karesiyle yapar)
+# Kamera-hareket telafisi. OLCULDU (1920x1200, n=30/kol, update() basina):
+#     ecc  9.66 ms   |  sof  3.51 ms   |  yok  0.41 ms   |  ecc@yari-coz  1.76 ms
+# ⛔ ECC KULLANMAYIN. Asagidaki _silence() yorumunun kendisi ECC'nin dokusu az
+#   GOKYUZU karelerinde "did not converge" bastigini soyluyor — yani 9.66 ms
+#   yakip guvenilmez bir donusum uretiyor. `sof` (seyrek optik akis) ayni isi
+#   3.5 ms'de ve gokyuzunde daha saglam yapar.
+#   Gecerli degerler (boxmot 22): "ecc", "orb", "sift", "sof".
+CMC_METHOD = "sof"
+
+# boxmot modul duzeni surumler arasinda IKI KEZ degisti; en YENIDEN eskiye dene.
+# ⚠ 22.0.0'da `hybridsort` bir PAKET degil, duz MODULDUR -> eski iki yol da
+#   ModuleNotFoundError verir. Bu SESSIZ bir bozulmaydi: ready=False olunca
+#   sistem ham argmax'a duser, kimlik surekliligi ve tek-kare parazit filtresi
+#   kaybolur ama hicbir sey cokmez.
+_HYBRIDSORT_PATHS = (
+    "boxmot.trackers.bbox.hybridsort",            # v22+  (duz modul)
+    "boxmot.trackers.bbox.hybridsort.hybridsort",  # v19-v21
+    "boxmot.trackers.hybridsort.hybridsort",       # eski duzen
+)
 
 
-def _hybridsort_sinifi():
-    """boxmot surumleri arasinda modul yolu degisti — sirayla dene."""
-    try:                                   # v19+
-        from boxmot.trackers.bbox.hybridsort.hybridsort import HybridSort
-        return HybridSort
-    except ImportError:
-        pass
-    from boxmot.trackers.hybridsort.hybridsort import HybridSort   # eski duzen
-    return HybridSort
+def _hybridsort_class():
+    """Kurulu boxmot surumune uyan HybridSort sinifini bulur."""
+    import importlib
+    errors = []
+    for path in _HYBRIDSORT_PATHS:
+        try:
+            return getattr(importlib.import_module(path), "HybridSort")
+        except (ImportError, AttributeError) as e:
+            errors.append("%s: %s" % (path, e))
+    raise ImportError("HybridSort bulunamadi -> " + " | ".join(errors))
 
 
-def _sessizlestir():
+def _silence():
     """ECC "did not converge" gibi kare basi WARNING selini keser (dokusu az
     gokyuzu karelerinde her karede basar). ERROR gorunmeye devam eder.
     DIKKAT: boxmot kendi logger'ini kurarken seviyeyi INFO'ya geri cekiyor ->
@@ -56,38 +75,38 @@ def _sessizlestir():
     logging.getLogger("boxmot").setLevel(logging.ERROR)
 
 
-class Takipci:
+class Tracker:
 
     def __init__(self):
-        self.hazir = False
-        self.hata = None
+        self.ready = False
+        self.error = None
         self._tr = None
-        self.trackler = []
-        self.sifirla()
+        self.tracks = []
+        self.reset()
 
-    def sifirla(self):
+    def reset(self):
         """Yeni gorev: bayat iz/kimlikle baslamasin."""
-        self.trackler = []
+        self.tracks = []
         try:
-            HybridSort = _hybridsort_sinifi()
+            HybridSort = _hybridsort_class()
             self._tr = HybridSort(reid_model=None, cmc_method=CMC_METHOD, **TRACKER_PARAMS)
-            _sessizlestir()
-            self.hazir = True
+            _silence()
+            self.ready = True
         except Exception as e:
             self._tr = None
-            self.hazir = False
-            self.hata = repr(e)
+            self.ready = False
+            self.error = repr(e)
 
-    def guncelle(self, tespitler, frame):
-        """tespitler: detector.tespit_hepsi ciktisi (PIKSEL); frame: BGR ndarray.
+    def update(self, detections, frame):
+        """detections: detector.detect_all ciktisi (PIKSEL); frame: BGR ndarray.
         -> en iyi iz dict {track_id, cx, cy, w, h, conf, W, H, t} | None"""
-        if not self.hazir or frame is None or not hasattr(frame, "shape"):
-            self.trackler = []
-            return tespitler[0] if tespitler else None      # takip yok -> ham argmax
+        if not self.ready or frame is None or not hasattr(frame, "shape"):
+            self.tracks = []
+            return detections[0] if detections else None  # takip yok -> ham argmax
 
-        if tespitler:
-            arr = np.empty((len(tespitler), 6), dtype=np.float32)
-            for i, d in enumerate(tespitler):
+        if detections:
+            arr = np.empty((len(detections), 6), dtype=np.float32)
+            for i, d in enumerate(detections):
                 cx, cy, w, h = float(d["cx"]), float(d["cy"]), float(d["w"]), float(d["h"])
                 arr[i] = (cx - w / 2.0, cy - h / 2.0, cx + w / 2.0, cy + h / 2.0,
                           float(d.get("conf", 0.9)), float(d.get("cls", 0)))
@@ -97,21 +116,21 @@ class Takipci:
         try:
             out = np.asarray(self._tr.update(arr, frame))
         except Exception:
-            self.trackler = []
+            self.tracks = []
             return None
-        self.trackler = out.tolist() if len(out) else []
+        self.tracks = out.tolist() if len(out) else []
         if not len(out):
             return None
 
-        best = out[int(np.argmax(out[:, 5]))]        # en yuksek conf'lu iz
+        best = out[int(np.argmax(out[:, 5]))]  # en yuksek conf'lu iz
         x1, y1, x2, y2, tid, conf, cls, ind = [float(v) for v in best]
         cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
 
         # Eslesen ORIJINAL tespitten kare olculerini/zaman damgasini tasi.
         src = None
         ii = int(round(ind))
-        if tespitler and 0 <= ii < len(tespitler):
-            src = tespitler[ii]
+        if detections and 0 <= ii < len(detections):
+            src = detections[ii]
         d = {"track_id": int(round(tid)),
              "cx": cx, "cy": cy, "w": x2 - x1, "h": y2 - y1, "conf": conf,
              "cls": int(round(cls)),

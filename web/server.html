@@ -1,0 +1,556 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Avcı Drone — Yer Kontrol İstasyonu</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#11161f; --panel2:#161c27; --border:#222c3a;
+    --text:#cdd6e4; --muted:#6b7891; --accent:#00e0a4; --accent2:#33a0ff;
+    --danger:#ff5d5d; --warn:#ffb454;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Segoe UI",system-ui,sans-serif;background:var(--bg);
+    color:var(--text);height:100vh;display:grid;
+    grid-template-rows:56px 1fr;overflow:hidden;
+  }
+  .mono{font-family:Consolas,"Courier New",monospace}
+
+  /* ---- Üst bar ---- */
+  header{
+    display:flex;align-items:center;justify-content:space-between;
+    padding:0 20px;background:var(--panel);border-bottom:1px solid var(--border);
+  }
+  header h1{font-size:16px;letter-spacing:.5px;font-weight:600}
+  header h1 .em{color:var(--accent)}
+  .conn{display:flex;align-items:center;gap:8px;font-size:13px}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--muted);transition:.2s}
+  .dot.ok{background:var(--accent);box-shadow:0 0 10px var(--accent)}
+  .dot.wait{background:var(--warn);box-shadow:0 0 10px var(--warn)}
+  .dot.bad{background:var(--danger);box-shadow:0 0 10px var(--danger)}
+
+  /* ---- Ana 3 panel ---- */
+  main{display:grid;grid-template-columns:250px 1fr 330px;gap:12px;padding:12px;min-height:0}
+  .col{background:var(--panel);border:1px solid var(--border);border-radius:10px;
+    display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .col h2{font-size:12px;letter-spacing:1.5px;color:var(--muted);font-weight:600;
+    padding:14px 16px;border-bottom:1px solid var(--border);text-transform:uppercase}
+  .col .body{padding:14px 16px;overflow:auto;flex:1;min-height:0}
+
+  /* ---- Sol panel: butonlar ---- */
+  .btn{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;
+    margin-bottom:10px;background:var(--panel2);border:1px solid var(--border);
+    border-radius:8px;color:var(--text);font-size:14px;cursor:pointer;
+    transition:.15s;text-align:left}
+  .btn:hover{border-color:var(--accent2);background:#1b2330}
+  .btn .ic{font-size:18px}
+  .btn.start:hover{border-color:var(--accent)}
+  .btn.stop:hover{border-color:var(--danger)}
+  .btn.active{border-color:var(--accent);background:#13202b;
+    box-shadow:inset 0 0 0 1px var(--accent)}
+  .note{font-size:11px;color:var(--muted);margin-top:6px;line-height:1.5}
+  .grpsep{font-size:10px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;
+    margin:14px 0 8px;border-top:1px solid var(--border);padding-top:10px}
+
+  /* ---- Sağ panel: telemetri ---- */
+  .card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    padding:12px 14px;margin-bottom:12px}
+  .card .title{font-size:12px;letter-spacing:1px;font-weight:600;margin-bottom:10px;
+    display:flex;align-items:center;gap:8px}
+  .card.drone .title{color:var(--accent)}
+  .card.target .title{color:var(--accent2)}
+  .row{display:flex;justify-content:space-between;align-items:baseline;
+    padding:5px 0;border-bottom:1px dashed #1a2230}
+  .row:last-child{border-bottom:none}
+  .row .k{font-size:12px;color:var(--muted)}
+  .row .v{font-size:14px}.row .v small{color:var(--muted);font-size:11px}
+  .dist{background:linear-gradient(135deg,#13202b,#161c27);border:1px solid var(--border);
+    border-radius:8px;padding:14px;text-align:center}
+  .dist .k{font-size:11px;letter-spacing:1px;color:var(--muted)}
+  .dist .v{font-size:30px;color:var(--accent);margin-top:4px}
+  .dist .v small{font-size:14px;color:var(--muted)}
+
+  .status{font-size:12px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border)}
+
+  /* ---- Orta panel: kuşbakışı harita (büyük) + olay günlüğü (altta) ---- */
+  #minimapWrap{position:relative;background:#06080c;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  #minimap{width:100%;height:100%;display:block}
+  .mm-legend{position:absolute;left:8px;bottom:6px;font-size:10px;line-height:1.5;color:var(--muted);
+    background:rgba(6,8,12,.6);padding:3px 6px;border-radius:5px}
+  .mm-legend i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:5px;vertical-align:middle}
+  #eventLogWrap{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+    display:flex;flex-direction:column;min-height:0}
+  #eventLogWrap .log-title{font-size:11px;letter-spacing:1px;color:var(--muted);font-weight:600;
+    padding:8px 10px;border-bottom:1px solid var(--border);text-transform:uppercase;flex:0 0 auto}
+  #eventLog{flex:1;overflow-y:auto;padding:6px 10px;font-size:12px;font-family:Consolas,monospace;line-height:1.55;min-height:0}
+  #eventLog .ev-row{display:flex;gap:8px;padding:1px 0}
+  #eventLog .ev-row .ev-time{color:#55627a;flex:0 0 auto}
+  .ev-info{color:var(--text)} .ev-good{color:var(--accent)}
+  .ev-warn{color:var(--warn)} .ev-critical{color:var(--danger);font-weight:600}
+
+  /* ---- Faz çipleri ---- */
+  .phase-strip{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:10px}
+  .phase-chip{font-size:10px;padding:4px 7px;border-radius:5px;background:var(--panel);
+    border:1px solid var(--border);color:var(--muted);letter-spacing:.3px}
+  .phase-chip.on{background:#13202b;border-color:var(--accent);color:var(--accent);font-weight:600}
+
+  /* ---- Rozetler ---- */
+  .badge{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:5px}
+  .badge.on{background:rgba(20,140,90,.22);color:var(--accent)}
+  .badge.idle{background:#1a2230;color:var(--muted)}
+  .badge.alert{background:rgba(220,40,40,.25);color:var(--danger);animation:badgeBlink 1s infinite}
+  @keyframes badgeBlink{0%,100%{opacity:1}50%{opacity:.35}}
+
+  /* ---- Güdüm komut barları (merkezden −1..+1) ---- */
+  .cmdrow{display:flex;align-items:center;gap:8px;padding:4px 0}
+  .cmdrow .cmdlab{font-size:11px;color:var(--muted);flex:0 0 42px}
+  .cmdbar{position:relative;flex:1;height:14px;background:var(--panel);
+    border:1px solid var(--border);border-radius:4px;overflow:hidden}
+  .cmdbar .cmdzero{position:absolute;left:50%;top:0;bottom:0;width:1px;background:#39465a;z-index:1}
+  .cmdbar .cmdfill{position:absolute;top:0;bottom:0;left:50%;width:0;background:var(--accent2);transition:.12s}
+  .cmdrow .cmdval{font-size:12px;flex:0 0 46px;text-align:right;font-family:Consolas,monospace}
+</style>
+</head>
+<body>
+
+  <header>
+    <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span>
+        <span id="modeBadge" class="badge idle" style="margin-left:10px">MOD —</span></h1>
+    <div class="conn"><span id="dot" class="dot bad"></span><span id="connText">Bağlantı bekleniyor…</span></div>
+  </header>
+
+  <main>
+    <!-- SOL: Görev kontrolü — iki mod, tek durdurma -->
+    <section class="col">
+      <h2>Görev Kontrol</h2>
+      <div class="body">
+        <button id="startGpsBtn" class="btn start" onclick="missionStart('start_gps')"><span class="ic">🛰️</span> GPS Takibi Başlat</button>
+        <div class="note" style="margin:-4px 0 12px">
+          Kalkış → hedefin <b>kuyruğundaki istasyona</b> oturma ve orada kalma.
+          Kamera hattı hiç çalışmaz (dedektör yüklenmez).
+        </div>
+        <button id="startHybridBtn" class="btn start" onclick="missionStart('start_hybrid')"><span class="ic">🎥</span> Hibrit Takip Başlat <small style="color:var(--muted)">(GPS + Kamera)</small></button>
+        <div class="note" style="margin:-4px 0 12px">
+          Aynı GPS fazıyla başlar; <b>devir kapısı</b> açılınca görsel faza geçer
+          ve komut <b>yalnızca kameradan</b> türer. Hedef kaybolursa GPS istasyon
+          tutmaya geri döner.
+        </div>
+        <button class="btn stop" onclick="missionStop()"><span class="ic">⏹️</span> Durdur</button>
+        <div class="grpsep">Bu arayüz güdüm üretmez</div>
+        <div class="note">
+          Komut <code>control/</code> paketinden gelir: GPS fazı
+          <code>gps_approach.py</code>, görsel faz <code>visual_tracking.py</code>,
+          faz kapısı <code>main.py</code>. Arayüz yalnızca gösterir ve tetikler.
+        </div>
+        <div class="grpsep">Hibrit modda</div>
+        <div class="note">
+          Kamera hattı oyun <b>ekranını</b> yakalar — oyun penceresi
+          <b>görünür/önde</b> kalmalı, yoksa dedektöre masaüstü pikseli gider.
+          Görsel fazda GPS/GNSS komuta <b>girmez</b>.
+        </div>
+      </div>
+    </section>
+
+    <!-- ORTA: Kuşbakışı harita (büyük) + olay günlüğü (altta) -->
+    <section class="col">
+      <h2>Kuşbakışı Harita</h2>
+      <div class="body" style="padding:12px;display:flex;flex-direction:column;gap:10px;overflow:hidden">
+        <!-- ANA ALAN: kuşbakışı mini-harita (avcı / ham-bozuk hedef / temiz hedef) -->
+        <div id="minimapWrap" style="flex:1;min-height:0">
+          <canvas id="minimap"></canvas>
+          <div class="mm-legend">
+            <div><i style="background:#25e0a0"></i>Avcı</div>
+            <div><i style="background:#ff5d5d"></i>Hedef (ham/bozuk GPS)</div>
+            <div><i style="background:#b98cff"></i>Hedef (temiz)</div>
+            <div><i style="background:#ffb454"></i>İstasyon (hedefin kuyruğu)</div>
+          </div>
+        </div>
+        <!-- ALT: görev olay günlüğü -->
+        <div id="eventLogWrap" style="height:220px;flex:0 0 auto">
+          <div class="log-title">📜 Görev Olay Günlüğü</div>
+          <div id="eventLog"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SAĞ: Telemetri -->
+    <section class="col">
+      <h2>Telemetri</h2>
+      <div class="body">
+        <!-- GÖREV DURUMU: faz çipleri (kalkış → istasyon → görsel) -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent)">🚩 GÖREV DURUMU</div>
+          <div class="phase-strip" id="phaseStrip">
+            <span class="phase-chip" data-phase="READY">HAZIR</span>
+            <span class="phase-chip" data-phase="TAKEOFF">KALKIŞ</span>
+            <span class="phase-chip" data-phase="STATION">İSTASYON</span>
+            <span class="phase-chip" data-phase="VISUAL">GÖRSEL</span>
+          </div>
+          <div class="row"><span class="k">En yakın mesafe <small>(GPS)</small></span><span class="v mono" id="msClosest">—</span></div>
+          <div class="row"><span class="k">En iyi istasyon hatası</span><span class="v mono" id="msBestStation">—</span></div>
+        </div>
+
+        <!-- İSTASYON TUTMA: GPS fazının BİRİNCİL ölçütü -->
+        <div class="card" style="border-color:#2a3550">
+          <div class="title" style="color:var(--accent)">📍 İSTASYON TUTMA</div>
+          <div class="row"><span class="k">İstasyon hatası</span><span class="v mono" id="stErr">—</span></div>
+          <div class="row"><span class="k">— yatay / dikey</span><span class="v mono" id="stErrHV">—</span></div>
+          <div class="row"><span class="k">İstek hızı</span><span class="v mono" id="stVcmd">—</span></div>
+          <div class="row"><span class="k">Hedef hızı (filtre)</span><span class="v mono" id="stTargetSpeed">—</span></div>
+          <div class="row"><span class="k">Hedef yönü</span><span class="v mono" id="stTargetHeading">—</span></div>
+          <div class="row"><span class="k">GNSS kapısı <small>(CT-EKF)</small></span><span class="v mono" id="stFilter">—</span></div>
+          <div class="note" id="stNote">—</div>
+        </div>
+
+        <!-- GÖRSEL TAKİP: yalnız HİBRİT modda anlamlı. Buradaki her sayı
+             KUTU PİKSELİNDEN türer — hedefin GPS'i görsel fazda okunmaz. -->
+        <div class="card" id="visualCard" style="border-color:#3a2c50">
+          <div class="title" style="color:#b98cff">🎥 GÖRSEL TAKİP
+            <span id="vsBadge" class="badge idle">KAPALI</span></div>
+          <div class="row"><span class="k">Kilit <small>(ard arda kare)</small></span><span class="v mono" id="vsLock">—</span></div>
+          <div class="row"><span class="k">İstasyona oturma <small>(tik)</small></span><span class="v mono" id="vsStationTicks">—</span></div>
+          <div class="row"><span class="k">Tespit güveni</span><span class="v mono" id="vsConf">—</span></div>
+          <div class="row"><span class="k">Menzil <small>(kutudan)</small></span><span class="v mono" id="vsRange">—</span></div>
+          <div class="row"><span class="k">Kutu boyutu</span><span class="v mono" id="vsSize">—</span></div>
+          <div class="row"><span class="k">Hücum hızı</span><span class="v mono" id="vsAttackSpeed">—</span></div>
+          <div class="row"><span class="k">Kadraj hatası <small>(e_cy)</small></span><span class="v mono" id="vsEcy">—</span></div>
+          <div class="row"><span class="k">Köprü <small>(ölü-hesap)</small></span><span class="v mono" id="vsBridge">—</span></div>
+          <div class="row"><span class="k">Devir sayısı</span><span class="v mono" id="vsHandoff">—</span></div>
+          <div class="row"><span class="k">En yakın <small>(görsel)</small></span><span class="v mono" id="vsClosest">—</span></div>
+          <div class="row"><span class="k">Kamera</span><span class="v mono" id="vsCamera">—</span></div>
+          <div class="note" id="vsNote">—</div>
+        </div>
+
+        <!-- GÜDÜM KOMUTLARI: oyuna giden 4 çubuk -->
+        <div class="card" style="border-color:#26314a">
+          <div class="title" style="color:var(--accent2)">🕹️ GÜDÜM KOMUTLARI</div>
+          <div class="cmdrow"><span class="cmdlab">Gaz</span><div class="cmdbar"><div class="cmdzero"></div><div class="cmdfill" id="gdThr"></div></div><span class="cmdval" id="gdThrV">—</span></div>
+          <div class="cmdrow"><span class="cmdlab">Pitch</span><div class="cmdbar"><div class="cmdzero"></div><div class="cmdfill" id="gdPitch"></div></div><span class="cmdval" id="gdPitchV">—</span></div>
+          <div class="cmdrow"><span class="cmdlab">Roll</span><div class="cmdbar"><div class="cmdzero"></div><div class="cmdfill" id="gdRoll"></div></div><span class="cmdval" id="gdRollV">—</span></div>
+          <div class="cmdrow"><span class="cmdlab">Yaw</span><div class="cmdbar"><div class="cmdzero"></div><div class="cmdfill" id="gdYaw"></div></div><span class="cmdval" id="gdYawV">—</span></div>
+        </div>
+
+        <div class="card drone">
+          <div class="title">🛸 AVCI DRONE</div>
+          <div class="row"><span class="k">Konum X</span><span class="v mono" id="dx">—</span></div>
+          <div class="row"><span class="k">Konum Y</span><span class="v mono" id="dy">—</span></div>
+          <div class="row"><span class="k">Konum Z</span><span class="v mono" id="dz">—</span></div>
+          <div class="row"><span class="k">Hız</span><span class="v mono" id="dspd">—</span></div>
+          <div class="row"><span class="k">Yön (Yaw)</span><span class="v mono" id="dyaw">—</span></div>
+        </div>
+
+        <div class="card target">
+          <div class="title">🎯 HEDEF İHA <small style="color:var(--muted);font-weight:400">(ham GPS)</small></div>
+          <div class="row"><span class="k">Konum X</span><span class="v mono" id="tx">—</span></div>
+          <div class="row"><span class="k">Konum Y</span><span class="v mono" id="ty">—</span></div>
+          <div class="row"><span class="k">Konum Z</span><span class="v mono" id="tz">—</span></div>
+          <div class="note">Hedef hızı burada yok: SDK <code>get_target_speed()</code>
+            daima 0 döner. Gerçek kestirim <b>İSTASYON TUTMA → Hedef hızı (filtre)</b>
+            satırındadır.</div>
+        </div>
+
+        <div class="dist">
+          <div class="k">HAM GPS — AVCI MESAFE</div>
+          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+          <div class="k" style="margin-top:10px">TEMİZ (FİLTRE) — AVCI MESAFE</div>
+          <div class="v mono" style="font-size:20px;color:var(--accent2)"><span id="distClean">—</span> <small>m</small></div>
+        </div>
+
+        <!-- İRTİFA / Z TEŞHİS (yalnız ham) -->
+        <div class="card" style="border-color:#2a3550;margin-top:12px">
+          <div class="title" style="color:var(--accent2)">🔎 İRTİFA / Z TEŞHİS</div>
+          <div class="row"><span class="k">Drone Z (konum)</span><span class="v mono" id="zDz">—</span></div>
+          <div class="row"><span class="k">Hedef Z (ham)</span><span class="v mono" id="zTz">—</span></div>
+          <div class="row"><span class="k">Δ hedef−drone</span><span class="v mono" id="zDelta">—</span></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  async function sendCommand(cmd){
+    try{
+      await fetch("/api/command",{method:"POST",
+        headers:{"Content-Type":"application/json"},body:JSON.stringify({cmd:cmd})});
+    }catch(e){}
+  }
+  // Iki mod TEK uc noktadan tetiklenir; hangi modun kostugunu sunucu soyler.
+  function missionStart(cmd){ sendCommand(cmd || "start_gps"); }
+  function missionStop(){ sendCommand("stop"); }
+
+  function setConn(state){
+    const dot = $("dot"), txt = $("connText");
+    dot.className = "dot " + (state==="ok"?"ok":state==="wait"?"wait":"bad");
+    txt.textContent = state==="ok" ? "Oyuna bağlı"
+                    : state==="wait" ? "Oyuna bağlanılıyor…"
+                    : "Sunucu kapalı";
+  }
+
+  const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
+  const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
+  const f2 = (x)=> (x==null? "—" : Number(x).toFixed(2));
+  const dash = ()=>["dx","dy","dz","dspd","dyaw","tx","ty","tz","dist","distClean"]
+                    .forEach(id=>$(id).textContent="—");
+
+  // ===== Gorev durumu: faz cipleri =====
+  function updateMission(ms){
+    ms = ms || {};
+    const phase = ms.phase || "READY";
+    document.querySelectorAll("#phaseStrip .phase-chip").forEach(ch=>{
+      ch.classList.toggle("on", ch.dataset.phase===phase);
+    });
+    $("msClosest").innerHTML     = ms.closest_m!=null ? f1(ms.closest_m)+' <small>m</small>' : "—";
+    $("msBestStation").innerHTML = ms.best_station_m!=null ? f1(ms.best_station_m)+' <small>m</small>' : "—";
+  }
+
+  // Istasyon = hedefin MENZIL m gerisinde, R*ORAN m altinda duran sanal nokta.
+  // GPS fazi bu noktayi tutmaya calisir; "istasyon hatasi" birincil olcuttur.
+  function updateStation(s){
+    s = s || {};
+    $("stErr").innerHTML = s.err_m!=null
+      ? '<span style="color:'+(s.err_m<8?'var(--accent)':s.err_m<25?'var(--warn)':'var(--danger)')+'">'
+        +f1(s.err_m)+' <small>m</small></span>' : "—";
+    $("stErrHV").innerHTML = (s.err_horiz!=null && s.err_vert!=null)
+      ? f1(s.err_horiz)+' / '+f1(s.err_vert)+' <small>m</small>' : "—";
+    $("stVcmd").innerHTML          = s.v_cmd!=null ? f1(s.v_cmd)+' <small>m/s</small>' : "—";
+    $("stTargetSpeed").innerHTML   = s.target_speed_kmh!=null ? f1(s.target_speed_kmh)+' <small>km/h</small>' : "—";
+    $("stTargetHeading").innerHTML = s.target_heading!=null ? f0(s.target_heading)+' <small>°</small>' : "— <small>(yön yok)</small>";
+
+    // GNSS kapisi: Mahalanobis testi. d2 > gate^2 olan olcum jammer sicramasi
+    // sayilip REDDEDILIR; ust uste ret kacis esigine ulasinca P sisirilip
+    // filtre yeni rejime yeniden kilitlenir.
+    const fl = s.filter || {};
+    $("stFilter").innerHTML = !fl.started
+      ? '— <small>(filtre ısınıyor)</small>'
+      : (fl.accept === false
+          ? '<span style="color:var(--warn)">REDDEDİLDİ</span> <small>d²='
+            +f1(fl.d2)+' · ret '+(fl.ret||0)+'/'+(fl.escape_thresh||0)+'</small>'
+          : '<span style="color:var(--accent)">kabul</span> <small>d²='
+            +f1(fl.d2)+' (eşik '+f0((fl.gate||0)*(fl.gate||0))+')</small>');
+    if(s.range_m!=null) $("stNote").textContent =
+      "Hedefin "+f1(s.range_m)+" m gerisi, "+f1(s.range_m*(s.alt_ratio||0))+" m altı "
+      +"(alt oranı "+(s.alt_ratio!=null?s.alt_ratio:"—")+"). Hedef hızı ileri beslenir.";
+  }
+
+  // ===== Mod rozeti + hangi baslatma dugmesi etkin =====
+  function updateMode(t){
+    const active = !!t.mission_active, mode = t.mode || "GPS", hybrid = (mode === "HYBRID");
+    const badge = $("modeBadge");
+    badge.className = "badge " + (active ? "on" : "idle");
+    badge.textContent = active ? (hybrid ? "HİBRİT · GPS + KAMERA" : "GPS") : "MOD —";
+    $("startGpsBtn").classList.toggle("active", active && !hybrid);
+    $("startHybridBtn").classList.toggle("active", active && hybrid);
+  }
+
+  // ===== Gorsel takip (yalniz HIBRIT modda anlamli) =====
+  // Buradaki her buyukluk KUTU PIKSELINDEN turer: menzil = RANGE_C_REF/kutu,
+  // e_cy = kadraj regulasyon hatasi. Gorsel fazda hedefin GPS'i okunmaz.
+  function updateVisual(t){
+    const v = t.visual || {}, cam = t.camera || {};
+    const hybrid = (t.mode === "HYBRID") && !!t.mission_active;
+    const guiding = hybrid && v.phase === "VISUAL";
+    $("visualCard").style.opacity = hybrid ? "1" : ".45";
+
+    const badge = $("vsBadge");
+    badge.className = "badge " + (guiding ? "on" : "idle");
+    badge.textContent = !hybrid ? "KAPALI" : (guiding ? "GÜDÜMDE" : "DEVİR BEKLİYOR");
+
+    // Kapi 1: kesintisiz gorsel kanit — SURE **VE** KARE birlikte.
+    // Hangisinin bagladigi dedektor hizina gore degisir, o yuzden IKISI de gosterilir.
+    const lockFull = (v.lock != null && v.lock >= v.lock_need
+                      && v.lock_s != null && v.lock_s >= v.lock_s_need);
+    $("vsLock").innerHTML = (v.lock != null)
+      ? '<span style="color:'+(lockFull?'var(--accent)':'var(--text)')+'">'
+        +f1(v.lock_s||0)+' / '+f1(v.lock_s_need)+' s</span>'
+        +' <small>('+v.lock+' / '+v.lock_need+' kare)</small>' : "—";
+
+    // Kapi 2: istasyona oturma. GNSS bayatsa bu kosul DUSER (menzil bilinemez).
+    $("vsStationTicks").innerHTML = v.camera_only_gate ? '— <small>(kamera-tek kapı)</small>'
+      : v.gnss_stale ? '— <small>(GNSS bayat → koşul düştü)</small>'
+      : (v.station_ticks != null ? v.station_ticks+' / '+v.station_ticks_need : "—");
+
+    $("vsConf").innerHTML = (v.conf != null)
+      ? f2(v.conf)+' <small>(eşik '+f2(v.conf_min)+')</small>'
+      : '— <small>(geçerli kutu yok)</small>';
+    $("vsRange").innerHTML       = v.range_m!=null ? f1(v.range_m)+' <small>m</small>' : "—";
+    $("vsSize").innerHTML        = v.size_px!=null ? f0(v.size_px)+' <small>px</small>' : "—";
+    $("vsAttackSpeed").innerHTML = v.v_attack!=null ? f1(v.v_attack)+' <small>m/s</small>' : "—";
+    $("vsEcy").innerHTML         = v.e_cy!=null ? f0(v.e_cy)+' <small>px</small>' : "—";
+    $("vsBridge").innerHTML      = v.bridge
+      ? '<span style="color:var(--warn)">AKTİF</span> <small>('+(v.bridge_frames||0)+' kare)</small>'
+      : (v.bridge_frames ? '— <small>('+v.bridge_frames+' kare kullanıldı)</small>' : "—");
+    $("vsHandoff").textContent = (v.handoff_count!=null) ? v.handoff_count : "—";
+    $("vsClosest").innerHTML   = v.closest_m!=null ? f1(v.closest_m)+' <small>m</small>' : "—";
+
+    // Kamera hatti sessizce olebilir (torch/model yuklenemezse kare hic gelmez).
+    const frames = cam.frames || 0;
+    $("vsCamera").innerHTML = !hybrid ? '— <small>(kapalı)</small>'
+      : (frames === 0 ? '<span style="color:var(--warn)">kare yok</span> <small>(model yükleniyor?)</small>'
+         : f1(cam.fps)+' <small>FPS · '+f0(cam.det_ms)+' ms<br>'+_esc(cam.source||"?")+'</small>');
+
+    $("vsNote").textContent = !hybrid
+      ? "Görsel faz yalnızca HİBRİT modda çalışır."
+      : (guiding
+         ? "Komut yalnızca kameradan türüyor (IBVS). Hedef "
+           + f1(v.lost_s) + " s görülmezse GPS'e dönülür."
+         : "Devir için iki koşul birlikte: " + f1(v.lock_s_need) + " s VE "
+           + v.lock_need + " kare kesintisiz kilit, VE "
+           + "istasyon hatası < " + f0(v.handoff_station_err_m) + " m / menzil < "
+           + f0(v.handoff_range_m) + " m.");
+  }
+
+  function setCmdBar(id, value){
+    value = Number(value)||0; if(value>1)value=1; if(value<-1)value=-1;
+    const fill=$(id); if(!fill) return;
+    if(value>=0){ fill.style.left="50%"; fill.style.width=(value*50)+"%"; fill.style.background="var(--accent2)"; }
+    else        { fill.style.left=(50+value*50)+"%"; fill.style.width=(-value*50)+"%"; fill.style.background="var(--warn)"; }
+    const vEl=$(id+"V"); if(vEl) vEl.textContent=value.toFixed(2);
+  }
+  function updateGuidance(gd){
+    gd = gd || {};
+    setCmdBar("gdThr", gd.thr);   setCmdBar("gdPitch", gd.pitch);
+    setCmdBar("gdRoll", gd.roll); setCmdBar("gdYaw", gd.yaw);
+  }
+
+  // ---- Olay gunlugu ----
+  let lastEventId = 0;
+  function _mmss(s){ s=Math.max(0,s); const m=Math.floor(s/60), ss=s-m*60;
+    return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss.toFixed(1); }
+  function _hhmm(epoch){ try{ return new Date(epoch*1000).toLocaleTimeString('tr-TR',{hour12:false}); }catch(e){ return ""; } }
+  function _esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  function updateEvents(events, mission){
+    if(!Array.isArray(events)) return;
+    const log=$("eventLog"); if(!log) return;
+    if(events.length && events[events.length-1].id < lastEventId){ lastEventId=0; log.innerHTML=""; }
+    const t0 = (mission && mission.t0) ? mission.t0 : null;
+    const atBottom = (log.scrollTop + log.clientHeight) >= (log.scrollHeight - 24);
+    for(const e of events){
+      if(e.id <= lastEventId) continue;
+      lastEventId = e.id;
+      const rel = (t0!=null) ? (e.t - t0) : null;
+      const stamp = (rel!=null && rel>=0) ? ("T+"+_mmss(rel)) : _hhmm(e.t);
+      const row=document.createElement("div"); row.className="ev-row";
+      row.innerHTML = '<span class="ev-time">'+stamp+'</span><span class="ev-'+(e.sv||"info")+'">'+_esc(e.m)+'</span>';
+      log.appendChild(row);
+    }
+    while(log.childElementCount>300) log.removeChild(log.firstChild);
+    if(atBottom) log.scrollTop = log.scrollHeight;
+  }
+
+  // ---- Kusbakisi mini-harita: avci / ham hedef / temiz hedef izleri ----
+  let mmHunter=[], mmRaw=[], mmClean=[], mmStation=null, mmT0=null;
+  function drawMinimap(t){
+    const cv=$("minimap"); if(!cv) return;
+    const wrap=cv.parentElement, cw=wrap.clientWidth, ch=wrap.clientHeight;
+    if(!cw||!ch) return;
+    if(cv.width!==cw)  cv.width=cw;
+    if(cv.height!==ch) cv.height=ch;
+    const ctx=cv.getContext("2d"); ctx.clearRect(0,0,cw,ch);
+    const t0 = (t.mission && t.mission.t0) ? t.mission.t0 : null;
+    if(t0!==mmT0){ mmT0=t0; mmHunter=[]; mmRaw=[]; mmClean=[]; mmStation=null; }
+    const d=t.drone, g=t.target, ov=t.overlay;
+    if(d && d.x!=null){ mmHunter.push([d.x,d.y]); if(mmHunter.length>600)mmHunter.shift(); }
+    if(g && g.x!=null){ mmRaw.push([g.x,g.y]); if(mmRaw.length>600)mmRaw.shift(); }
+    if(ov && ov.clean){ mmClean.push([ov.clean.x,ov.clean.y]); if(mmClean.length>600)mmClean.shift(); }
+    mmStation = (ov && ov.station) ? [ov.station.x, ov.station.y] : null;
+    const pts=mmHunter.concat(mmRaw,mmClean,mmStation?[mmStation]:[]);
+    if(!pts.length){ ctx.fillStyle="#55627a"; ctx.font="11px monospace";
+      ctx.fillText("harita: veri bekleniyor…",10,20); return; }
+    let minx=Infinity,maxx=-Infinity,miny=Infinity,maxy=-Infinity;
+    for(const [x,y] of pts){ if(x<minx)minx=x; if(x>maxx)maxx=x; if(y<miny)miny=y; if(y>maxy)maxy=y; }
+    const cxm=(minx+maxx)/2, cym=(miny+maxy)/2;
+    const half=Math.max((maxx-minx)/2,(maxy-miny)/2,10)*1.1;
+    const pad=14;
+    const sx = x => pad + (cw-2*pad)*((x-(cxm-half))/(2*half));
+    const sy = y => pad + (ch-2*pad)*(1-(y-(cym-half))/(2*half));
+    ctx.strokeStyle="rgba(255,255,255,.05)"; ctx.lineWidth=1;
+    ctx.beginPath(); ctx.moveTo(sx(cxm),pad); ctx.lineTo(sx(cxm),ch-pad);
+    ctx.moveTo(pad,sy(cym)); ctx.lineTo(cw-pad,sy(cym)); ctx.stroke();
+    const drawTrack=(track,color)=>{ if(track.length<2)return; ctx.strokeStyle=color; ctx.lineWidth=1.5;
+      ctx.beginPath(); track.forEach(([x,y],i)=> i?ctx.lineTo(sx(x),sy(y)):ctx.moveTo(sx(x),sy(y))); ctx.stroke(); };
+    drawTrack(mmClean,"rgba(185,140,255,.45)");
+    drawTrack(mmRaw,"rgba(255,93,93,.35)");
+    drawTrack(mmHunter,"rgba(37,224,160,.55)");
+    const drawDot=(p,color,r)=>{ const [x,y]=p[p.length-1]; ctx.fillStyle=color;
+      ctx.beginPath(); ctx.arc(sx(x),sy(y),r,0,6.2832); ctx.fill(); };
+    const gap = t.gap;
+    if(mmRaw.length){ const [x,y]=mmRaw[mmRaw.length-1];
+      if(gap){ ctx.strokeStyle="#6b7891"; ctx.lineWidth=1.5;
+        ctx.beginPath(); ctx.arc(sx(x),sy(y),4,0,6.2832); ctx.stroke();
+        ctx.fillStyle="#8a94a8"; ctx.font="9px monospace"; ctx.fillText("KESİNTİ",sx(x)+7,sy(y)-3); }
+      else drawDot(mmRaw,"#ff5d5d",4);
+    }
+    if(mmClean.length) drawDot(mmClean,"#b98cff",4);
+    if(mmStation){                               // istasyon: tutulmaya calisilan nokta
+      const px=sx(mmStation[0]), py=sy(mmStation[1]);
+      ctx.strokeStyle="#ffb454"; ctx.lineWidth=1.5;
+      ctx.beginPath(); ctx.arc(px,py,5,0,6.2832); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(px-7,py); ctx.lineTo(px+7,py);
+      ctx.moveTo(px,py-7); ctx.lineTo(px,py+7); ctx.stroke();
+      if(mmHunter.length){                       // istasyon hatasi cizgisi
+        const [ax,ay]=mmHunter[mmHunter.length-1];
+        ctx.strokeStyle="rgba(255,180,84,.35)"; ctx.setLineDash([4,4]);
+        ctx.beginPath(); ctx.moveTo(sx(ax),sy(ay)); ctx.lineTo(px,py); ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    }
+    if(mmHunter.length){ const [x,y]=mmHunter[mmHunter.length-1], px=sx(x), py=sy(y);
+      drawDot(mmHunter,"#25e0a0",5);
+      if(d && d.yaw!=null){ const a=d.yaw*Math.PI/180;
+        ctx.strokeStyle="#25e0a0"; ctx.lineWidth=2; ctx.beginPath();
+        ctx.moveTo(px,py); ctx.lineTo(px+Math.cos(a)*14, py-Math.sin(a)*14); ctx.stroke(); }
+    }
+    ctx.fillStyle="#55627a"; ctx.font="10px monospace";
+    ctx.fillText("~"+Math.round(2*half)+" m", cw-64, ch-8);
+  }
+
+  let lastOk = 0;
+  async function tick(){
+    try{
+      const r = await fetch("/api/telemetry",{cache:"no-store"});
+      const t = await r.json();
+      if(t.connected) lastOk = Date.now();
+      setConn((Date.now()-lastOk) < 2500 ? "ok" : "wait");
+      updateMode(t);
+
+      const d=t.drone, g=t.target;
+      $("dx").innerHTML  = f1(d.x)+' <small>m</small>';
+      $("dy").innerHTML  = f1(d.y)+' <small>m</small>';
+      $("dz").innerHTML  = f1(d.z)+' <small>m</small>';
+      $("dspd").innerHTML= f1(d.speed_kmh)+' <small>km/h</small>';
+      $("dyaw").innerHTML= f0(d.yaw)+' <small>°</small>';
+      $("tx").innerHTML  = f1(g.x)+' <small>m</small>';
+      $("ty").innerHTML  = f1(g.y)+' <small>m</small>';
+      $("tz").innerHTML  = f1(g.z)+' <small>m</small>';
+      $("dist").textContent = f1(t.distance_m);
+      $("distClean").textContent = (t.clean_distance_m != null) ? f1(t.clean_distance_m) : "—";
+
+      // Irtifa / Z teshis (yalniz ham)
+      $("zDz").innerHTML   = f1(d.z)+' <small>m</small>';
+      $("zTz").innerHTML   = f1(g.z)+' <small>m</small>';
+      if(g.z!=null && d.z!=null){
+        const delta = g.z - d.z;                       // ham hedef Z − drone Z
+        const color = delta>0 ? 'var(--warn)' : 'var(--accent)';
+        const dir   = delta>0 ? 'tırman ↑' : 'alçal ↓';
+        $("zDelta").innerHTML = '<span style="color:'+color+'">'+f1(delta)+' <small>m · '+dir+'</small></span>';
+      } else { $("zDelta").innerHTML = "—"; }
+
+      updateMission(t.mission);
+      updateStation(t.station);
+      updateVisual(t);
+      updateGuidance(t.guidance);
+      updateEvents(t.events, t.mission);
+      drawMinimap(t);
+    }catch(e){
+      setConn("bad"); dash();
+    }
+  }
+  setInterval(tick, 200);
+  tick();
+</script>
+</body>
+</html>

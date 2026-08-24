@@ -1,259 +1,298 @@
 # -*- coding: utf-8 -*-
 """
-control/gps_approach.py — BOZUK GNSS ile yaklasma (Faz 1).
+control/gps_approach.py — GPS FAZI: KALKIS + ISTASYON TUTMA.
 
-Gorev zincirindeki yeri: kalkis -> GNSSFiltre ile bozuk hedef GNSS'ini temizle
--> hedefe surekli yaklas ve BURNU hedefe cevir (hedefi kadrajda tut) -> gorsel
-temas kurulunca gozetmen (control/main.py) komutu gorsel faza devreder.
+AMAC: hedefin KUYRUGUNDAKI bir noktaya (istasyon) hizla oturmak ve orada
+KALMAK. Gorsel devir oradan yapilir.
 
-GPS guduumu OLDURUCU FAZ DEGILDIR: gorevi bozuk GNSS'i optimize etmek, araca
-yonelmek ve kamera icin kesintisiz gorsel temas hazirlamaktir. Terminal takip
-gorsel fazin isidir (control/gorsel_takip.py).
+⛔ YARISMA KURALI: bu modul YALNIZ gorsel temas YOKKEN cagrilir. Gorsel faz
+   basladiginda `step()` hic calistirilmaz; yalnizca `clean_target()`
+   cagrilabilir ve onun dondurdugu deger HICBIR KOMUTA GIRMEZ (filtre
+   isinmis kalsin diyedir).
 
-Girdi: sdk.drone_sdk.get_target_location() (BOZUK GNSS) -> fusion.gnss_filtre.
-Cikis: (throttle, pitch, roll, yaw) -> control.common.KomutGonderici.
+TERIMLER
+  * istasyon : hedefe gore SABIT bir goreli konum (kuyrugunda R m, altinda h m).
+               Hedef hareket ettikce istasyon da hareket eder.
+  * ileri besleme (feedforward): hatayi beklemeden, BILINEN bozucuyu dogrudan
+               komuta eklemek. Burada bozucu = hedefin kendi hizi.
+  * kalici gecikme hatasi: saf P kontrolcu hareketli referansi izlerken hep
+               GERIDE kalir. v = Kp*e kadar hiz uretebildigi icin denge
+               e = V/Kp'de kurulur, SIFIRA INMEZ. Kp=0.9 ve V=18 m/s ise
+               kalici hata 20 m. Ileri besleme bunu SIFIRLAR.
+
+NEDEN BOYLE (olculdu, kardes depo drones_of_war_entegrasyon):
+  * Ileri beslemesiz surumde arac hedefe hic oturamadi; menzil 100-255 m
+    arasi salindi, kapanma hizi medyan -3.78 m/s (yani UZAKLASIYORDU).
+  * Eski surumumuz cubugu DOGRUDAN PD ile suruyordu (KP_H, KP_Z...). Bu,
+    olculmus arac zarfini (asimetrik dikey, iki kollu throttle haritasi,
+    ivme tavani) hic bilmiyordu. Artik yasa HIZ SETPOINT'i uretir ve
+    control.common.VelocityToStick olculmus modelle cubuga cevirir.
+
+ISTASYON GEOMETRISI — OLCULDU (kampanya GK+GK2, 24 ucus, donusumlu A/B).
+  Gercek tespit orani medyani:
+     15 m / 0.45  -> %66.9   kutu 47.7 px   yanlis-pozitif %11.4
+      8 m / 0.45  -> %76.0   kutu 73.5 px   yanlis-pozitif  %4.0
+      8 m / 0.75  -> %88.8   kutu 69.3 px   yanlis-pozitif  %3.7   <- SECILDI
+  Kollarin araliklari HIC ORTUSMUYOR. Iki dugme BIRBIRINDEN BAGIMSIZ:
+     MENZIL yalniz KUTU BOYUTUNU degistirir (R 15->8 m: 61 -> 114 px)
+     ORAN   yalniz GOK PAYINI degistirir    (0.45->0.75: 232 -> 362 px)
+  cunku yukselis acisi atan(oran) — menzilden BAGIMSIZ. Gok payi buyudukce
+  hedefin arka plani gokyuzu olur (dedektor icin temiz zemin).
 """
 import math
-import time
 
-import numpy as np
-
-from control.common import (clamp, deadband, wrap_pi, world_to_body)
-from fusion.gnss_filtre import GNSSFiltre
+from control.common import (CM_TO_M, ConverterCfg, Telemetry, VelocityToStick,
+                            clamp, wrap_deg)
+from filter.gnss_filtre_v2 import GNSSFilterV2
 
 
 class GPSCfg:
-    # --- ISARETLER / EKSEN YONU ---
-    ROT_IN_DEGREES = True       # get_drone_rotation derece donduruse True
-    PITCH_SIGN = +1.0           # ileri hareket +pitch degilse -1
-    ROLL_SIGN  = +1.0           # saga hareket +roll degilse -1
-    YAW_SIGN   = +1.0           # hedefe donus icin +yaw degilse -1
-    Z_SIGN     = +1.0
-
     # --- DONGU ---
     LOOP_HZ = 50.0
     DT = 1.0 / LOOP_HZ
 
-    # --- KOMUT TAVANLARI ---
-    PITCH_MAX = 0.75
-    ROLL_MAX  = 0.75
-    THR_UP    = 0.70
-    THR_DN    = -1.00
-    YAW_MAX   = 0.45
-
-    # --- BURUN -> HEDEF YAW ---
-    KP_YAW = 1.3
-    YAW_DEADBAND = math.radians(3)
-
     # --- KALKIS ---
     TAKEOFF = True
-    TAKEOFF_ALT_AGL = 1000.0    # cm; kalkista bulundugu yerden tirmanilacak yukseklik
-    TAKEOFF_THR = 0.6           # tirmanma throttle
+    TAKEOFF_ALT_M = 45.0  # m; zemine goreli tirmanma yuksekligi
+    TAKEOFF_VZ = 12.0     # m/s; tirmanma hizi setpoint'i
+    TAKEOFF_TOL_M = 3.0   # m; bu tolerans icinde "kalkis bitti"
 
-    # --- TAKIP MESAFESI ---
-    APPROACH_STANDOFF   = 500.0 # cm; YATAY takip mesafesi (hedefin bu kadar gerisinde dur)
-    APPROACH_ALT_OFFSET = 500.0 # cm; DIKEY takip mesafesi (hedefin bu kadar altinda uc)
+    # --- ISTASYON (GPS fazinin HEDEFI) ---
+    STATION_RANGE_M = 8.0     # m; hedefin kac metre ARKASINDA duracagiz
+    STATION_ALT_RATIO = 0.75  # alt ofseti menzile ORANTILI: h = R * ORAN
+    STATION_ALT_M = 15.0      # m; ORAN 0 ise kullanilan SABIT alt ofset
+    STATION_KP = 0.9          # 1/s; yatay konum hatasi -> hiz
+    STATION_KP_Z = 0.9        # 1/s; dikey konum hatasi -> hiz
+    STATION_FEEDFWD = True    # hedef hizini ileri besle (KAPATMA: bkz. baslik)
 
-    # --- PID KAZANCLARI ---
-    KP_H = 0.00025              # yatay konum hatasi -> pitch/roll
-    KD_H = 0.00060              # yatay hata turevi -> sonumleme/fren
-    KP_Z = 0.00040              # irtifa hatasi -> throttle
-    KD_Z = 0.00100              # dikey hiz -> sonumleme
-    KI_Z = 0.00020              # kalici irtifa hatasini kapat
-    INT_Z_BAND = 2500.0         # cm; integrali sadece |ez|<band iken biriktir (anti-windup)
-    INT_Z_MAX  = 5000.0         # cm; biriken integrali kis
+    # --- ZARF: OLCULMUS degerler TEK KAYNAKTAN gelir (ConverterCfg) ---
+    # ⛔ Buraya sayi YAZMAYIN. Zarf uc katmanda (cevirici, GPS yasasi, gorsel
+    #   yasa) tekrar edildiginde tirmanma tavani 33.51 / 33.5 / 33.5 diye
+    #   ZATEN KAYMISTI. Olcum degisirse tek yer guncellenir.
+    VZ_MAX_CLIMB = ConverterCfg.VZ_MAX_CLIMB      # m/s; olculdu
+    VZ_MAX_DESCENT = ConverterCfg.VZ_MAX_DESCENT  # m/s; ⚠ 4.8 kat asimetrik —
+                           #   tek tavan kullanmak alcalma komutunu ~5 kat abartir
+    YAW_RATE_MAX = ConverterCfg.YAW_RATE_MAX_DEG  # derece/s
 
-    # --- FILTRE / DEADBAND ---
-    DERIV_EMA = 0.20            # hata turevi EMA orani
-    POS_DEADBAND = 150.0        # cm; yakinda yatay jitter'i onle
+    # --- POLITIKA (zarf DEGIL: zarfin altinda bilincli secim) ---
+    V_MAX = 33.0           # m/s; yatay hiz tavani (arac 34.6 yapabiliyor)
+    KP_YAW = 3.0           # yaw hatasi (derece) -> yaw hizi (derece/s)
 
-    # --- GNSS KESINTISI ---
-    DR_MAX_S = 30.0             # sn; kesintide son hizla en fazla bu kadar ileri tahmin edilir
+    # --- HEDEF YONU (istasyonun kuyruga kurulmasi icin) ---
+    HEADING_MIN_SPEED = 1.0  # m/s; bunun altinda yon guvenilmez -> son yon tutulur
 
-    # --- GNSS FILTRE ---
-    GECIKME_SN = 1.0            # simulasyon ham GNSS gecikme suresi
+    # --- GNSS FILTRE (filter/gnss_filtre_v2.py :: GNSSFilterV2) ---
+    DELAY_S = 1.0  # s; olculen ham GNSS gecikmesi (~1.13) telafi edilir
+    # ⭐ HER TIK BESLE: filtre paket tekrarini KENDI tanir (np.allclose) ve
+    #   arada OLU-HESAPLA ileri gider. Yalnizca yeni pakette beslersek o
+    #   mekanizma hic calismaz ve hedef konumu 50 Hz'lik yasaya ~5 Hz'lik
+    #   MERDIVEN olarak girer. False = eski davranis (paket tekrarinda dondur).
+    FILTER_EVERY_TICK = True
 
 
-class GPSTakip:
-    """Bozuk GNSS ile yaklasma guduumu. Her tik `adim()` cagrilir (50 Hz)."""
+# ==========================================================
+#  ISTASYON YASASI (saf fonksiyonlar — test edilebilir)
+# ==========================================================
+def station_point(target_p, target_heading_deg, cfg=GPSCfg):
+    """Hedefin KUYRUGUNDAKI istasyon noktasi (m, Unreal dunya ekseni).
 
-    def __init__(self, drone, gonderici):
+    Yon bilinmiyorsa (hedef duruyor / yon henuz kestirilemedi) hedefin
+    kendisi + alt ofset dondurulur.
+
+    ALT OFSETI MENZILE ORANTILI: kamera TILT derece YUKARI baktigi icin
+    hedefin kadraj merkezinde durmasi h = R*tan(TILT) ister. Sabit h
+    kullanmak, menzil degisince hedefi kadrajda yukari/asagi kaydirir.
+    """
+    hx, hy, hz = target_p
+    if cfg.STATION_ALT_RATIO > 0:
+        z = hz - cfg.STATION_RANGE_M * cfg.STATION_ALT_RATIO
+    else:
+        z = hz - cfg.STATION_ALT_M
+    if target_heading_deg is None:
+        return hx, hy, z
+    r = math.radians(target_heading_deg)
+    return (hx - math.cos(r) * cfg.STATION_RANGE_M,
+            hy - math.sin(r) * cfg.STATION_RANGE_M,
+            z)
+
+
+def command(drone_p, drone_yaw_deg, target_p, target_v, target_heading_deg, cfg=GPSCfg):
+    """Istasyon tutma komutu.
+
+    CIKTI: ((vx, vy), vz_ned, yaw_rate_deg_s, tani)
+      vx, vy : m/s, Unreal dunya yatay duzlemi
+      vz_ned : m/s, POZITIF = ASAGI (cevirici ters cevirir)
+
+    YASA:  v = v_des (ileri besleme) + Kp * (istasyon - konum)
+      Ilk terim hedefle AYNI hizda ucmayi saglar (kalici hata SIFIR),
+      ikinci terim istasyona oturtur.
+
+    BURUN: her zaman HEDEFE donuk (istasyona degil) — kamera hedefe baksin
+    ki gorsel devir kurulabilsin.
+    """
+    sx, sy, sz = station_point(target_p, target_heading_deg, cfg)
+    ex = sx - drone_p[0]
+    ey = sy - drone_p[1]
+    ez = sz - drone_p[2]
+
+    ff_x, ff_y, ff_z = (target_v if cfg.STATION_FEEDFWD else (0.0, 0.0, 0.0))
+
+    vx = ff_x + cfg.STATION_KP * ex
+    vy = ff_y + cfg.STATION_KP * ey
+    n = math.hypot(vx, vy)  # yatay tavan — YONU koruyarak kirp
+    if n > cfg.V_MAX:
+        vx *= cfg.V_MAX / n
+        vy *= cfg.V_MAX / n
+
+    vz_up = ff_z + cfg.STATION_KP_Z * ez
+    vz_up = clamp(vz_up, -cfg.VZ_MAX_DESCENT, cfg.VZ_MAX_CLIMB)
+
+    bearing = math.degrees(math.atan2(target_p[1] - drone_p[1],
+                                      target_p[0] - drone_p[0]))
+    yaw_err = wrap_deg(bearing - drone_yaw_deg)
+    yaw_rate = clamp(cfg.KP_YAW * yaw_err, -cfg.YAW_RATE_MAX, cfg.YAW_RATE_MAX)
+
+    diag = {
+        "station_x": sx, "station_y": sy, "station_z": sz,
+        "station_err_m": math.sqrt(ex * ex + ey * ey + ez * ez),  # BIRINCIL OLCUT
+        "station_err_horiz": math.hypot(ex, ey),
+        "station_err_vert": ez,
+        "target_range_m": math.dist(drone_p, target_p),
+        "target_speed": math.hypot(target_v[0], target_v[1]),
+        "target_heading": target_heading_deg,
+        "yaw_err": yaw_err,
+        "v_cmd": math.hypot(vx, vy),
+    }
+    return (vx, vy), -vz_up, yaw_rate, diag
+
+
+# ==========================================================
+#  GPS FAZI SURUCUSU
+# ==========================================================
+class GPSTracker:
+    """Bozuk GNSS ile kalkis + istasyon tutma. Her tik `step()` cagrilir (50 Hz)."""
+
+    def __init__(self, drone, sender, cfg=GPSCfg):
+        self.cfg = cfg
         self.drone = drone
-        self.gonderici = gonderici
-        self.filtre = None
-        self.sifirla()
+        self.tlm = Telemetry(drone)
+        self.sender = sender
+        self.conv = VelocityToStick()  # DURUMSUZ; faz devrinde tasinacak sey yok
+        self.filter = None
+        self.reset()
 
     # ----------------------------------------------------------------
-    #  Yeni gorev icin durumu sifirla
-    # ----------------------------------------------------------------
-    def sifirla(self):
-        self.filtre = GNSSFiltre(gecikme_sn=GPSCfg.GECIKME_SN)
+    def reset(self):
+        """Yeni gorev icin durumu sifirla."""
+        self.filter = GNSSFilterV2(lead_s=self.cfg.DELAY_S)
 
-        # hedef kestirimi
-        self.son_ham = None
-        self.son_temiz = None
-        self.son_z_anlik = None
-        self.son_xy_anlik = None
-        self.son_hiz = None
+        # hedef kestirimi (hepsi SI: m, m/s, derece)
+        self.last_raw = None             # SDK'nin dondurdugu ham demet (paket izleme)
+        self.target_p = None             # temiz hedef konumu (m)
+        self.target_v = (0.0, 0.0, 0.0)  # temiz hedef hizi (m/s)
+        self.target_heading = None       # hedefin gidis yonu (derece) | None
         self._fresh = False
-        self._son_fresh_t = None
 
-        # kontrol durumu
-        self.e_prev = None
-        self.t_prev = None
-        self.de = [0.0, 0.0, 0.0]    # EMA-filtreli hata turevi (cm/s)
-        self._ez_int = 0.0           # dikey integral birikimi (cm*s)
+        # kalkis
+        self._takeoff_done = (not self.cfg.TAKEOFF)
+        self._ground_z = None
 
-        # kalkis durumu
-        self._kalkis_done = (not GPSCfg.TAKEOFF)
-        self._zemin_z = None         # kalkis noktasi
-
-        # gozetmen/konsol icin durum (guduume GIRMEZ)
-        self.d_h = None              # cm; yatay hedef mesafesi (handoff kapisi okur)
-        self.faz = "KALKIS" if GPSCfg.TAKEOFF else "YAKLASMA"
+        # gozetmen/arayuz icin durum (guduume GIRMEZ)
+        self.phase = "TAKEOFF" if self.cfg.TAKEOFF else "STATION"
+        self.range_h = None      # m; hedefe 3B menzil (devir kapisi okur)
+        self.station_err = None  # m; istasyon hatasi (devir kapisi okur)
+        self.diag = {}
 
     # ----------------------------------------------------------------
-    #  Komut gonder (TEK kapi: control.common.KomutGonderici)
+    #  BOZUK GNSS -> TEMIZ HEDEF (konum + hiz + yon)
     # ----------------------------------------------------------------
-    def _send(self, thr, pitch, roll, yaw):
-        self.gonderici.gonder(thr, pitch, roll, yaw)
+    def clean_target(self):
+        """Ham GNSS paketini filtreye ver, temiz hedef konumunu (m) dondur.
 
-    def _send_ham(self, thr, pitch, roll, yaw):
-        self.gonderici.gonder_ham(thr, pitch, roll, yaw)
+        ⛔ GORSEL FAZDA da cagrilir ama donen deger HICBIR KOMUTA GIRMEZ —
+          amac filtrenin (ve hiz/yon kestiriminin) sicak kalmasidir; faz
+          geri donerse sifirdan isinmak gerekmesin.
 
-    def _loiter(self):
-        self.gonderici.loiter()
+        ⚠ `last_raw` GERCEK paket kimligidir ve YALNIZ paket degisince tazelenir:
+          gozetmenin/arayuzun "GNSS bayat mi" izlemesi buna bakar. Filtreyi her
+          tik beslemek bu izlemeyi BOZMAZ, cunku bayrak ayri tutulur.
+        """
+        raw = self.tlm.target_raw_cm()
+        self._fresh = (raw != self.last_raw)
+        if not self._fresh and not self.cfg.FILTER_EVERY_TICK:
+            return self.target_p  # eski davranis: tekrarda dondur
+        self.last_raw = raw
+        # Tekrar eden pakette filtre KENDI olu-hesap dalina duser (bkz. GPSCfg).
+        clean_cm = self.filter.update(raw[0], raw[1], raw[2])
+        if clean_cm is None:  # filtre henuz isinmadi
+            return self.target_p
 
-    # ----------------------------------------------------------------
-    #  GNSS Temizleme
-    # ----------------------------------------------------------------
-    def _hedef_temizle(self):
-        ham = self.drone.get_target_location()
-        if ham == self.son_ham:
-            self._fresh = False
-            return self.son_temiz
-        self.son_ham = ham
-        sonuc = self.filtre.guncelle(ham[0], ham[1], ham[2])
-        if sonuc is None:
-            self._fresh = False
-            return self.son_temiz
-        self.son_temiz = np.array(sonuc)
-        self._fresh = True
-        durum = self.filtre.durum_gudum()
-        self.son_hiz = None if durum is None else np.array(durum["vel"], float)
-        self.son_z_anlik = float(self.son_temiz[2])
-        self.son_xy_anlik = np.array([self.son_temiz[0], self.son_temiz[1]], float)
-        return self.son_temiz
-
-    # ----------------------------------------------------------------
-    #  EMA-filtreli Hata Turevi
-    # ----------------------------------------------------------------
-    def _derivative(self, e, t):
-        if self.e_prev is None:
-            self.e_prev, self.t_prev = e, t
-            return self.de
-        dt = t - self.t_prev
-        if dt > 1e-3:
-            a = GPSCfg.DERIV_EMA
-            for i in range(3):
-                raw = (e[i] - self.e_prev[i]) / dt
-                self.de[i] = (1.0 - a) * self.de[i] + a * raw
-            self.e_prev, self.t_prev = e, t
-        return self.de
+        # cm -> m sinirini burada gec (filtre cm alaninda calisir)
+        self.target_p = (clean_cm[0] * CM_TO_M, clean_cm[1] * CM_TO_M,
+                         clean_cm[2] * CM_TO_M)
+        gs = self.filter.guidance_state()
+        if gs is not None:   # ⭐ hiz = ILERI BESLEME girdisi
+            v = gs["vel"]
+            self.target_v = (v[0] * CM_TO_M, v[1] * CM_TO_M, v[2] * CM_TO_M)
+            # Hedefin GIDIS YONU: istasyonu kuyruga kurmak icin gerekir.
+            # Yavasken atan2 gurultuden ibarettir -> son guvenilir yon tutulur.
+            speed_horiz = math.hypot(self.target_v[0], self.target_v[1])
+            if speed_horiz > self.cfg.HEADING_MIN_SPEED:
+                self.target_heading = math.degrees(math.atan2(self.target_v[1],
+                                                              self.target_v[0]))
+        return self.target_p
 
     # ================================================================
-    #  Kontrol Adimi
+    #  KONTROL ADIMI
     # ================================================================
-    def adim(self):
-        drone_pos = np.array(self.drone.get_drone_location())
-        yaw_m = self.drone.get_drone_rotation()[2]
-        drone_yaw = math.radians(yaw_m) if GPSCfg.ROT_IN_DEGREES else yaw_m
-        t = time.perf_counter()
-        self._hedef_temizle()
+    def step(self):
+        dp = self.tlm.position_m()
+        _roll, _pitch, yaw = self.tlm.orientation_deg()
+        v_meas = self.tlm.velocity_ms()
+        hp = self.clean_target()
 
-        if not self._kalkis_done:
-            self.faz = "KALKIS"
-            if self._zemin_z is None:
-                self._zemin_z = float(drone_pos[2])
-            hedef_z = self._zemin_z + GPSCfg.TAKEOFF_ALT_AGL
-            if drone_pos[2] < hedef_z:
-                self._send_ham(GPSCfg.TAKEOFF_THR, 0.0, 0.0, 0.0)
+        if self._ground_z is None:
+            self._ground_z = dp[2]
+        height = dp[2] - self._ground_z
+
+        # ---- KALKIS: yalniz DIKEY tirmanis, yatay komut YOK ----
+        if not self._takeoff_done:
+            self.phase = "TAKEOFF"
+            already_high = (hp is not None and dp[2] >= hp[2] - 20.0)
+            if already_high or height >= (self.cfg.TAKEOFF_ALT_M
+                                          - self.cfg.TAKEOFF_TOL_M):
+                self._takeoff_done = True
+            else:
+                thr, _, _, _ = self.conv.convert((0.0, 0.0, -self.cfg.TAKEOFF_VZ),
+                                                 v_meas, math.radians(yaw), 0.0)
+                self.sender.send(thr, 0.0, 0.0, 0.0)
+                self.diag = {"state": "TAKEOFF", "height": height}
                 return
-            self._kalkis_done = True
-        self.faz = "YAKLASMA"
+        self.phase = "STATION"
 
-        # -- Veri Kesintisi --
-        if self._fresh:
-            self._son_fresh_t = t
-        est = self.son_temiz
-
-        if est is None:
-            self._loiter()
+        # ---- HEDEF YOK: irtifayi tut, savrulma ----
+        if hp is None:
+            self.range_h = None
+            self.station_err = None
+            self.sender.loiter()
+            self.diag = {"state": "NO_TARGET"}
             return
 
-        # -- Dead-reckoning suresi --
-        dr_dt = 0.0
-        if (not self._fresh) and self._son_fresh_t is not None:
-            dr_dt = clamp(t - self._son_fresh_t, 0.0, GPSCfg.DR_MAX_S)
-        vhx = float(self.son_hiz[0]) if self.son_hiz is not None else 0.0
-        vhy = float(self.son_hiz[1]) if self.son_hiz is not None else 0.0
-        vhz = float(self.son_hiz[2]) if self.son_hiz is not None else 0.0
+        # ---- ISTASYON TUTMA ----
+        (vx, vy), vz_ned, yaw_rate, diag = command(dp, yaw, hp, self.target_v,
+                                                   self.target_heading, self.cfg)
+        thr, pitch, roll, yaw_c = self.conv.convert((vx, vy, vz_ned), v_meas,
+                                                    math.radians(yaw), yaw_rate)
+        self.sender.send(thr, pitch, roll, yaw_c)
 
-        # -- Dikey nisan --
-        z_hedef = (self.son_z_anlik + vhz * dr_dt) if self.son_z_anlik is not None else float(est[2])
-        z_ref = z_hedef - GPSCfg.APPROACH_ALT_OFFSET
-        ez = float(z_ref - drone_pos[2])
+        self.range_h = diag["target_range_m"]  # gozetmen (devir kapisi) okur
+        self.station_err = diag["station_err_m"]
+        diag.update(self.conv.diag)
+        diag["state"] = "STATION"
+        diag["filter"] = self.filter.diag()  # kapi/kacis teshisi (gosterge)
+        self.diag = diag
 
-        # -- Yatay nisan --
-        if self.son_xy_anlik is not None:
-            tx = float(self.son_xy_anlik[0]) + vhx * dr_dt
-            ty = float(self.son_xy_anlik[1]) + vhy * dr_dt
-        else:
-            tx, ty = float(est[0]), float(est[1])
-        ex = tx - float(drone_pos[0])
-        ey = ty - float(drone_pos[1])
-        d_h = math.hypot(ex, ey)
-        self.d_h = d_h                      # gozetmen (handoff kapisi) okur
-
-        # -- Takip mesafesi --
-        if d_h > 1e-6:
-            _ux, _uy = ex / d_h, ey / d_h
-            _dcmd = d_h - GPSCfg.APPROACH_STANDOFF
-            ex_cmd, ey_cmd = _ux * _dcmd, _uy * _dcmd
-        else:
-            ex_cmd = ey_cmd = 0.0
-
-        # -- Turev (EMA) + Yatay PD
-        de = self._derivative((ex_cmd, ey_cmd, ez), t)
-        e_fwd, e_right = world_to_body(ex_cmd, ey_cmd, drone_yaw)
-        de_fwd, de_right = world_to_body(de[0], de[1], drone_yaw)
-        pitch_raw = GPSCfg.PITCH_SIGN * (GPSCfg.KP_H * e_fwd   + GPSCfg.KD_H * de_fwd)
-        roll_raw  = GPSCfg.ROLL_SIGN  * (GPSCfg.KP_H * e_right + GPSCfg.KD_H * de_right)
-        pitch_raw = clamp(pitch_raw, -GPSCfg.PITCH_MAX, GPSCfg.PITCH_MAX)
-        roll_raw  = clamp(roll_raw,  -GPSCfg.ROLL_MAX,  GPSCfg.ROLL_MAX)
-
-        # -- Dikey-Yatay ayristirma
-        if ez < 0.0:
-            alc = clamp(1.0 + ez / 800.0, 0.15, 1.0)
-            pitch_raw *= alc
-            roll_raw  *= alc
-
-        # -- Irtifa PID --
-        if abs(ez) < GPSCfg.INT_Z_BAND:
-            self._ez_int = clamp(self._ez_int + ez * GPSCfg.DT, -GPSCfg.INT_Z_MAX, GPSCfg.INT_Z_MAX)
-        else:
-            self._ez_int = 0.0
-        thr_raw = clamp(GPSCfg.Z_SIGN * (GPSCfg.KP_Z * ez + GPSCfg.KI_Z * self._ez_int + GPSCfg.KD_Z * de[2]),
-                        GPSCfg.THR_DN, GPSCfg.THR_UP)
-
-        # -- Yaw (Burnu hedefe cevir)
-        bearing = math.atan2(ey, ex)
-        yaw_err = deadband(wrap_pi(bearing - drone_yaw), GPSCfg.YAW_DEADBAND)
-        yaw_raw = GPSCfg.YAW_SIGN * clamp(GPSCfg.KP_YAW * yaw_err, -GPSCfg.YAW_MAX, GPSCfg.YAW_MAX)
-
-        # -- Deadband --
-        if d_h < GPSCfg.POS_DEADBAND:
-            pitch_raw = 0.0
-            roll_raw = 0.0
-
-        self._send(thr_raw, pitch_raw, roll_raw, yaw_raw)
+    # ----------------------------------------------------------------
+    def status(self):
+        """Son tikin ic degerleri (konsol/arayuz icin; guduume GIRMEZ)."""
+        return dict(self.diag)

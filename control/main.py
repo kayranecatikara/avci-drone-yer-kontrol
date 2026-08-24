@@ -1,260 +1,321 @@
 # -*- coding: utf-8 -*-
 """
-control/main.py — GOREV GOZETMENI + giris noktasi.
+control/main.py — FAZ GOZETMENI (yalnizca faz gecisi).
 
-    python3 -m control.main            oyunda PLAY moduna gecip ENTER'a bas
-    python3 -m control.main --hemen    beklemeden basla
-    Ctrl+C                             gorevi durdur (motorlar kesilir)
+Bu dosyada GUDUM YOKTUR, DONGU YOKTUR, GIRIS NOKTASI YOKTUR. Ne komut uretir,
+ne komut gonderir, ne de kendi basina calisir. Tek isi su soruyu yanitlamaktir:
+
+    "Su anda GPS fazinda mi, GORSEL fazda mi olmaliyiz?"
+
+KOSTURUCU `web/server.py`'dir (yer kontrol arayuzu, hibrit mod). Dongu,
+telemetri, kamera hatti ve komut gonderimi orada; KAPILAR burada. Ayirmanin
+sebebi: kapi esikleri (HANDOFF_FRAMES, HANDOFF_STATION_ERR_M, LOST_S...) OLCULMUS
+degerlerdir ve tek bir yerde durmalidir — kosturucu degisince kapinin da
+degismesi, kardes depoda faz cirpinmasinin kok nedeniydi.
 
 FAZ AKISI
-    KALKIS -> GPS YAKLASMA -> (devir kapisi) -> GORSEL TAKIP -> (kayip) -> GPS ...
+    GPS (kalkis + istasyon) -> (devir kapisi) -> GORSEL -> (kayip) -> GPS ...
 
-DEVIR KAPISI (GPS -> GORSEL): iki kosul BIRLIKTE saglanmalidir —
-    1) YAKINLIK  : GPS yatay mesafesi HANDOFF_RANGE altinda (ya da hedef GNSS'i
-                   bayat; o zaman menzil zaten bilinemez, kutu kapisi yeter),
-    2) GORSEL KILIT: ard arda N_LOCK kare guduume girebilecek kutu
-                   (control.gorsel_takip.nisan_kutusu — gorsel fazin KULLANDIGI
-                   kapinin AYNISI; ayri esik yazmak iki katmani ayristirir ve
-                   devirden hemen sonra "kayip" verip faz sekmesine yol acar).
+DEVIR KAPISI (GPS -> GORSEL). Iki kosul BIRLIKTE saglanmalidir:
+  1) GORSEL KILIT — kesintisiz olarak HEM en az HANDOFF_LOCK_S saniye HEM de
+     en az HANDOFF_FRAMES ayri karede guduume girebilecek kutu
+     (control.visual_tracking.aim_box; gorsel fazin KULLANDIGI kapinin
+     AYNISI. Ayri esik yazmak iki katmani ayristirir ve devirden hemen sonra
+     "kayip" verip faz sekmesine yol acar).
+     ⭐ Sure sarti, kapinin DEDEKTOR HIZINA gore sessizce zayiflamasini
+       engeller; kare sarti, DONMUS kamerada surenin kendi kendine dolmasini.
+       Ikisi de gerekli — bkz. visual_tracking.Cfg.HANDOFF_LOCK_S.
+  2) ISTASYONA OTURMA — GPS istasyon hatasi HANDOFF_STATION_ERR_M altinda VE hedefe
+     menzil HANDOFF_RANGE_M altinda, ard arda HANDOFF_STATION_TICKS tik boyunca.
+     (Hedef GNSS'i bayatsa menzil zaten bilinemez -> bu kosul duser, kutu
+     kapisi tek basina yeter.)
 
-GORSEL FAZDA GPS KOMUTA GIRMEZ: gorsel temas kurulduktan sonra hareket komutu
-YALNIZCA kameradan turer (yarisma kurali; aksi diskalifiye). Bu dosyada gorsel
-fazda cagrilan tek GPS islevi `_hedef_temizle()`'dir ve o SADECE filtreyi taze
-tutar — donen deger hicbir komuta girmez (faz geri donerse filtre isinmis olur).
+  ⛔ 2. KOSUL HEDEFIN GPS'INI OKUR ve bu MESRUDUR: bir FAZ GECISI kapisidir,
+    GUDUM YASASI DEGILDIR — gorsel temas HENUZ YOKTUR. Gorsel faz basladiktan
+    sonra hedefin GPS'i komuta HIC girmez; gozetmen gorsel fazda hedefe ait
+    TEK BIR sayiyi bile okumaz (bkz. `visual_tick` imzasi: yalnizca kutu var mi
+    yok mu). Kamera-tek kapiya dusmek icin `Cfg.CAMERA_ONLY_GATE = True`
+    yapilir; o zaman 2. kosul YAPISAL olarak devre disi kalir.
+
+  NEDEN 2. KOSUL VAR (olculdu, kardes depo): kamera kapisi tek basina
+  YAKLASMA sirasinda, arac daha oturmadan atesliyordu — devir 22.7 m'de,
+  14.9 s'de, istasyon hatasi hala 34.6 m. "Otur, SONRA devret" hic
+  gerceklesmiyordu.
+
+GORSEL FAZDA GPS KOMUTA GIRMEZ (yarisma kurali; aksi diskalifiye). Yapisal
+garanti `control.visual_tracking.VisualTracker.compute` imzasindadir: hedefe ait
+tek veri bbox pikselleridir. Kosturucunun gorsel fazda cagirmasi mesru olan
+tek GPS islevi `GPSTracker.clean_target()`'dir ve donen deger HICBIR KOMUTA
+GIRMEZ (faz geri donerse filtre isinmis olsun diyedir).
 """
-import math
-import sys
-import threading
 import time
 
-from control.common import KomutGonderici
-from control.gorsel_takip import Cfg as GorselCfg, GorselTakip, bayat_mi, nisan_kutusu
-from control.gps_approach import GPSCfg, GPSTakip
-from perception import camera, detection_state
-from sdk import drone_sdk as drone
-
-CM_TO_M = 0.01
+from control.visual_tracking import Cfg as VisualCfg, is_stale, aim_box
+from perception import detection_state
 
 
 class Cfg:
-    LOOP_HZ = 50.0
-    DT = 1.0 / LOOP_HZ
-
     # --- DEVIR KAPISI ---
-    HANDOFF_RANGE = 4000.0    # cm; GPS yatay mesafesi bunun altindayken gorsele devir
-    GPS_STALE_S = 2.0         # s; hedef GNSS paketi bundan eskiyse "GNSS bayat" say
+    CAMERA_ONLY_GATE = False     # True -> devir YALNIZ kamera kapisiyla (asagidaki
+                                 #  GPS kosulu YAPISAL olarak calismaz)
+    HANDOFF_RANGE_M = 15.0       # m; hedefe GPS menzili (dedektor menzile siddetle
+                                 #  bagli: ~14 m'de ham tespit %88-97, 40 m'de %50,
+                                 #  70 m'de %33 — olculdu, n=2097 istasyon karesi)
+    HANDOFF_STATION_ERR_M = 8.0  # m; istasyon hatasi bunun altindaysa "oturdu"
+    HANDOFF_STATION_TICKS = 25   # ard arda tik (~0.5 s) oturmus kalmali
+    GPS_STALE_S = 2.0            # s; hedef GNSS paketi bundan eskiyse "bayat"
 
-    # --- KONSOL ---
-    OZET_S = 1.0              # s; durum satiri araligi
+    # --- GORSEL FAZDAN DONUS ---
+    # LOST_FRAMES(20) / dedektor ~10 Hz = 2 s. Sure cinsinden yazildi ki kamera
+    # thread'i DONARSA da tetiklensin (donmus kamerada kare sayaci ilerlemez,
+    # kare temelli sayac sonsuza kadar beklerdi).
+    LOST_S = 2.0
 
 
-class Gorev:
+class PhaseSupervisor:
+    """GPS <-> GORSEL faz kapisi. Durumsuz degildir (sayaclari tutar) ama
+    KOMUT URETMEZ; kosturucu her tik ilgili fazin `*_tick` islevini cagirir.
 
-    def __init__(self):
-        self.gonderici = KomutGonderici(drone)
-        self.gps = GPSTakip(drone, self.gonderici)
-        self.gorsel = GorselTakip()
-        self.faz = "GPS"
-        self.aktif = False
-        self._kilit_sayac = 0     # ard arda gecerli tespit (devir kapisi)
-        self._kayip_t = None      # gorsel fazda tespitsiz gecen surenin baslangici
-        self._devir_sayisi = 0
-        self._son_paket_t = None  # son YENI ham GNSS paketinin zamani
-        self._son_ham = None
-        self._son_det = None      # konsol ozeti icin
+    Tipik kullanim (kosturucu tarafinda):
 
-    # ----------------------------------------------------------------
-    def basla(self):
-        self.gps.sifirla()
-        self.gorsel.sifirla()
-        self.gonderici.sifirla()
-        detection_state.sifirla()
-        self.faz = "GPS"
-        self._kilit_sayac = 0
-        self._kayip_t = None
-        self._devir_sayisi = 0
-        self.aktif = True
-        print("[GOREV] BASLADI — kalkis + bozuk GNSS ile yaklasma.")
-
-    def dur(self):
-        self.aktif = False
-        try:
-            self.gonderici.kes()
-        except Exception:
-            pass
-        print("[GOREV] DURDURULDU — motorlar kesildi.")
-
-    # ----------------------------------------------------------------
-    def _paket_izle(self, t):
-        """YENI ham GNSS paketi geldiyse zaman damgasini tazele. HER FAZDA calisir:
-        gorsel fazda da filtre beslendiginden kesinti izlemesi kesintisiz surer
-        (faz geri donunce 'bayat' bayragi gercegi gostersin)."""
-        ham = self.gps.son_ham
-        if ham is not None and ham != self._son_ham:
-            self._son_ham = ham
-            self._son_paket_t = t
-
-    def _gnss_bayat(self, t):
-        """Hedef GNSS paketi GPS_STALE_S'ten uzun suredir yenilenmedi mi?"""
-        if self._son_paket_t is None:
-            return False
-        return (t - self._son_paket_t) > Cfg.GPS_STALE_S
-
-    def _tespit_oku(self, t):
-        """detection_state'ten guduume GIREBILECEK tespiti oku (yoksa None)."""
-        det = detection_state.son()
-        if bayat_mi(det, GorselCfg, simdi=t):
-            return None
-        return nisan_kutusu(det, GorselCfg)
-
-    # ================================================================
-    #  TEK KONTROL ADIMI (50 Hz)
-    # ================================================================
-    def adim(self):
-        t = time.perf_counter()
-        det = self._tespit_oku(t)
-        self._son_det = det
-
-        if self.faz == "GPS":
-            self.gps.adim()                       # kalkis + bozuk GNSS ile yaklasma
-            self._paket_izle(t)
-            bayat = self._gnss_bayat(t)
-            self._kilit_sayac = (self._kilit_sayac + 1) if det is not None else 0
-            yakin = (self.gps.d_h is not None and self.gps.d_h <= Cfg.HANDOFF_RANGE)
-            if (self.gps._kalkis_done and self._kilit_sayac >= GorselCfg.N_LOCK
-                    and (yakin or bayat)):
-                self.faz = "GORSEL"
-                self._devir_sayisi += 1
-                self._kayip_t = None
-                self.gorsel.sifirla()             # taze EMA + yumusak gecis rampasi
-                mesafe = ("%.0f m" % (self.gps.d_h * CM_TO_M)) if self.gps.d_h else "?"
-                print("[DEVIR] GORSEL TEMAS (#%d, menzil %s%s) -> GPS yonelimi BIRAKILDI, "
-                      "komut yalnizca kameradan." % (self._devir_sayisi, mesafe,
-                                                     ", GNSS BAYAT" if bayat else ""))
-            return
-
-        # ==================== GORSEL FAZ ====================
-        # Filtreyi taze tut (KOMUTA GIRMEZ; faz geri donerse isinmis olsun).
-        self.gps._hedef_temizle()
-        self._paket_izle(t)
-
-        if det is not None:
-            self._kayip_t = None
-            # KENDI IMU pitch'imiz = ego-motion telafisi (hedef verisi DEGIL).
-            rot = drone.get_drone_rotation()
-            own_pitch = (math.radians(float(rot[1])) if GPSCfg.ROT_IN_DEGREES
-                         else float(rot[1]))
-            thr, pitch, roll, yaw = self.gorsel.hesapla(det, own_pitch_rad=own_pitch)
-            self.gonderici.gonder(thr, pitch, roll, yaw)
-            return
-
-        # --- TESPIT YOK: kisa sure hover, uzun kayipta GPS'e geri don ---
-        if self._kayip_t is None:
-            self._kayip_t = t
-        kayip_s = t - self._kayip_t
-        if kayip_s <= float(GorselCfg.LOST_S):
-            self.gonderici.loiter()               # hedefi ararken bekle
-            return
-        print("[DEVIR] Hedef %.1f s kayip -> GPS yaklasmaya GERI DONULDU." % kayip_s)
-        self.faz = "GPS"
-        self._kilit_sayac = 0
-        self._kayip_t = None
-        self.gorsel.sifirla()
-
-    # ----------------------------------------------------------------
-    def ozet(self):
-        """Tek satir konsol durumu (guduume GIRMEZ)."""
-        kam = camera.durum()
-        cmd = self.gonderici.prev
-        if self.faz == "GPS":
-            d = ("%.0f m" % (self.gps.d_h * CM_TO_M)) if self.gps.d_h else "?"
-            ic = "faz=%-9s menzil=%-8s kilit=%d/%d" % (
-                self.gps.faz, d, self._kilit_sayac, GorselCfg.N_LOCK)
+        det, seq = goz.read_detection(t)
+        if goz.faz == goz.GPS:
+            gps.step()
+            if goz.gps_tick(t, det, seq, takeoff_done=..., station_err=...,
+                           range_h=..., last_raw=...):
+                gorsel.reset()                  # devir oldu
         else:
-            g = self.gorsel.durum()
-            ic = "faz=GORSEL   sapma=%-6s boyut=%-7s conf=%-5s" % (
-                g.get("sapma", "-"), g.get("boyut", "-"),
-                ("%.2f" % self._son_det["conf"]) if self._son_det else "KAYIP")
-        return ("[%s] %s | thr%+.2f pit%+.2f rol%+.2f yaw%+.2f | kamera %.1f FPS (%.0f ms)"
-                % (self.faz, ic, cmd["thr"], cmd["pitch"], cmd["roll"], cmd["yaw"],
-                   kam["fps"], kam["det_ms"]))
+            kutu = gorsel.box(det, own_att, t)
+            ...komutu gonder...
+            if goz.visual_tick(t, det, seq, box_ok=(kutu is not None)):
+                gorsel.reset()                  # hedef kayip, GPS'e donuldu
+    """
 
+    GPS = "GPS"
+    VISUAL = "VISUAL"
 
-# ==========================================================
-#  BAGLANTI YONETICISI
-# ==========================================================
-def baglanti_yoneticisi():
-    onceki = None
-    while True:
-        c = drone.is_connected()
-        if c and onceki is not True:
-            print("[BAGLANTI] Oyuna baglanildi.")
-        elif (not c) and onceki is True:
-            print("[BAGLANTI] Oyun baglantisi koptu — yeniden deneniyor...")
-        onceki = c
-        if not c:
-            try:
-                drone.disconnect()
-            except Exception:
-                pass
-            drone.connect()
-        time.sleep(2.0)
+    def __init__(self, cfg=Cfg, visual_cfg=VisualCfg):
+        self.cfg = cfg
+        self.visual_cfg = visual_cfg
+        self.reset()
 
+    def reset(self):
+        """Yeni gorev: faz ve TUM sayaclar basa doner."""
+        self.phase = self.GPS
+        self.handoff_count = 0
+        self._lock = 0           # ard arda GECERLI kare (tik degil)
+        self._lock_since = None  # kesintisiz kanit zincirinin BASLANGIC damgasi
+        self._last_frame_t = None  # son YENI karenin damgasi (donmus kamera tespiti)
+        self._last_seq = None    # sayaca islenmis son kare no
+        self._station_ticks = 0  # ard arda "istasyona oturmus" tik
+        self._last_valid_t = None
+        self._last_raw = None
+        self._last_packet_t = None
+        self._message = ""  # son faz gecisinin insan okur aciklamasi
 
-# ==========================================================
-#  ANA PROGRAM
-# ==========================================================
-def main():
-    hemen = "--hemen" in sys.argv
-    gorev = Gorev()
+    # ================================================================
+    #  GIRDI OKUMA
+    # ================================================================
+    def read_detection(self, t=None):
+        """detection_state'ten guduume GIREBILECEK tespiti oku -> (det, seq).
 
-    threading.Thread(target=baglanti_yoneticisi, daemon=True,
-                     name="baglanti").start()
-    camera.baslat(lambda: gorev.aktif and drone.is_connected())
+        `seq` kamera thread'inin KARE sayacidir; DEDUP icin gerekir. Dongu
+        50 Hz, dedektor 8-10 Hz -> ayni kayit 5-6 tik boyunca dondurulur.
+        Sayan taraf tik ile kareyi ayirt etmezse "ard arda N kare" sarti
+        fiilen "ard arda N tik" olur (N=10 icin 0.2 s), yani kapi TEK
+        tespitle acilir. Kardes depoda olculen cirpinmanin kok nedeni tam
+        olarak buydu: 190 s'de 6-12 faz degisimi, gorsel faz omru medyan
+        3.6-5.2 s.
 
-    print("=" * 62)
-    print("  AVCI DRONE — GPS TAKIP + GORSEL TAKIP")
-    print("  Oyun (Drones of War) acik ve PLAY modunda olmali.")
-    print("  Oyun penceresi GORUNUR/ONDE kalsin (kamera ekrani yakalar).")
-    print("=" * 62)
-    if not hemen:
-        try:
-            input("Baslatmak icin ENTER (cikis: Ctrl+C) > ")
-        except (EOFError, KeyboardInterrupt):
+        Kapi TEK YERDEDIR: `aim_box`. Gorsel faz da AYNISINI kullanir.
+        """
+        t = time.perf_counter() if t is None else t
+        det, seq, _ = detection_state.status()
+        if is_stale(det, self.visual_cfg, now=t):
+            return None, seq
+        return aim_box(det, self.visual_cfg), seq
+
+    # ----------------------------------------------------------------
+    def _track_packet(self, last_raw, t):
+        """YENI ham GNSS paketi geldiyse zaman damgasini tazele. HER FAZDA
+        calisir: gorsel fazda da filtre beslendiginden kesinti izlemesi
+        kesintisiz surer (faz geri donunce 'bayat' bayragi gercegi gostersin).
+        """
+        if last_raw is not None and last_raw != self._last_raw:
+            self._last_raw = last_raw
+            self._last_packet_t = t
+
+    def gnss_stale(self, t=None):
+        """Hedef GNSS paketi GPS_STALE_S'ten eski mi? (yalniz kapi ve gosterge)"""
+        if self._last_packet_t is None:
+            return False
+        t = time.perf_counter() if t is None else t
+        return (t - self._last_packet_t) > self.cfg.GPS_STALE_S
+
+    def _process_frame(self, t, det, seq):
+        """Kanit zincirini surdur: SURE damgasi + AYRI KARE sayaci.
+
+        Sayac YALNIZ YENI karede ilerler (tik degil, KARE) — dongu 50 Hz,
+        dedektor cok daha yavas oldugundan ayni kayit onlarca tik boyunca
+        dondurulur ve tik saymak kapiyi tek tespitle acardi.
+
+        ⚠ ZINCIR KIRILMASI (det is None) AYNI KAREDE DE SIFIRLAR. `det`,
+          `read_detection`'da `is_stale` suzgecinden gecmistir: ayni `seq`
+          uzerinde None'a donmesi "kutu BAYATLADI" demektir, yani kanit
+          gercekten bitmistir. Bunu `seq` esitligine takilip atlarsak, donmus
+          bir kamerada zincir hic kirilmaz ve sure kapisi kendi kendine dolar.
+
+        ⛔ KARE ILERLEMESI DE SART (yapisal, cagirana guvenmez). Kamera thread'i
+          donarsa `seq` durur ama DUVAR SAATI ilerler; kare tabani o ana kadar
+          dolmussa saf sure kapisi DONMUS bir goruntuyle acilirdi (olculdu:
+          53 Hz'de 0.20 s'de donan kamera kapiyi 1.00 s'de aciyordu). Bu yuzden
+          "son YENI kareden beri gecen sure > STALE_S" zinciri kirar. Esik
+          bilerek `STALE_S`'tir: gorsel fazin "bu kutu artik guduume giremez"
+          dedigi ayni andir — iki katmanda iki ayri esik olmaz.
+        """
+        if (self._last_frame_t is not None
+                and (t - self._last_frame_t) > self.visual_cfg.STALE_S):
+            self._lock = 0
+            self._lock_since = None
+        if det is None:
+            self._lock = 0
+            self._lock_since = None
+            self._last_seq = seq
             return
+        self._last_valid_t = t
+        if seq == self._last_seq:
+            return  # ayni kare, zaten sayildi
+        self._last_seq = seq
+        self._last_frame_t = t
+        if self._lock_since is None:
+            self._lock_since = t
+        self._lock += 1
 
-    for _ in range(50):                       # baglanti icin kisa bekleme
-        if drone.is_connected():
-            break
-        time.sleep(0.1)
-    if not drone.is_connected():
-        print("[UYARI] Oyuna henuz baglanilamadi — baglanti kurulunca gorev basliyor.")
+    def _lock_s(self, t):
+        """Kesintisiz gorsel kanit suresi (s)."""
+        return 0.0 if self._lock_since is None else (t - self._lock_since)
 
-    gorev.basla()
-    t_ozet = 0.0
-    try:
-        while True:
-            t0 = time.monotonic()
-            if drone.is_connected():
-                try:
-                    gorev.adim()
-                except Exception as e:
-                    print("[HATA] kontrol adimi: %r" % e)
-            if time.monotonic() - t_ozet >= Cfg.OZET_S:
-                t_ozet = time.monotonic()
-                print(gorev.ozet())
-            kalan = Cfg.DT - (time.monotonic() - t0)
-            if kalan > 0:
-                time.sleep(kalan)
-    except KeyboardInterrupt:
-        print("\nKapatiliyor...")
-    finally:
-        gorev.dur()
-        try:
-            drone.disconnect()
-        except Exception:
-            pass
+    def _is_locked(self, t):
+        """Gorsel kilit kuruldu mu? SURE **VE** KARE sarti birlikte.
+
+        Fiili kapi = max(HANDOFF_LOCK_S, HANDOFF_FRAMES / dedektor_hizi).
+        Gerekce ve olculmus hiz-kapi tablosu:
+        control/visual_tracking.py :: Cfg.HANDOFF_LOCK_S.
+        """
+        if self._lock_since is None:
+            return False
+        if self._lock < self.visual_cfg.HANDOFF_FRAMES:
+            return False
+        return self._lock_s(t) >= self.visual_cfg.HANDOFF_LOCK_S
+
+    def _is_settled(self, t, station_err, range_h):
+        """Arac istasyona OTURDU ve hedefe devir menzilinde mi?
+
+        ⛔ HEDEFIN GPS'INI OKUR — yalnizca GPS fazinda, gorsel temas YOKKEN
+          cagrilir; bir faz gecisi kapisidir, guduum yasasi degildir.
+          `Cfg.CAMERA_ONLY_GATE` ile tamamen devre disi birakilabilir.
+        """
+        if self.cfg.CAMERA_ONLY_GATE:
+            return True  # kapi yalnizca kamera kutusuna baksin
+        if self.gnss_stale(t):
+            return True  # menzil bilinemez -> kutu kapisi yeter
+        if station_err is None or range_h is None:
+            self._station_ticks = 0
+            return False
+        if (station_err <= self.cfg.HANDOFF_STATION_ERR_M
+                and range_h <= self.cfg.HANDOFF_RANGE_M):
+            self._station_ticks += 1
+        else:
+            self._station_ticks = 0
+        return self._station_ticks >= self.cfg.HANDOFF_STATION_TICKS
+
+    # ================================================================
+    #  KAPILAR
+    # ================================================================
+    def gps_tick(self, t, det, seq, takeoff_done=True, station_err=None, range_h=None,
+                 last_raw=None):
+        """GPS fazinda bir tik islenir. GORSEL faza gecildiyse True doner.
+
+        det, seq  : `read_detection` ciktisi
+        takeoff_done, station_err, range_h, last_raw : GPSTracker'in DURUM alanlari
+                    (guduum degil gosterge/kapi verisi; gorsel temas YOK)
+        """
+        self._track_packet(last_raw, t)
+        self._process_frame(t, det, seq)
+        # ⚠ `_is_settled` HER tik cagrilir (kisa devre YOK): icindeki oturma
+        #   sayaci ancak her tik islenirse "ard arda HANDOFF_STATION_TICKS" anlamina
+        #   gelir. Kilit sartinin arkasina saklanirsa sayac kilit acilana
+        #   kadar hic islemez ve kapi 0.5 s GECIKIR.
+        settled = self._is_settled(t, station_err, range_h)
+        if not (takeoff_done and self._is_locked(t) and settled):
+            return False
+
+        self.phase = self.VISUAL
+        self.handoff_count += 1
+        distance = ("%.0f m" % range_h) if range_h else "?"
+        self._message = ("GORSEL TEMAS (#%d, menzil %s, kilit %.1f s / %d kare%s) — "
+                         "GPS yonelimi BIRAKILDI, komut yalnizca kameradan."
+                         % (self.handoff_count, distance, self._lock_s(t), self._lock,
+                            ", GNSS BAYAT" if self.gnss_stale(t) else ""))
+        return True
+
+    def visual_tick(self, t, det, seq, box_ok, last_raw=None):
+        """Gorsel fazda bir tik islenir. GPS fazina DONULDUYSE True doner.
+
+        ⛔ Imzada hedefe ait TEK veri "kutu var mi yok mu"dur. Menzil, konum,
+          GNSS buraya PARAMETRE OLARAK BILE girmez -> gorsel fazda kural
+          ihlali yapisal olarak imkansizdir. (`last_raw` hedefin konumu degil,
+          paket kimligidir; yalnizca "paket geliyor mu" izlemesini besler ve
+          hicbir kapiyi bu fazda tetiklemez.)
+
+        box_ok : taze tespit YA DA kopru (olu-hesap) kutusu uretildi mi
+        """
+        self._track_packet(last_raw, t)
+        self._process_frame(t, det, seq)
+        if box_ok:
+            return False
+
+        lost_s = (t - self._last_valid_t) if self._last_valid_t else 0.0
+        if lost_s <= self.cfg.LOST_S:
+            return False
+
+        self.phase = self.GPS
+        self._lock = 0
+        self._lock_since = None
+        self._station_ticks = 0
+        self._message = ("Hedef %.1f s kayip — GPS istasyon tutmaya GERI DONULDU."
+                         % lost_s)
+        return True
+
+    # ================================================================
+    #  GOSTERGE (guduume GIRMEZ)
+    # ================================================================
+    def handoff_message(self):
+        """Son faz gecisinin insan okur aciklamasi (olay gunlugu icin)."""
+        return self._message
+
+    def status(self, t=None):
+        """Gozetmenin ic sayaclari — arayuz/konsol icin."""
+        t = time.perf_counter() if t is None else t
+        return {
+            "phase": self.phase,
+            "lock": self._lock,
+            "lock_need": self.visual_cfg.HANDOFF_FRAMES,
+            "lock_s": self._lock_s(t),
+            "lock_s_need": self.visual_cfg.HANDOFF_LOCK_S,
+            "station_ticks": self._station_ticks,
+            "station_ticks_need": self.cfg.HANDOFF_STATION_TICKS,
+            "handoff_count": self.handoff_count,
+            "gnss_stale": self.gnss_stale(t),
+            "camera_only_gate": bool(self.cfg.CAMERA_ONLY_GATE),
+        }
 
 
+# ==========================================================
+#  Bu dosya bir GIRIS NOKTASI DEGILDIR.
+#  `python -m control.main` sessizce hicbir sey yapmasin diye isaret levhasi:
+# ==========================================================
 if __name__ == "__main__":
-    main()
+    print("control/main.py bir giris noktasi DEGILDIR — yalnizca faz kapisidir "
+          "(PhaseSupervisor).\nGorevi calistirmak icin:  python -m web.server  "
+          "->  http://127.0.0.1:8001")
