@@ -1,0 +1,102 @@
+[
+ {
+  "ad": "L0_kapi_KAPALI_a",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_CONF": "0.35",
+   "AVCI_KILIT_DOLULUK": "0",
+   "AVCI_KILIT_BOSLUK_MOD": "kare"
+  },
+  "not": "KILIT DOGRULAMA: kapi kapali (eski davranis) #1"
+ },
+ {
+  "ad": "L5_kapi_ACIK_a",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5"
+  },
+  "not": "KILIT DOGRULAMA #1 -- ilk kosu: GPS_VISUAL %100 >=5s, min 5.00 s, vurus 7"
+ },
+ {
+  "ad": "L0_kapi_KAPALI_b",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_CONF": "0.35",
+   "AVCI_KILIT_DOLULUK": "0",
+   "AVCI_KILIT_BOSLUK_MOD": "kare"
+  },
+  "not": "KILIT DOGRULAMA: kapi kapali #2 (serpistirilmis)"
+ },
+ {
+  "ad": "L5_kapi_ACIK_b",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5"
+  },
+  "not": "KILIT DOGRULAMA #2"
+ }
+]

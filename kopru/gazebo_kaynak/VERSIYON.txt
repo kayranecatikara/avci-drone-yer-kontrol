@@ -1,0 +1,21 @@
+GAZEBO YASASI — KAYNAK SURUM KAYDI
+senkron zamani : 2026-08-13 10:47:04
+kaynak repo    : C:\Users\Zeylo\Desktop\hamidiyesim
+dal            : kayramin_super_gudumu
+commit         : 2b90498920f112916f4518674fc833fdf0132b50
+commit tarihi  : 2026-08-11
+commit konusu  : T1b kodlandı ama UÇULMADI — mekanizma kapısı uçmadan eledi
+
+DOSYA HASH'LERI (git blob):
+  77866a388cba  control/guidance/__init__.py
+  dc69f21b4ce6  control/guidance/gps_guidance.py
+  4dea992ccae5  control/guidance/common.py
+  dc95e7ea45ae  control/guidance/guidance_core.py
+  6af4dde7be3d  control/guidance/hedef_kestirim.py
+  d0dc140c7abd  control/guidance/supervisor.py
+  03cd1c2bd4ed  control/guidance/bbox_ibvs.py
+  424842a3e931  control/guidance/visual_lead.py
+  9cbde16c856d  control/guidance/kurtarma.py
+  74f1bbb16a75  control/guidance/adapter_copter.py
+  d32ee2e005a6  vision/__init__.py
+  f3b735958d10  vision/geometry.py

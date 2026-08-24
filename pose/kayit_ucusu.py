@@ -434,10 +434,29 @@ def calistir(args):
                     uv = geometri.projekte(hpos, cam_pos, R_cam, fx, W, H)
                     d_cm = float(np.linalg.norm(np.asarray(hpos) - np.asarray(dpos)))
 
-                    if not (K.MIN_MESAFE_CM < d_cm < K.MAX_MESAFE_CM):
-                        n_red_mesafe += 1
-                    elif not kadrajda(uv, W, H):
-                        n_red_kadraj += 1
+                    # KAPSAM (--kapsam): hangi kareler kaydedilir?
+                    #   pozitif (VARSAYILAN) : hedef kadrajda + mesafe bandinda
+                    #                          -> eski davranis, BIT AYNI
+                    #   negatif              : hedef kadraj DISINDA (Hat C / hard
+                    #                          negative havuzu; mesafe kapisi YOK)
+                    #   hepsi                : kapi yok (sonra ayikla)
+                    # Negatif kararinin KENDISI burada verilmez; burasi yalnizca
+                    # havuzu genisletir. Kesin "hedef gorunmuyor" testi ve emniyet
+                    # payi veriseti/negatif_topla.py:negatif_mi()'de (birim testli).
+                    _icerde = kadrajda(uv, W, H)
+                    _mesafe_ok = (K.MIN_MESAFE_CM < d_cm < K.MAX_MESAFE_CM)
+                    if args.kapsam == "negatif":
+                        _al, _sebep = (not _icerde), "kadraj"
+                    elif args.kapsam == "hepsi":
+                        _al, _sebep = True, "kadraj"
+                    else:
+                        _al = _mesafe_ok and _icerde
+                        _sebep = "mesafe" if not _mesafe_ok else "kadraj"
+                    if not _al:
+                        if _sebep == "mesafe":
+                            n_red_mesafe += 1
+                        else:
+                            n_red_kadraj += 1
                     else:
                         n_kayit += 1
                         ad = "kare_%06d.png" % n_kayit
@@ -503,6 +522,11 @@ def main():
                     help="kare kayit sikligi (vars: %.0f)" % K.KAYIT_HZ)
     ap.add_argument("--pasif", action="store_true",
                     help="komut gonderme (arm dahil) — sadece izle ve kaydet")
+    ap.add_argument("--kapsam", choices=("pozitif", "negatif", "hepsi"),
+                    default="pozitif",
+                    help="pozitif (vars): hedef kadrajda+mesafe bandinda (eski "
+                         "davranis). negatif: hedef kadraj DISINDA (hard negative "
+                         "havuzu). hepsi: kapi yok.")
     sys.exit(calistir(ap.parse_args()))
 
 

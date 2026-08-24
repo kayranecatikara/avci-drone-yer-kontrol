@@ -1,0 +1,28 @@
+# talon_v2.pt metadata (model_yonetici okur)
+# ---------------------------------------------------------------------------
+# yolo11s detect, 1 sinif (talon).  Egitim: 2026-08-14, 100 epoch, imgsz=960.
+# Veri: 8998 kare / 7741 train + 1257 val, SIZINTISIZ blok bolme.
+#   talon_    5042  sim cekimi (Halton, 1.5-40 m, tam otomatik etiket)
+#   talon9_   1520  elle etiketlenen (TALON_ETIKET_01)  + 81 negatif
+#   talon7_   1935  elle etiketlenen (TALON_ETIKET_02)  + 81 negatif
+#   talonB_    339  2. bilgisayar sim cekimi
+#
+# VAL SONUCLARI (1257 kare):
+#   mAP50 0.9796 | mAP50-95 0.8386 | precision 0.9782 | recall 0.9570
+#
+# MESAFEYE GORE RECALL (SAHI YOK, tam kare tek gecis):
+#    0-5 m  %97.2 |  5-10 m %96.8 | 10-20 m %95.3
+#   20-30 m %92.7 | 30-45 m %94.1 | 45+ m   %100 (13 kare)
+#   -> Eski model SAHI'siz uzakta %0 goruyordu; bu model tek gecisle
+#      45 m'ye kadar %92+ yakaliyor. SAHI'ye GEREK YOK.
+#
+# YANLIS POZITIF: 24 negatif karede 1 kutu (%4.2) -- bos gokyuzunde temiz.
+#
+# HIZ (RTX 4060 Laptop, oyun KAPALI):
+#   PyTorch .pt   22.7 FPS
+#   TensorRT .engine (FP16)  47.4 FPS   <- yaninda talon_v2.engine var,
+#                                          gorsel_tespit onu otomatik secer.
+# ---------------------------------------------------------------------------
+imgsz: 960
+conf: 0.35
+aciklama: "yolo11s @960 (2026-08-14) - 8998 kare, mAP50 0.980, 30-45m recall %94, SAHI gerektirmez"

@@ -15,7 +15,14 @@ yol `control/guidance/`
 
 | Dosya | Satır | Rol | Bizde kullanılıyor mu? |
 |---|---|---|---|
-| `gps_guidance.py` | 522 | **Güdüm yasası** — tek karar mercii | ✅ EVET, aynen |
+> ⚠️ **Bu tablo ilk gönderilen `GUDUM_TASIMA/` nüshasına aittir (7 Ağustos).**
+> Yasa o tarihten sonra dalda gelişmeye devam etti; kullandığımız sürüm artık
+> `kayramin_super_gudumu` dalının HEAD'i (bkz. `gazebo_kaynak/VERSIYON.txt`).
+> Somut fark: `gps_guidance.py` **522 → 720 satır** (yeni: `ELEV_DINAMIK`,
+> `FF_DONUS`, `ARKA_KISALT`); ayrıca `supervisor.py` + `bbox_ibvs.py` hibrit/görsel
+> faz için baştan yazıldı. Güncelleme: `python -m kopru.yasa_senkron`.
+
+| `gps_guidance.py` | 522→**720** | **Güdüm yasası** — tek karar mercii | ✅ EVET, aynen |
 | `common.py` | 106 | Ortak matematik + `send_velocity` | ✅ EVET (send_velocity değiştirilir) |
 | `guidance_core.py` | 612 | Kadraj hatası ölçümü (kamera geometrisi) | ✅ EVET (yalnız ölçüm) |
 | `hedef_kestirim.py` | 250 | IMM (CV+CA) durum kestirimi | ❌ HAYIR — yasa çağırmıyor |

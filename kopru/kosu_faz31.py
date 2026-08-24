@@ -162,7 +162,20 @@ def main():
     ap.add_argument("--hedef", choices=["bozuk", "truth"], default="bozuk",
                     help="TESHIS: 'truth' = get_plane hedefin GERCEK GPS'inden beslenir "
                          "(bozuk kanal okunmaz, CT-EKF baypas). Yarisma konfigi DEGIL.")
+    ap.add_argument("--elev-din", type=int, choices=[0, 1], default=0, dest="elev_din",
+                    help="[VARSAYILAN 0 = SISTEMLE AYNI] Dinamik istasyon yukselisi. "
+                         "1 = yasanin ham varsayilani (A/B icin).")
     a = ap.parse_args()
+
+    # ⛔ 2026-08-13 DUZELTME — OLCUM KOSUCUSU SISTEMDEN AYRISMISTI.
+    # Yasanin ham varsayilani ELEV_DINAMIK=ACIK; arayuz yolu (kopru/entegre.py
+    # _kur -> AVCI_GPS_ELEV_DIN=0) onu KAPATIYOR. Kosucu bunu gecmedigi icin
+    # SISTEMDEN FARKLI bir konfigurasyon olcuyordu:
+    #     olculdu (R1, 3 angajman): istasyon ALT 1.34 m / yukselis +12.2 deg
+    #     oysa sistem konfigi      : ALT 2.92 m / yukselis 25.0 deg
+    # Yani "regresyon var mi" kiyasi gecersiz olurdu. Artik kosucu VARSAYILAN
+    # olarak sistemin konfigini kurar; --elev-din 1 ile A/B yapilabilir.
+    os.environ["AVCI_GPS_ELEV_DIN"] = str(a.elev_din)
 
     # gg.Cfg env'i SINIF TANIMINDA okur -> import'tan ONCE set et
     if a.ic_oran is not None:
@@ -186,8 +199,12 @@ def main():
 
     gg.send_velocity = dow_kopru.send_velocity      # TEK baglama noktasi
     print(f"[KOSU] gg baglandi: V_MAX={gg.Cfg.V_MAX} RANGE_SET={gg.Cfg.RANGE_SET} "
-          f"ELEV={gg.Cfg.ISTASYON_ELEV_DEG} IC_KAYMA={gg.Cfg.IC_KAYMA} "
+          f"ELEV={gg.Cfg.ISTASYON_ELEV_DEG} ELEV_DIN={gg.Cfg.ELEV_DINAMIK} "
+          f"IC_KAYMA={gg.Cfg.IC_KAYMA} "
           f"IC_ORAN={gg.Cfg.IC_ORAN} KP_H={gg.Cfg.KP_H} (etiket {a.etiket})")
+    if gg.Cfg.ELEV_DINAMIK:
+        print("[KOSU] ⚠ ELEV_DINAMIK ACIK — arayuz/sistem yolu bunu KAPALI kosar. "
+              "Sistemle kiyaslanacaksa --elev-din 0 kullan.")
     print(f"[KOSU] istasyon: {gg.Cfg.RANGE_SET*math.cos(math.radians(gg.Cfg.ISTASYON_ELEV_DEG)):.2f} m ARKA"
           f" + {gg.Cfg.RANGE_SET*math.sin(math.radians(gg.Cfg.ISTASYON_ELEV_DEG)):.2f} m ALT")
     _K = 1.718 / (2.0 * math.tan(math.radians(125.0) / 2.0))     # 0.4472

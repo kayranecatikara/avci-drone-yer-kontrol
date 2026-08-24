@@ -1,0 +1,155 @@
+[
+ {
+  "ad": "K0_taban",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_KESTIRIM": "0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "REFERANS = B_ayna_DPP birebir; ongorulu nisan KAPALI (AVCI_IBVS_KESTIRIM=0). Kestirim kodu yuklu ama komuta HIC dokunmaz. MEKANIZMA KAPISI (negatif): bbox_ibvs logunda `kestirim_lead_deg` sutunu VARSA ve 0'dan farkliysa varsayilan-kapali sozu bozulmustur, deney GECERSIZ. Cevrimdisi kor testte olculen taban (saf takip, LOS'a dik nisan hatasi p50): 0.5s 3.47 m | 1.0s 8.13 m | 2.0s 18.19 m | 3.0s 27.16 m (n=18991 ornek, 929 iz, 1810 temiz segment)."
+ },
+ {
+  "ad": "K1_gecikme_telafisi",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_KESTIRIM": "1",
+   "AVCI_IBVS_KESTIRIM_UFUK": "0.5",
+   "AVCI_IBVS_KESTIRIM_MODEL": "cv",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "EN DUSUK RISKLI ADIM: ufuk = kanal gecikmesi (tau = dedektor 0.22 + yaw 0.28 = 0.50 s). Lead pursuit DEGIL, yalnizca GECIKME TELAFISI. GEREKCE (olculdu): yasa komutu tau kadar gec uyguluyor; aspect medyani 163 derecede biriken yanal iska v_dik*tau = 5.26*0.50 = 2.63 m. Ayni ufukta kestirim hatasi 1.52 m -> NET KAZANC 1.11 m. MEKANIZMA KAPISI: `kestirim_lead_deg` medyani (mutlak) > 2 derece olmali; 0'a yapisiksa kapi acilmamistir, deney GECERSIZ. Ayrica `kestirim_n` >= 5 ve `kestirim_hazir`=1 orani > %70 olmali. BASARI: CPA_med taban(2.44-2.69 m duz / 5.92-6.43 m donus) degerlerinden DUSMELI; ozellikle DONUS CPA_med < 5.0 m."
+ },
+ {
+  "ad": "K2_kesme_ufuk1",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_KESTIRIM": "2",
+   "AVCI_IBVS_KESTIRIM_UFUK": "1.0",
+   "AVCI_IBVS_KESTIRIM_MODEL": "cv",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "TAM KESME NOKTASI: t_go = R/kapanma (1.0 s ile sinirli), nisan = hedefin t_go sonraki yeri. Ufuk 1.0 s SINIR degeridir: kestirim hatasi 1.0 s'te 3.31 m ile gecikme iskasinin altinda kalir, 2.0 s'te 8.26 m'ye cikip ustune tasar (bkz. korbolge). MEKANIZMA KAPISI: `kestirim_tgo` sutunu dolu ve medyani 0.3-1.0 s bandinda olmali; hep tavanda (1.0) ise kapanma hesabi calismiyor demektir. BASARI: kapali cevrim benzetimi V=19.8 m/s'de CPA_med 7.67 -> 5.16 m, vurus %1 -> %9; V=22 m/s'de 6.13 -> 3.02 m, vurus %28 -> %42 ongoruyor."
+ },
+ {
+  "ad": "K3_OLUMSUZ_KONTROL_bozuk_kestirim",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_KESTIRIM": "2",
+   "AVCI_IBVS_KESTIRIM_UFUK": "3.0",
+   "AVCI_IBVS_KESTIRIM_MODEL": "cv",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "OLUMSUZ KONTROL — BU KOSUNUN KOTU CIKMASI BEKLENIR. Ufuk 3.0 s'e cikarilinca kestirim hatasi 14.35 m'ye firlar (olculdu) ve ongorulu nisan SAF TAKIPTEN KOTU hale gelmelidir. DEVRILME NOKTASI benzetimde olculdu: V=19.8 m/s'de kestirim hatasi sigma ~8 m'de ongoru saf takibi kaybediyor; V=22 m/s'de >12 m'ye kadar dayaniyor. Bu kosu KOTULESMEZSE, ya kapi hic acilmamistir ya da yasa nisan noktasini kullanmiyordur -> K1/K2'nin OLUMLU sonucu da SUPHELIDIR. Yani bu, K1/K2'nin gecerlilik testidir."
+ },
+ {
+  "ad": "K4_yavaslama_BIRLESIK",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_KESTIRIM": "2",
+   "AVCI_IBVS_KESTIRIM_UFUK": "1.0",
+   "AVCI_IBVS_DONUS_BUTCE": "0.9",
+   "AVCI_IBVS_DONUS_VTABAN": "15.0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "K2 + M1 donus butcesi (yavaslayarak sert donus). ⚠ DIKKAT: yavaslamanin ongorulu nisanla birlesimi TEK YONLU DEGIL. Olculdu: omega_max = a/V oldugu icin yavaslamak donusu sertlestirir (18 m/s'de 38.2 derece/s, 15 m/s'de 45.8) AMA kapanmayi OLDURUR. Kuyrukta (aspect 163) kapanma: V=18 -> -0.01 m/s (asla kapanmaz), V=20 -> -2.09, V=22 -> -4.16 m/s. Yani yavaslama YALNIZ hedef DONERKEN ve kisa sureli anlamlidir. MEKANIZMA KAPISI: `donus_kapi_v` dolu VE doygunluk %54.1'den <%40'a inmeli; ayrica ortalama V 18'in ALTINA inerse kapanma olcumu (`v_los`) negatiflesmeli — negatiflesiyorsa bu kosu DURDURULMALI, cunku temas hic olmaz."
+ },
+ {
+  "ad": "OLCUM_OZETI",
+  "env": {
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "CEVRIMDISI OLCUMLER (sim/kestirim.py, 5052 hizali segment / 257354 kare; ayna normallestirilmis + tutarlilik kapili 1810 temiz segment). (1) MODEL KIYASI, LOS'a DIK nisan hatasi p50 (m) @ ufuk 0.5/1.0/2.0/3.0 s: sabit_hiz(CV) 1.52/3.31/8.26/14.35 ; imm 1.88/3.83/8.83/14.89 ; sabit_donus(CT) 2.13/4.48/10.90/18.99 ; polinom 4.02/7.88/18.74/34.51 ; oval 4.83/8.94/17.24/27.07 ; SAF TAKIP (kontrol) 3.47/8.13/18.19/27.16. KAZANAN = CV, her ufukta. (2) CT ve OVAL modelleri KAYBETTI: ovalin viraj parcalari ufka gore kisa, 'donus surecek' bahsi tutmuyor; gorulen yay medyan ~1 s (~18 m, ~21 derece) — cember uydurmaya yetmiyor. (3) MENZIL VEKILI: R=202.6/boyut |hata| med 4.91 m yanlilik +2.58 m; R=232.2/(boyut+4.11) 3.35 m / +0.06 m (dilim yanliligi hala buyuk: 0-5 m'de +5.06, 30-60 m'de -14.23). Bu yuzden olcum gurultusu ANIZOTROPIK kuruldu (LOS boyunca buyuk, dikine kucuk). (4) TESPIT × MENZIL (123504 gecerli kare): 0.5-8 m %95.7, 20-50 m %49.1 -> YAKIN MENZILDE KORLUK YOK, tespit yakinda DAHA IYI. 'Terminal faz kor' gerekcesi GECERSIZ. (5) KOR SURE (son kutulu kare -> CPA) medyan 0.00 s, p90 0.22 s -> acik cevrim penceresi yok; asil pencere KANAL GECIKMESI tau=0.50 s."
+ },
+ {
+  "ad": "TUZAKLAR",
+  "env": {
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "⚠⚠ (1) AYNA KESIMI: kamera aynasi 2026-08-16 ~18:00-19:00'da duzeltildi. ONCESI kayitlarda LOS azimut = yaw - eps_yaw, SONRASI = yaw + eps_yaw. Depo IKI AYNALANMIS DUNYA barindiriyor; hepsini birlikte kullanmak yatay geometriyi yok eder (azimut yayilimi 2.7 yerine 28 derece). sim/kestirim.py bunu cx' = 2*CX - cx ile normallestirir. (2) TRUTH CERCEVESI: veri/hedef_iz DoW (oyun) cercevesindedir; NED_y = -DoW_y, NED_z = -DoW_z (dow_kopru.py:49-53). Bu cevrim yapilmadan hicbir yatay olcum gecerli degil. (3) VERI KALITESI: ayna SONRASI (canli kampanya) kayitlarin yalniz %29.6'si tutarli; kutulu karelerin %67'sinde kopru=1 (hayalet/koprulenmis kutu). Ayna ONCESI kayitlar %92.1 temiz. (4) GECERLILIK FILTRESI: telemetri bos gelen satirlar donuk/sifir deger tasir ve menzil kutulamasinda SAHTE KORELASYON uretir ('yakinda tespit cokuyor' bulgusu tam boyle dogdu ve curudu). Kural: hedef hizi 8-25 m/s VE kendi hizimiz > 0.5 m/s. (5) OLCUT: kestirim hatasini HAM |dp| ile olcmeyin — menzil vekilinin hatasi nisan noktasini GORUS HATTI BOYUNCA kaydirir ve nereye baktigimizi DEGISTIRMEZ. Yalniz LOS'a DIK bilesen olculmelidir (ham norm p50 19 m'nin 9.3 m'si salt menzil). (6) CT MODELI: _ct_ilerlet'te 'if |omega|<eps: dogrusal' dallanmasi konursa sayisal Jakobiyen d/d(omega)=0 verir, omega hic gozlemlenemez ve CT sessizce CV'ye dejenere olur (olculdu: ikisi de birebir 18.82 m). Seri acilimi sart."
+ }
+]

@@ -1,0 +1,103 @@
+[
+ {
+  "ad": "K0_taban_olcum",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "REFERANS. Kapi KAPALI -> davranis bugunku. Amac: denetim kaydinin IHLAL ORANINI olcmek. MEKANIZMA KAPISI: sunucu logunda '[SUPERVISOR] kesintisiz kilit kapisi KAPALI (AVCI_KILIT_S=0)' satiri GORULMELI. BEKLENEN (2026-08-17 olcumu, 229 gecis): ihlal %86.9; kilit medyani GPS_VISUAL 3.15 s / TERMINAL 2.97 s. OLCUM: python arac/kilit_denetim.py --son 1"
+ },
+ {
+  "ad": "K5_kapi_ACIK_5s",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "KULLANICI SARTI UYGULANIR: 5 s KESINTISIZ kilit olmadan NE gorsel NE terminal fazina gecilmez. AVCI_KILIT_CONF boru hattiyla (0.25) HIZALANIR -- hizalanmazsa kilit, yasaya giren kutulari saymaz ve sart gereksiz yere zorlasir (olculdu: >=5 s epizod 12 -> 14). MEKANIZMA KAPISI: (1) '[SUPERVISOR] kesintisiz kilit kapisi ACIK: 5.0 s' satiri GORULMELI, (2) 'ESIK UYUSMAZLIGI' uyarisi CIKMAMALI, (3) IBVS'te '[IBVS] KESINTISIZ KILIT KAPISI: x.xx s < 5.0 s' satiri EN AZ BIR KEZ cikmali -- cikmiyorsa kapi hic sinanmamistir ve deney GECERSIZDIR. HUKUM: python arac/kilit_denetim.py --son 1 -> 'IHLAL YOK' VE 'kapi durumu: ACIK' YAZMALI. UYARI (tezgahta olculdu): angajman sayisi tabanin %11.8'ine duser (110 -> 13 devir). Bu bir hata DEGIL, algi surekliligi limitidir."
+ },
+ {
+  "ad": "K3_kapi_ACIK_3s_diz",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "3.0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_SART_S": "3.0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "ODUNLESIM DIZI NOKTASI. Tezgah karar tablosu: esik 3.0 s -> devir tabanin %57.3'u (110 -> 63); esik 4.0 s -> %30.0; esik 5.0 s -> %11.8. Yani angajman kaybi 3->4->5 arasinda DIKLESIYOR. Bu kol, 5 s cok pahaliysa kullanicinin BILEREK secebilecegi noktadir. SART_S de 3.0 yapilir ki denetim ayni esige gore hukum versin. ⚠ Bu kol kullanici sartini KARSILAMAZ (sart 5 s); yalniz maliyeti olcmek icindir."
+ },
+ {
+  "ad": "K5_doluluk_tabani",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_ACCEL_SPLIT": "0",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_DENETIM": "1",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5"
+  },
+  "not": "EN SIKI TANIM. 5 s sure sartina EK olarak: (a) kilidin >=%80'i GERCEKTEN gozlemlenmis olmali (DOLULUK tabani), (b) bosluk toleransi KARE degil SURE ile olculur -> tanim kare hizindan bagimsiz. GEREKCE: tezgahta olculdu, bugunku >=5 s kilitlerin doluluk medyani %62.1 ve EN KOTUSU %51.1 -- yani '5 s kesintisiz kilit'in icinde medyan 2.27 s KORLUK var. Sure sarti tek basina 'kesintisiz' demek DEGILDIR. MEKANIZMA KAPISI: denetim CSV'sinde 'doluluk' kolonu DOLU olmali ve tum satirlar >=0.80 cikmali. UYARI: bu kol angajmani K5'ten de asagi cekecektir; once K5 kosulmalidir."
+ }
+]

@@ -1,0 +1,38 @@
+[
+  {
+    "ad": "oyun_acilis_bekle",
+    "bekle_s": 40.0,
+    "tus": null,
+    "not": "yalniz .bat ile acildiysa gerekli; oyun zaten ayaktaysa atlanir"
+  },
+  {
+    "ad": "spawn_e",
+    "bekle_s": 2.0,
+    "tus": "e",
+    "not": "OLCULDU: gorev icinde ekranda 'To spawn the drone: Press E key' yaziyor"
+  },
+  {
+    "ad": "spawn_e_tekrar",
+    "bekle_s": 4.0,
+    "tus": "e",
+    "not": "ilki yutulursa"
+  },
+  {
+    "ad": "oturma",
+    "bekle_s": 6.0,
+    "tus": null,
+    "not": "SDK portu (12345) acilsin"
+  },
+  {
+    "ad": "enter_menu",
+    "bekle_s": 3.0,
+    "tus": "enter",
+    "not": "YALNIZ gercekten menudeysek gerekir; port acildiysa buraya hic gelinmez"
+  },
+  {
+    "ad": "spawn_e_son",
+    "bekle_s": 5.0,
+    "tus": "e",
+    "not": "menuden cikildiysa tekrar spawn"
+  }
+]

@@ -355,6 +355,8 @@ _zorla_uygulandi = [object()]      # baslangicta istekten farkli olsun
 def _zorla_mod_uygula():
     """Saklanan zorla modunu supervisor'a yaz. Kopru yoksa False doner."""
     try:
+        # 2026-08-24: eski supervisor KALDIRILDI. Faz zorlamasi yeni hatta
+        # env ile yapilir (DOW_KILIT_N / DOW_KAYIP_N) -> burada islevsiz.
         _kg = getattr(beyin, "kopru_gudum", None)
         _sup = getattr(_kg, "_sup", None) if _kg is not None else None
         if _sup is None:
@@ -578,13 +580,14 @@ def _mesafe_olc():
 
 def _hibrit_bilgi(beyin):
     """Supervisor durum sozlugu {faz, gecis_sayisi, kilit_sayac, ...} | None."""
-    kg = getattr(beyin, "kopru_gudum", None)
-    if kg is None:
-        return None
-    try:
-        return kg.faz() or None
-    except Exception:
-        return None
+    # 2026-08-24: faz mercii artik dow/amir.py (eski supervisor kaldirildi).
+    dg = getattr(beyin, "dow_gudum", None)
+    if dg is not None:
+        try:
+            return dg.faz_ozet() or None
+        except Exception:
+            return None
+    return None
 
 
 def _kilit_durum(beyin):
@@ -1928,8 +1931,8 @@ def build_telemetry():
     # esikleri (kilit 15 kare / kayip 20 kare) o hizda kac SANIYE ediyor, orada
     # gorunur. 30 Hz varsayimi bizde tutmuyor; etkisi gizlenmesin.
     try:
-        _kg = getattr(beyin, "kopru_gudum", None)
-        gudum_info["hibrit"] = _kg.faz() if _kg is not None else {"hibrit": False}
+        _dg = getattr(beyin, "dow_gudum", None)
+        gudum_info["hibrit"] = _dg.faz_ozet() if _dg is not None else {"hibrit": False}
     except Exception:
         gudum_info["hibrit"] = {"hibrit": False}
     kayip_s = 0.0
@@ -1956,17 +1959,20 @@ def build_telemetry():
     #   dikey kapanma sonrasi degisti mi).
     kopru_tani = None
     try:
-        _kg2 = getattr(beyin, "kopru_gudum", None)
-        _kp = getattr(_kg2, "_kopru", None) if _kg2 is not None else None
-        _st = getattr(_kp, "son_tani", None) if _kp is not None else None
+        _dg2 = getattr(beyin, "dow_gudum", None)
+        _st = getattr(_dg2, "tani", None) if _dg2 is not None else None
         if isinstance(_st, dict) and _st:
-            _al = ("sp_vx", "sp_vy", "sp_vz", "sp_yaw_ned_deg", "bayat",
-                   "vx_sdk", "vy_sdk", "vz_up_sdk", "vh_sdk", "vh_sp", "vh_fd",
-                   "yaw_dow_deg", "yaw_hata_deg",
-                   "e_fwd", "e_right", "e_vz",
-                   "sp_fwd", "sp_right", "olc_fwd", "olc_right",
-                   "thr", "pitch", "roll", "yaw", "thr_doydu",
-                   "yaw_yas_s", "v_yas_s", "dt")
+            _al = ("faz", "menzil_m", "en_yakin_m", "agl_m",
+                   "sp_vx", "sp_vy", "sp_vz_ned", "sp_yaw_rate",
+                   "v_own", "vz_own", "roll", "pitch", "yaw",
+                   "thr", "pitch_stick", "roll_stick", "yaw_stick",
+                   "cev_ileri_hata", "cev_sag_hata", "cev_a_ileri", "cev_a_sag",
+                   "cev_vz_yukari", "cev_doyum",
+                   "ibvs_menzil_m", "ibvs_azimut", "ibvs_yukselis",
+                   "ibvs_e_cy", "ibvs_cy_ref", "ibvs_v", "ibvs_vz_yukari",
+                   "ibvs_yaw_rate", "ist_hata_m", "hedef_hiz",
+                   "kutu_var", "kutu_gecerli", "red_sebep", "kutu_yas_s",
+                   "kilit", "kayip", "devir")
             kopru_tani = {k: _st.get(k) for k in _al if k in _st}
     except Exception:
         kopru_tani = None

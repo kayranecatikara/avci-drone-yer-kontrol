@@ -77,10 +77,22 @@ Ayrı yazılırsa biri kaçınılmaz olarak ters olur ve hata yalnızca uçuşta
 
 | Dosya | Satır | Görevi |
 |---|---|---|
-| `gazebo_kaynak/control/guidance/gps_guidance.py` | 522 | **Güdüm yasası.** İstasyon geometrisi + PD + hedef-hızı ileri beslemesi |
+> **SÜRÜM:** `gazebo_kaynak/VERSIYON.txt` — hangi commit'ten senkronlandığı ve
+> her dosyanın git blob hash'i orada. Güncellemek için:
+> `python -m kopru.yasa_senkron` (önce `--kontrol` ile fark raporu alınabilir).
+> Son senkron: **`2b90498` · 11 Ağustos 2026** · dal `kayramin_super_gudumu` ·
+> 12/12 dosya birebir.
+
+| `gazebo_kaynak/control/guidance/gps_guidance.py` | 720 | **Güdüm yasası.** İstasyon geometrisi + PD + hedef-hızı ileri beslemesi (+ ELEV_DINAMIK / FF_DONUS / ARKA_KISALT) |
+| `gazebo_kaynak/control/guidance/supervisor.py` | 217 | **Faz yöneticisi** — GPS ↔ GÖRSEL devir (D0 kuralı: ardışık 10 tespit) |
+| `gazebo_kaynak/control/guidance/bbox_ibvs.py` | 1050 | **Görsel yasa** — saf bbox IBVS (hibrit fazın güdümü) |
+| `gazebo_kaynak/control/guidance/visual_lead.py` | 577 | Pose tabanlı görsel lead (alternatif görsel kol) |
+| `gazebo_kaynak/control/guidance/kurtarma.py` | 136 | Kurtarma bekçisi (takla/kaçak dönüşte komutu kes) |
+| `gazebo_kaynak/control/guidance/adapter_copter.py` | 251 | Copter adaptörü |
 | `gazebo_kaynak/control/guidance/common.py` | 106 | Ortak yardımcılar + `send_velocity` (MAVLink gönderici) |
 | `gazebo_kaynak/control/guidance/guidance_core.py` | 612 | `hedef_kadraj_hatasi` — kadraj ÖLÇÜMÜ (komuta girmez) |
 | `gazebo_kaynak/control/guidance/hedef_kestirim.py` | 250 | IMM (CV+CA) — **kullanılmıyor** |
+| `gazebo_kaynak/control/{carpisma_state,mav_common}.py` | 71 / 377 | Yasanın bağımlılıkları |
 | `gazebo_kaynak/vision/geometry.py` | 325 | Kamera izdüşümü (guidance_core'un bağımlılığı) |
 
 ### ÖLÇÜM VE KOŞU ARAÇLARI
@@ -103,6 +115,7 @@ Ayrı yazılırsa biri kaçınılmaz olarak ters olur ve hata yalnızca uçuşta
 | **[02_DONUSTURUCU.md](02_DONUSTURUCU.md)** | Dönüştürücü: çerçeve sözleşmesi, kanal kanal matematik, döngü mimarisi, ArduCopter'da olup bizde olmayanlar |
 | **[03_OLCUMLER.md](03_OLCUMLER.md)** | Her sayının nereden geldiği: Faz 1/2/3 ölçümleri, çürütülen varsayımlar, kanıtlanmayanlar |
 | **[04_ENTEGRASYON.md](04_ENTEGRASYON.md)** | Yer kontrol istasyonuna bağlanma, silinen eski yasa, GPS kaynağı seçici |
+| **[05_YUMUSAK_UCUS.md](05_YUMUSAK_UCUS.md)** | **Tek başına okunur.** Gazebo ↔ DoW farkı, veriyi nasıl okuduğumuz, komutu nasıl yazdığımız, sarsıntının neden olmadığı — birine göndermek için |
 | **[../docs/kopru_denetim.md](../docs/kopru_denetim.md)** | Bağımsız denetim: köprü ArduCopter'ın yerini doğru alıyor mu? (uçtan uca iz, limit önceliği, zamanlama) |
 
 ---

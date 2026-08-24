@@ -42,3 +42,36 @@ omer_filtre.py.py
 # Her makinede uretilir:  python arac/motor_kur.py   (bkz. FPS_VE_MODEL.md)
 models/*.engine
 *.engine
+
+# ══ 2026-08-24: DoW sistemi push edilirken eklendi ══════════════════════
+# Asil kod ~5 MB; asagidakiler 940 MB tutuyor ve hicbiri sistemi calistirmak
+# icin gerekli degil. Gereken model (talon_v5.pt) ZATEN repoda izleniyor.
+
+# --- Arsiv/yedek kopyalari (kod degil, eski surumlerin tam kopyalari) ---
+yedek/
+kopru/gazebo_kaynak_ONCEKI*/
+PAYLASIM_MODELLER_*/
+
+# --- Claude Code oturum verisi (transkript + worktree; paylasilmaz) ---
+.claude/
+
+# --- ONNX disa aktarimlari: .pt'den yeniden uretilir, 108 MB tutuyor ---
+*.onnx
+
+# --- Ek model varyantlari (aktif sistem v5 kullaniyor) ---
+models/talon_v2.pt
+models/talon_v3.pt
+models/talon_pose_v2.pt
+models/best_yolo11s_*.pt
+models/best_talon_v1*.pt
+models/*.yedek_*
+yolo26n.pt
+
+# --- Calisma zamani ciktilari ---
+sunucu_cikti.txt
+sunucu_hata.txt
+ayrik_log/
+.gudum_kipi
+
+# arayuz calisma logu (0.7 MB, her kosuda yeniden uretilir)
+arayuz_log.txt

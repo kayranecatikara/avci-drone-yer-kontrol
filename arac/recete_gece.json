@@ -1,0 +1,132 @@
+[
+ {
+  "ad": "K0_taban",
+  "env": {
+   "AVCI_GPS_FF_KORU": "0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_DPP_K": "0",
+   "AVCI_KOPRU_RANGE": "7.0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "KONTROL: eski davranis. Her turda kosulur ki kayma olursa gorulsun."
+ },
+ {
+  "ad": "K1_eniyi",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "R4 paketi = istasyon 6 + FF_KORU + conf 0.25 + DPP, kopru ACIK. Simdiki en iyi."
+ },
+ {
+  "ad": "K2_duz",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_TERM_LAM_MAX": "13",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "K1 + terminal DUZ segmenti bekler (TEK FARK -- R6'da hayalet kapaliydi, ayrilamiyordu)"
+ },
+ {
+  "ad": "K3_krop",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_KROP": "1",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "K1 + krop (TEK FARK)"
+ },
+ {
+  "ad": "K4_duz_krop",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_TERM_LAM_MAX": "13",
+   "AVCI_KROP": "1",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "K1 + duz kapi + krop (ikisi birlikte)"
+ },
+ {
+  "ad": "K5_hayaletsiz",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "0.0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "K1 + hayalet KAPALI (kullanicinin acik istegi -- bedeli olculmeye devam)"
+ }
+]

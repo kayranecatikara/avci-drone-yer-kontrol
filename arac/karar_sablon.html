@@ -1,0 +1,711 @@
+<title>Hayalet Kilit</title>
+<style>
+/* ─────────────────────────────────────────────────────────────────────
+   UCUS TEST TEZGAHI — tek dunya: karanlik cam uzerinde fosfor izi.
+   Bilerek tek temali; her renk acikca boyanir, konak zemini sizmaz.
+   ───────────────────────────────────────────────────────────────────── */
+:root{
+  --gece:#0A0E14;      /* zemin — mavi kacan siyah, notr degil */
+  --panel:#111823;
+  --panel2:#0D141D;
+  --cizgi:#1F2B3A;
+  --cizgi2:#2C3B4E;
+  --metin:#C3D0DE;
+  --sonuk:#69809A;
+  --gps:#D98A2B;       /* GPS fazi — kehribar */
+  --gorus:#2FB6A8;     /* gorsel faz, GERCEK tespit */
+  --hayalet:#D1454E;   /* koprulenmis hayalet kare — sayfanin tek cesareti */
+  --hedef:#93A6BB;     /* karsi arac */
+  --iyi:#6FA96B;
+  --dikkat:#C9A227;
+  --gos:"Bahnschrift","DIN Alternate","Segoe UI Variable Display",system-ui,sans-serif;
+  --gov:"Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+  --mono:"Cascadia Mono","Cascadia Code",Consolas,ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html{color-scheme:dark}
+body{margin:0;background:var(--gece);color:var(--metin);font-family:var(--gov);
+  font-size:15px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.sar{max-width:1420px;margin:0 auto;padding:26px 20px 72px}
+
+/* ── TEZ ── */
+header{display:grid;gap:14px;padding-bottom:20px;border-bottom:1px solid var(--cizgi)}
+.eyebrow{font-family:var(--mono);font-size:10.5px;letter-spacing:.19em;text-transform:uppercase;
+  color:var(--sonuk);margin:0;display:flex;gap:11px;flex-wrap:wrap;align-items:center}
+.eyebrow b{color:var(--metin);font-weight:400}
+.nk{color:var(--cizgi2)}
+h1{font-family:var(--gos);font-size:clamp(30px,5.2vw,58px);font-weight:600;letter-spacing:.005em;
+  line-height:1.02;margin:0;color:#EAF2FA;text-wrap:balance}
+.lead{margin:0;max-width:66ch;font-size:16.5px;color:#AEBECE}
+.lead b{color:#EAF2FA;font-weight:600}
+.lead .kotu{color:var(--hayalet);font-weight:600}
+
+.rozetler{display:grid;grid-template-columns:repeat(auto-fit,minmax(184px,1fr));gap:1px;
+  background:var(--cizgi);border:1px solid var(--cizgi);margin-top:4px}
+.rz{background:var(--panel);padding:12px 14px;display:grid;gap:3px}
+.rz .ad{font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--sonuk)}
+.rz .sy{font-family:var(--gos);font-size:26px;font-weight:600;line-height:1.05;font-variant-numeric:tabular-nums;color:#EAF2FA}
+.rz .alt{font-size:12px;color:var(--sonuk);line-height:1.35}
+.rz.vur .sy{color:var(--hayalet)}
+
+/* ── SEKMELER ── */
+.sekmeler{display:flex;flex-wrap:wrap;gap:1px;background:var(--cizgi);
+  border:1px solid var(--cizgi);border-bottom:0;margin-top:30px}
+.sekmeler button{border:0;flex:1 1 150px;text-align:left;padding:10px 13px;background:var(--panel2);
+  color:var(--metin);cursor:pointer;font-family:var(--mono);font-size:11.5px;line-height:1.3}
+.sekmeler button:hover{background:#16202C}
+.sekmeler button:focus-visible{outline:2px solid var(--gorus);outline-offset:-2px}
+.sekmeler button[aria-selected="true"]{background:#1A2634;box-shadow:inset 0 2px 0 var(--gorus)}
+.sekmeler i{display:block;font-style:normal;font-size:10px;color:var(--sonuk);margin-top:3px;
+  font-variant-numeric:tabular-nums}
+
+/* ── ALET BANKI ── */
+.bank{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(310px,1fr);gap:1px;
+  background:var(--cizgi);border:1px solid var(--cizgi)}
+@media(max-width:940px){.bank{grid-template-columns:1fr}}
+.hucre{background:var(--panel);min-width:0;display:flex;flex-direction:column}
+.hbas{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--sonuk);padding:9px 13px;border-bottom:1px solid var(--cizgi);
+  display:flex;justify-content:space-between;gap:12px;align-items:baseline}
+.hbas em{font-style:normal;color:var(--cizgi2);letter-spacing:.1em}
+canvas{display:block;width:100%}
+#sahne{background:#070A0F;cursor:grab;touch-action:none;aspect-ratio:16/10}
+#sahne:active{cursor:grabbing}
+#kamera{background:#050810;aspect-ratio:4/3}
+
+/* ── KARAR OKUMASI ── */
+#karar{padding:12px 13px 14px;border-top:1px solid var(--cizgi);background:var(--panel2);flex:1}
+.kizgara{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:1px;background:var(--cizgi);
+  border:1px solid var(--cizgi);margin-bottom:11px}
+.kh{background:var(--panel);padding:7px 9px}
+.kh .ad{font-family:var(--mono);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--sonuk)}
+.kh .sy{font-family:var(--mono);font-size:15px;font-variant-numeric:tabular-nums;line-height:1.25}
+.kh .not{font-size:10.5px;color:var(--sonuk);line-height:1.3}
+.hkm{border-left:3px solid var(--gorus);background:#131E29;padding:10px 11px;font-size:12.5px;line-height:1.52}
+.hkm.hayalet{border-left-color:var(--hayalet);background:#1D1216}
+.hkm.gps{border-left-color:var(--gps);background:#1D1710}
+.hkm .bas{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--sonuk);display:block;margin-bottom:4px}
+.hkm b{color:#EAF2FA}
+.hkm .kotu{color:var(--hayalet)}
+
+/* ── SERIT GRAFIK ── */
+.serit{border:1px solid var(--cizgi);border-top:0;background:var(--panel)}
+#serit{cursor:crosshair;touch-action:none;aspect-ratio:1420/210}
+@media(max-width:940px){#serit{aspect-ratio:900/260}}
+
+.kumanda{border:1px solid var(--cizgi);border-top:0;background:var(--panel2);padding:10px 13px;
+  display:flex;flex-wrap:wrap;gap:13px;align-items:center}
+button.k{font-family:var(--mono);font-size:11.5px;color:var(--metin);background:var(--panel);
+  border:1px solid var(--cizgi);padding:6px 12px;cursor:pointer}
+button.k:hover{background:#1B2735}
+button.k:focus-visible{outline:2px solid var(--gorus);outline-offset:2px}
+button.k[aria-pressed="true"]{background:#1A2634;border-color:var(--gorus);color:#EAF2FA}
+.grup{display:flex;gap:1px;background:var(--cizgi);border:1px solid var(--cizgi)}
+.grup button.k{border:0}
+input[type=range]{flex:1;min-width:150px;accent-color:var(--gorus)}
+.et{font-family:var(--mono);font-size:9.5px;letter-spacing:.15em;text-transform:uppercase;color:var(--sonuk)}
+.saat{font-family:var(--mono);font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--metin);
+  min-width:66px;text-align:right}
+
+/* ── OLAY DEFTERI ── */
+.olaylar{display:grid;grid-template-columns:repeat(auto-fit,minmax(196px,1fr));gap:1px;
+  background:var(--cizgi);border:1px solid var(--cizgi);border-top:0}
+.ol{background:var(--panel);padding:10px 12px;display:grid;gap:2px;text-align:left;border:0;
+  cursor:pointer;font:inherit;color:inherit;border-top:2px solid transparent}
+.ol:hover{background:#16202C}
+.ol:focus-visible{outline:2px solid var(--gorus);outline-offset:-2px}
+.ol .z{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--sonuk)}
+.ol .ad{font-family:var(--gos);font-size:15px;font-weight:600;color:#EAF2FA;line-height:1.15}
+.ol .ay{font-size:11.5px;color:var(--sonuk);line-height:1.35}
+
+/* ── RAPOR ── */
+section{margin-top:46px}
+h2{font-family:var(--gos);font-size:22px;font-weight:600;color:#EAF2FA;margin:0 0 4px;letter-spacing:.005em}
+.h2ust{font-family:var(--mono);font-size:9.5px;letter-spacing:.19em;text-transform:uppercase;
+  color:var(--sonuk);margin:0 0 3px}
+h2+.kicik{margin-top:14px}
+p{margin:0 0 13px;max-width:68ch}
+.bulgular{display:grid;gap:1px;background:var(--cizgi);border:1px solid var(--cizgi);margin-top:16px}
+.bul{background:var(--panel);padding:16px 18px;display:grid;grid-template-columns:auto minmax(0,1fr);gap:0 18px}
+.bul .no{font-family:var(--gos);font-size:34px;font-weight:600;line-height:.9;color:var(--cizgi2);
+  font-variant-numeric:tabular-nums}
+.bul h3{font-family:var(--gos);font-size:18px;font-weight:600;margin:0 0 6px;color:#EAF2FA}
+.bul p{margin:0 0 8px;max-width:74ch;font-size:14.5px}
+.bul p:last-child{margin-bottom:0}
+.bul .olcum{font-family:var(--mono);font-size:12px;color:var(--sonuk);border-left:2px solid var(--cizgi2);
+  padding-left:11px;margin-top:9px}
+.bul .olcum b{color:var(--metin);font-weight:400}
+.bul.son .no{color:var(--hayalet)}
+b.kotu{color:var(--hayalet)}
+b.iyi{color:var(--iyi)}
+
+.tblsar{overflow-x:auto;border:1px solid var(--cizgi);margin:16px 0}
+table{border-collapse:collapse;width:100%;min-width:660px}
+th,td{padding:8px 12px;text-align:right;border-bottom:1px solid var(--cizgi);font-family:var(--mono);
+  font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+th{color:var(--sonuk);font-weight:400;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;
+  background:var(--panel2)}
+td{background:var(--panel)}
+td:first-child,th:first-child{text-align:left}
+tbody tr:last-child td{border-bottom:0}
+tfoot td{background:var(--panel2);color:var(--metin);border-top:1px solid var(--cizgi2);border-bottom:0}
+code{font-family:var(--mono);font-size:.89em;background:var(--panel2);padding:1.5px 5px;border:1px solid var(--cizgi)}
+.formul{background:var(--panel);border:1px solid var(--cizgi);padding:13px 15px;margin:13px 0;
+  font-family:var(--mono);font-size:13px;overflow-x:auto}
+.formul .ac{display:block;font-family:var(--gov);font-size:12.5px;color:var(--sonuk);margin-top:6px}
+footer{margin-top:52px;padding-top:18px;border-top:1px solid var(--cizgi);
+  font-family:var(--mono);font-size:11px;color:var(--sonuk);line-height:1.75}
+@media(prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="sar">
+<header>
+  <p class="eyebrow"><b>Drones of War</b><span class="nk">/</span><span>gerçek uçuş</span>
+    <span class="nk">·</span><span id="ebKaynak">—</span>
+    <span class="nk">·</span><span>200 Hz truth <span class="nk">+</span> güdüm logu, tek saat ekseni</span></p>
+  <h1>Hayalet Kilit</h1>
+  <p class="lead">Görsel fazın <b>yarısında</b> dedektör hedefi görmüyor. Yasa o karelerde hatırladığı
+  son kerterizi çeviriyor ve kutu ekranın ortasına oturuyor — <b>eps 2°</b>, her şey yolunda görünüyor.
+  Hedef ise <span class="kotu">gerçekte 142° başka yönde</span>. Sistem bu hayalete <b>TERMİNAL</b> deyip
+  18 m/s ile dalıyor. Aşağıdaki her sayı bu uçuşun kaydından ölçüldü.</p>
+  <div class="rozetler">
+    <div class="rz"><span class="ad">GPS koşusu kurs açısı</span><span class="sy">16,8°</span>
+      <span class="alt">çarpışma rotası için gereken <b>43,0°</b></span></div>
+    <div class="rz"><span class="ad">Yaklaşmada LOS süpürmesi</span><span class="sy">103°</span>
+      <span class="alt">çarpışma rotasında bu sayı <b>0°</b> olmalı</span></div>
+    <div class="rz"><span class="ad">Hedefi görebildiğimiz süre</span><span class="sy">0,5–2,1 s</span>
+      <span class="alt">devirden sonra, kadrajdan çıkana kadar</span></div>
+    <div class="rz vur"><span class="ad">Hayalet kare oranı</span><span class="sy">%50</span>
+      <span class="alt">bu karelerde kerteriz hatası <b>142°</b></span></div>
+  </div>
+</header>
+
+<div class="sekmeler" id="sekmeler" role="tablist" aria-label="Angajmanlar"></div>
+<div class="bank">
+  <div class="hucre">
+    <div class="hbas"><span>Üç boyutlu tekrar</span><em>sürükleyerek döndür · tekerlek yakınlaştırır</em></div>
+    <canvas id="sahne"></canvas>
+  </div>
+  <div class="hucre">
+    <div class="hbas"><span>Arayıcının gördüğü</span><em id="etKam">122° × 91° kadraj</em></div>
+    <canvas id="kamera"></canvas>
+    <div id="karar"></div>
+  </div>
+</div>
+<div class="serit"><canvas id="serit"></canvas></div>
+<div class="kumanda">
+  <div class="grup"><button class="k" id="oynat">▶ Oynat</button></div>
+  <input type="range" id="kaydir" min="0" max="2000" value="0" aria-label="Zaman">
+  <span class="saat" id="saat">0,00 s</span>
+  <span class="et">Hız</span><div class="grup" id="hizGrup" role="group" aria-label="Oynatma hızı"></div>
+  <span class="et">Katman</span><div class="grup" id="gosGrup" role="group" aria-label="Katmanlar"></div>
+</div>
+<div class="olaylar" id="olaylar"></div>
+
+<section>
+  <p class="h2ust">Bulgular · ölçüldü, tahmin edilmedi</p>
+  <h2>Zincir üç halkadan ibaret</h2>
+  <div class="bulgular">
+
+    <article class="bul">
+      <span class="no">1</span>
+      <div>
+        <h3>GPS koşusu çarpışma rotası değil, kuyruk kovalaması</h3>
+        <p>Çarpışma rotasında kerteriz <em>dönmez</em> — hedefi ekranın aynı noktasında tutarsınız ve
+        mesafe kapanır. Bizim koşumuzda kerteriz yaklaşma boyunca <b>103° süpürüyor</b>. Sebebi basit:
+        burnu hedefin <em>bulunduğu</em> yere çeviriyoruz, <em>gideceği</em> yere değil.</p>
+        <p>Hedef bizden yavaş (hız oranı 0,833) ve yandan geçiyor. Bu geometride çarpışma için
+        <b>43° önalma</b> gerekir; biz <b>16,8°</b> ile uçuyoruz. Aradaki 26°, kerterizi
+        saniyede 23–36° döndüren şey.</p>
+        <p class="olcum">Devir öncesi son 3 s, 6 angajman: kurs hatası medyan <b>16,8°</b> ·
+        gereken önalma <b>43,0°</b> · LOS hızı <b>23–36 °/s</b> · kapanma <b>8–17 m/s</b></p>
+      </div>
+    </article>
+
+    <article class="bul">
+      <span class="no">2</span>
+      <div>
+        <h3>Devir anında hedef zaten kenara doğru gidiyor</h3>
+        <p>Görsel faza <b>7,5–8,8 m</b> menzilde giriyoruz — istediğimiz yakınlık bu. Ama hedef daha
+        ilk karede boresight'tan <b>21°</b> ötede ve kerteriz hızlanıyor. 8 metrede yandan geçen
+        18 m/s'lik bir hedefin kerterizi saniyede 100°'yi aşar; bu geometrinin kaçınılmaz sonucu.</p>
+        <p>Uçağın kendisi suçlu değil: ölçülen dönüş kabiliyetimiz <b>179–242 °/s</b>, gereken LOS
+        hızının çok üstünde. Sorun kabiliyet değil, <b>gecikme</b> — komut ile gerçekleşen yaw arasında
+        yaklaşık 30° fark var, ve 0,5 saniyede hedef 61°'lik kadraj kenarını geçiyor.</p>
+        <p class="olcum">Devirde menzil <b>7,5–8,8 m</b> · ilk eps <b>21°</b> · görsel fazda LOS hızı
+        p90 <b>28–81 °/s</b> · ölçülen yaw kabiliyeti <b>179–242 °/s</b> · yarım HFOV <b>61,0°</b></p>
+      </div>
+    </article>
+
+    <article class="bul">
+      <span class="no">3</span>
+      <div>
+        <h3>Hedef kaybolunca yasa hayalete kilitleniyor</h3>
+        <p>Tespit kesildiğinde <b>atalet köprüsü</b> devreye giriyor: son bilinen mutlak kerteriz
+        saklanıyor, biz döndükçe o kerteriz kadraja geri getiriliyor. Mekanik doğru çalışıyor —
+        ama <b>kerteriz eskimiş</b>. Hedef o sırada 18 m/s ile hareket ediyor.</p>
+        <p>Sonuç ters yönde çalışıyor: biz döndükçe hayalet kutu ekranın <em>ortasına oturuyor</em>,
+        <code>eps</code> 60°'den 2°'ye iniyor, yasa "hedefi merkezledim" diye okuyor ve
+        <code>durum</code> alanını <b>TERMINAL</b> yapıp hızı 18 m/s'e sabitliyor. Gerçek hedef ise
+        o an <span><b class="kotu">142°</b></span> başka yönde — çoğu zaman tam arkamızda.</p>
+        <p class="olcum">Gerçek tespit karesi: eps hatası medyan <b class="iyi">7,6°</b> (algı sağlam) ·
+        köprü karesi: <b class="kotu">141,6°</b> · köprü kareleri tüm görsel faz komutlarının
+        <b>%50,3</b>'ü (224/446)</p>
+      </div>
+    </article>
+
+    <article class="bul son">
+      <span class="no">4</span>
+      <div>
+        <h3>Sonuç: görsel faza devretmek bugün net zarar</h3>
+        <p>Üç halkanın toplamı tek bir cümleye iniyor. <b>Altı angajmanın dördünde görsel faz,
+        GPS'in getirdiği yakınlığı hiç geçemiyor</b> — menzil devirden itibaren yalnızca açılıyor.
+        Kalan ikisinde kazanç <b>+0,86 m</b> ve <b>+3,05 m</b>; o ikisinde de vuruş eşiğinin
+        (3 m) altına inilemiyor. Medyan kazanç <b class="kotu">−0,24 m</b>.</p>
+        <p>GPS güdümü bizi medyan <b>7,48 m</b>'ye getiriyor. Görsel faz devraldıktan sonra ulaşılan
+        en yakın nokta medyan <b>7,78 m</b>, faz bittiğinde ise <b>49 m</b>. Yani bugünkü haliyle
+        devir, kazanılmış bir yaklaşmayı harcıyor.</p>
+        <p>Zincirin en üst halkasını düzeltmeden alttakileri düzeltmek işe yaramaz: kerteriz
+        dönmediği sürece hedef kadrajdan çıkmaz, çıkmadığı sürece hayalet köprüye hiç
+        girilmez. <b>Önce önalma, sonra arayıcı.</b></p>
+        <p class="olcum">GPS fazının en yakını medyan <b>7,48 m</b> · görsel fazın en yakını
+        <b>7,78 m</b> · 4/6 angajmanda görsel faz kazancı <b>negatif</b> · vuruş eşiği <b>3 m</b></p>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<section>
+  <p class="h2ust">Komut nasıl üretiliyor</p>
+  <h2>İki bağımsız karar, tek ölçüm</h2>
+  <p class="kicik">Görsel fazda yasa kutunun <em>boyutundan</em> hızı, <em>yerinden</em> yönü çıkarır.
+  Bu uçuşta boyut kararı zaten doğru tarafta kaldı; kırılan taraf yön kararı oldu.</p>
+  <div class="formul">v_los = hiz_I + K_FWD · (BOYUT_REF − kutu)
+    <span class="ac">Kutu 25 px'ten küçükse hata artı → hızlan. Bu uçuşta kutu 11–19 px arasında kaldı,
+    yani hata sürekli <b>artı</b> ve yasa neredeyse hep tavan hız <b>24 m/s</b> istedi. Hız kararı
+    kaçışın sebebi değil.</span></div>
+  <div class="formul">ψ<sub>v</sub> = iris_yaw + N · λ̇ · Δt      (N = 1,6)
+    <span class="ac">λ̇ kerteriz hızı. Gerçek tespitte doğru çalışıyor. Köprü karelerinde λ̇ hatırlanan
+    kerterizden türetiliyor ve <b>işaret olarak da yanlış</b> olabiliyor — ölçülen kerteriz hatası 142°.</span></div>
+  <div class="formul">durum = TERMINAL  ⟸  eps küçük ∧ menzil küçük
+    <span class="ac">Bu kapı <code>conf = 0</code> köprü karelerinde de açılıyor. Terminal kararının
+    <em>gerçek</em> bir tespite dayanma şartı yok — bu uçuşta terminal ilan edilen karelerin tamamı
+    hayalet kareydi.</span></div>
+</section>
+
+<section>
+  <p class="h2ust">Angajman kayıtları</p>
+  <h2>Altı geçişin tamamı aynı şekli çiziyor</h2>
+  <div class="tblsar"><table>
+    <thead><tr><th>Angajman</th><th>Devir menzili</th><th>En yakın</th><th>Görsel faz kazancı</th>
+      <th>Çıkış menzili</th><th>LOS süpürme</th><th>Görme süresi</th><th>Hayalet kare</th></tr></thead>
+    <tbody id="tblSeg"></tbody>
+    <tfoot id="tblAlt"></tfoot>
+  </table></div>
+  <p><b>Görsel faz kazancı</b> = GPS'in ulaştığı en yakınlık eksi görsel fazın ulaştığı en yakınlık.
+  Artı olması görsel fazın işe yaradığı anlamına gelir. Altı angajmanın dördünde <b>negatif</b>.</p>
+  <p>Kilit sayacı hiçbirinde dolmuyor. Kilit yalnız görsel fazda sayılıyor, görsel faz ise 1–2 saniye
+  sürüyor, şart ise 10 saniyelik pencerede kümülatif 5 saniye. Yani bugünkü mimaride kilidin
+  dolması <em>geometrik olarak</em> mümkün değil — süre yetmiyor.</p>
+</section>
+
+<footer>
+  Truth: <code>veri/hedef_iz/*.csv</code> — 200 Hz, iki aracın konumu, tutumu ve hız vektörü, faz damgalı.<br>
+  Güdüm: <code>kopru/gazebo_kaynak/logs/bbox_ibvs_*.csv</code> — kutu, eps, λ̇, durum, köprü bayrağı, komut.<br>
+  İki log aynı <code>perf_counter</code> ekseninde; eşleme toleransı ±0,15 s. Dışa aktarım:
+  <code>arac/ucus_3b_disaktar.py</code> → <code>veri/ucus_3b.json</code>.<br>
+  Çerçeve notu: tüm açılar <b>oyun dünyası</b> çerçevesinde. Yasanın NED açıları (<code>iris_yaw</code>,
+  <code>vy_cmd</code>) aynalanarak çevrildi; ölçüldü, medyan fark 0,03°.
+</footer>
+</div>
+
+<script id="veri" type="application/json">__VERI__</script>
+<script>
+"use strict";
+const V=JSON.parse(document.getElementById("veri").textContent);
+const G=V.geo, SEG=V.segmentler, RAD=Math.PI/180, DEG=180/Math.PI;
+const A={}; V.alanlar.forEach((k,i)=>A[k]=i);
+const w180=x=>(x+540)%360-180;
+const vir=(x,n)=>x.toFixed(n===undefined?1:n).replace(".",",");
+
+let si=0,t=0,oynuyor=false,hizC=1,sonKare=0;
+const goster={iz:true,koni:true,hayalet:true};
+const azalt=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const K=()=>SEG[si].kare;
+const sonT=()=>K()[K().length-1][A.t];
+function kAt(z){const k=K();let lo=0,hi=k.length-1;if(z>=k[hi][A.t])return hi;
+  while(lo<hi){const m=(lo+hi)>>1;if(k[m][A.t]<z)lo=m+1;else hi=m;}return lo;}
+const losOf=r=>Math.atan2(r[A.hy]-r[A.dy],r[A.hx]-r[A.dx])*DEG;
+/* yasanin INANDIGI kerteriz: kendi burnu + olctugu eps */
+const inanc=r=>(r[A.eps]==null||r[A.d_yaw]==null)?null:r[A.d_yaw]+r[A.eps];
+
+/* ── DPR olcekleme ── */
+const CVS=[];
+function olcekle(cv){
+  const o=Math.min(devicePixelRatio||1,2), r=cv.getBoundingClientRect();
+  if(!r.width)return false;
+  const W=Math.round(r.width*o),H=Math.round(r.height*o);
+  if(cv.width!==W||cv.height!==H){cv.width=W;cv.height=H;}
+  const g=cv.getContext("2d");g.setTransform(o,0,0,o,0,0);
+  cv.mw=r.width;cv.mh=r.height;return true;
+}
+function hepsiniOlcek(){CVS.forEach(olcekle);}
+
+/* ═════════ 3B SAHNE ═════════ */
+const kam={az:-2.25,el:.42,zoom:1,f:[0,0,0]};
+function pr3(cv){
+  const d=kam.d,f=kam.f,e=kam.el,a=kam.az;
+  const goz=[f[0]+d*Math.cos(e)*Math.cos(a),f[1]+d*Math.cos(e)*Math.sin(a),f[2]+d*Math.sin(e)];
+  let il=[f[0]-goz[0],f[1]-goz[1],f[2]-goz[2]];const n=Math.hypot(il[0],il[1],il[2])||1;il=il.map(v=>v/n);
+  let sg=[il[1],-il[0],0];const s=Math.hypot(sg[0],sg[1])||1;sg=sg.map(v=>v/s);
+  const yu=[sg[1]*il[2]-sg[2]*il[1],sg[2]*il[0]-sg[0]*il[2],sg[0]*il[1]-sg[1]*il[0]];
+  const o=cv.mw*.92;
+  return p=>{const v=[p[0]-goz[0],p[1]-goz[1],p[2]-goz[2]];
+    const zc=v[0]*il[0]+v[1]*il[1]+v[2]*il[2];if(zc<.4)return null;
+    return [cv.mw/2+o*(v[0]*sg[0]+v[1]*sg[1]+v[2]*sg[2])/zc,
+            cv.mh/2-o*(v[0]*yu[0]+v[1]*yu[1]+v[2]*yu[2])/zc];};
+}
+function ln(g,pr,a,b,c,kal,kes,alfa){const A1=pr(a),B1=pr(b);if(!A1||!B1)return;
+  g.save();g.strokeStyle=c;g.lineWidth=kal||1;if(alfa!=null)g.globalAlpha=alfa;
+  if(kes)g.setLineDash(kes);g.beginPath();g.moveTo(A1[0],A1[1]);g.lineTo(B1[0],B1[1]);g.stroke();g.restore();}
+function ucak(g,pr,p,yaw,roll,pitch,ol,c,kal){
+  const cy=Math.cos(yaw*RAD),sy=Math.sin(yaw*RAD),cr=Math.cos((roll||0)*RAD),sr=Math.sin((roll||0)*RAD),
+        cp=Math.cos((pitch||0)*RAD),sp=Math.sin((pitch||0)*RAD);
+  const D=(f,s,u)=>{const f2=f*cp-u*sp,u2=f*sp+u*cp,s2=s*cr-u2*sr,u3=s*sr+u2*cr;
+    return [p[0]+ol*(f2*cy-s2*sy),p[1]+ol*(f2*sy+s2*cy),p[2]+ol*u3];};
+  const P={b:D(1.7,0,0),k:D(-1.25,0,0),sl:D(-.15,-1.55,.1),sr:D(-.15,1.55,.1),
+           el:D(-1.05,-.62,.05),er:D(-1.05,.62,.05),d:D(-1.15,0,.7)};
+  ln(g,pr,P.b,P.k,c,kal);ln(g,pr,P.sl,P.sr,c,kal);
+  ln(g,pr,P.el,P.er,c,kal*.75);ln(g,pr,P.k,P.d,c,kal*.75);
+  const B=pr(P.b);if(B){g.fillStyle=c;g.beginPath();g.arc(B[0],B[1],kal*1.5,0,7);g.fill();}
+}
+function koni(g,pr,p,yaw,roll,c){
+  const uz=15,tt=G.TILT*RAD,cy=Math.cos(yaw*RAD),sy=Math.sin(yaw*RAD),
+        cr=Math.cos((roll||0)*RAD),sr=Math.sin((roll||0)*RAD);
+  const ks=[[-G.TXMAX,-G.TYMAX],[G.TXMAX,-G.TYMAX],[G.TXMAX,G.TYMAX],[-G.TXMAX,G.TYMAX]].map(([u,v])=>{
+    const fw=Math.cos(tt)+v*Math.sin(tt),dn=-Math.sin(tt)+v*Math.cos(tt);
+    /* yasa NED'de: +u saga. Oyun dunyasinda y aynali -> -u */
+    const su=-u,s2=su*cr-(-dn)*sr,u2=su*sr+(-dn)*cr,n=Math.hypot(fw,s2,u2)||1;
+    return [p[0]+uz*(fw*cy-s2*sy)/n,p[1]+uz*(fw*sy+s2*cy)/n,p[2]+uz*u2/n];});
+  for(const k of ks)ln(g,pr,p,k,c,1,[3,5],.85);
+  for(let i=0;i<4;i++)ln(g,pr,ks[i],ks[(i+1)%4],c,1,[3,5],.85);
+}
+function isin(g,pr,p,ac,uz,c,kes,yaz){
+  const u=[p[0]+uz*Math.cos(ac*RAD),p[1]+uz*Math.sin(ac*RAD),p[2]];
+  ln(g,pr,p,u,c,2,kes);const P=pr(u);
+  if(P){g.fillStyle=c;g.beginPath();g.arc(P[0],P[1],3.2,0,7);g.fill();
+    if(yaz){g.font="600 10px "+gf("--mono");g.fillText(yaz,P[0]+7,P[1]+3);}}
+}
+const gf=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+const cvS=document.getElementById("sahne");CVS.push(cvS);
+function cizSahne(){
+  const g=cvS.getContext("2d"),k=K(),i=kAt(t),r=k[i];
+  g.fillStyle="#070A0F";g.fillRect(0,0,cvS.mw,cvS.mh);
+  kam.f=[(r[A.hx]+r[A.dx])/2,(r[A.hy]+r[A.dy])/2,(r[A.hz]+r[A.dz])/2];
+  kam.d=Math.max(20,Math.min(95,16+r[A.menzil]*1.75))/kam.zoom;
+  const pr=pr3(cvS),z0=r[A.hz],a=20,
+        m=[Math.round(kam.f[0]/a)*a,Math.round(kam.f[1]/a)*a];
+  for(let q=-4;q<=4;q++){
+    ln(g,pr,[m[0]+q*a,m[1]-4*a,z0],[m[0]+q*a,m[1]+4*a,z0],"#15202B",1,null,.55);
+    ln(g,pr,[m[0]-4*a,m[1]+q*a,z0],[m[0]+4*a,m[1]+q*a,z0],"#15202B",1,null,.55);}
+  if(goster.iz){
+    const iz=(kx,ky,kz,fn)=>{for(let j=Math.max(1,i-190);j<=i;j++){
+      const P=pr([k[j-1][kx],k[j-1][ky],k[j-1][kz]]),Q=pr([k[j][kx],k[j][ky],k[j][kz]]);
+      if(!P||!Q)continue;g.strokeStyle=fn(k[j]);g.globalAlpha=.28+.5*(j-Math.max(1,i-190))/190;
+      g.lineWidth=1.7;g.beginPath();g.moveTo(P[0],P[1]);g.lineTo(Q[0],Q[1]);g.stroke();}g.globalAlpha=1;};
+    iz(A.hx,A.hy,A.hz,()=>gf("--hedef"));
+    iz(A.dx,A.dy,A.dz,q=>!q[A.gorsel]?gf("--gps"):(q[A.kopru]?gf("--hayalet"):gf("--gorus")));
+  }
+  const biz=[r[A.dx],r[A.dy],r[A.dz]],hed=[r[A.hx],r[A.hy],r[A.hz]];
+  ln(g,pr,biz,hed,"#3A4B5E",1.4,[3,4]);
+  const orta=pr([(biz[0]+hed[0])/2,(biz[1]+hed[1])/2,(biz[2]+hed[2])/2+1.2]);
+  if(orta){g.fillStyle="#7E93A9";g.font="600 11px "+gf("--mono");g.textAlign="center";
+    g.fillText(vir(r[A.menzil],1)+" m",orta[0],orta[1]);g.textAlign="left";}
+  const c=!r[A.gorsel]?gf("--gps"):(r[A.kopru]?gf("--hayalet"):gf("--gorus"));
+  if(goster.koni&&r[A.d_yaw]!=null)
+    koni(g,pr,biz,r[A.d_yaw],r[A.d_roll],!r[A.gorsel]?"#4E3517":(r[A.kopru]?"#4A1A1E":"#1B4A45"));
+  /* GERCEK LOS vs yasanin INANDIGI kerteriz */
+  if(goster.hayalet&&r[A.eps]!=null){
+    const inn=inanc(r),fark=Math.abs(w180(inn-losOf(r)));
+    isin(g,pr,biz,inn,13,fark>45?gf("--hayalet"):gf("--gorus"),[6,4],
+         (fark>45?"hayalet  ":"gördüğü  ")+vir(fark,0)+"° sapma");
+  }
+  if(r[A.h_hdg]!=null)ucak(g,pr,hed,r[A.h_hdg],0,0,1.75,gf("--hedef"),2.2);
+  if(r[A.d_yaw]!=null)ucak(g,pr,biz,r[A.d_yaw],r[A.d_roll],r[A.d_pitch],1.5,c,2.4);
+  g.font="10.5px "+gf("--mono");
+  [[gf("--hedef"),"karşı araç"],[c,!r[A.gorsel]?"biz · GPS fazı":(r[A.kopru]?"biz · HAYALET kare":"biz · gerçek tespit")],
+   ["#3A4B5E","gerçek görüş hattı"]].forEach(([col,ad],n)=>{
+    g.fillStyle=col;g.fillRect(14,cvS.mh-18-n*15,11,2.5);
+    g.fillStyle=gf("--sonuk");g.fillText(ad,31,cvS.mh-13-n*15);});
+}
+
+/* ═════════ KAMERA ═════════ */
+const cvK=document.getElementById("kamera");CVS.push(cvK);
+function cizKamera(){
+  const g=cvK.getContext("2d"),r=K()[kAt(t)],W=cvK.mw,H=cvK.mh;
+  g.fillStyle="#050810";g.fillRect(0,0,W,H);
+  const sx=W/640,sy=H/480,X=v=>v*sx,Y=v=>v*sy;
+  const gx=G.F*G.TXMAX,gy=G.F*G.TYMAX;
+  g.strokeStyle="#182533";g.lineWidth=1;
+  g.strokeRect(X(G.CX-gx),Y(G.CY-gy),X(2*gx),Y(2*gy));
+  g.font="9px "+gf("--mono");g.fillStyle="#33465A";
+  g.fillText("kadraj kenarı · ±61,0°",X(G.CX-gx)+4,Y(G.CY-gy)-5);
+  g.save();g.setLineDash([2,4]);g.strokeStyle="#233242";g.beginPath();
+  g.moveTo(0,Y(G.CY_NISAN));g.lineTo(W,Y(G.CY_NISAN));
+  g.moveTo(X(G.CX),0);g.lineTo(X(G.CX),H);g.stroke();g.restore();
+  /* angajman volumu 25-75% yatay, 10-90% dikey */
+  g.save();g.setLineDash([1,5]);g.strokeStyle="#243B4A";
+  g.strokeRect(X(160),Y(48),X(320),Y(384));g.restore();
+  if(r[A.cx]==null){
+    g.fillStyle=r[A.gorsel]?"#5D3038":"#2A3949";g.font="12px "+gf("--mono");
+    g.fillText(r[A.gorsel]?"komut kaydı yok":"görsel faz dışı",X(G.CX)-52,Y(G.CY));return;}
+  const hay=!!r[A.kopru], col=hay?gf("--hayalet"):gf("--gorus");
+  const b=Math.max(r[A.boyut]||4,4);
+  g.save();g.strokeStyle=col;g.lineWidth=1.9;if(hay)g.setLineDash([5,4]);
+  g.strokeRect(X(r[A.cx]-b/2),Y(r[A.cy]-b*.42),X(b),Y(b*.84));g.restore();
+  g.fillStyle=col;g.font="600 10px "+gf("--mono");
+  g.fillText(vir(b,0)+" px"+(hay?"  · HAYALET  conf 0":"  · conf "+vir(r[A.conf],2)),
+             X(r[A.cx]+b/2)+6,Y(r[A.cy]-b*.42)+9);
+  /* hedefin GERCEKTE oldugu yer: gercek LOS'u kadraja yansit */
+  if(goster.hayalet&&hay&&r[A.d_yaw]!=null){
+    const e=w180(losOf(r)-r[A.d_yaw]);
+    if(Math.abs(e)<80){
+      const px=G.CX+G.F*Math.tan(e*RAD);
+      g.save();g.strokeStyle="#7E93A9";g.lineWidth=1.2;g.setLineDash([3,3]);
+      g.beginPath();g.moveTo(X(px),Y(G.CY-40));g.lineTo(X(px),Y(G.CY+40));g.stroke();g.restore();
+      g.fillStyle="#7E93A9";g.fillText("gerçek",X(px)+4,Y(G.CY-44));
+    }else{
+      g.fillStyle="#7E93A9";g.font="10px "+gf("--mono");
+      g.fillText("gerçek hedef kadrajın "+(e>0?"solunda":"sağında")+" · "+vir(Math.abs(e),0)+"° dışarıda",
+                 X(14),Y(G.CY+gy)-10);
+    }
+  }
+}
+
+/* ═════════ KARAR OKUMASI ═════════ */
+function cizKarar(){
+  const r=K()[kAt(t)],el=document.getElementById("karar");
+  const h=(ad,sy,not,col)=>'<div class="kh"><div class="ad">'+ad+'</div><div class="sy"'+
+    (col?' style="color:'+col+'"':'')+'>'+sy+'</div>'+(not?'<div class="not">'+not+'</div>':'')+'</div>';
+  let z='<div class="kizgara">';
+  z+=h("faz",r[A.gorsel]?"GÖRSEL":"GPS",r[A.durum]||"—",r[A.gorsel]?gf("--gorus"):gf("--gps"));
+  z+=h("menzil",vir(r[A.menzil],1)+" m","");
+  if(r[A.eps]!=null){
+    const inn=inanc(r),fark=Math.abs(w180(inn-losOf(r)));
+    z+=h("yasanın ölçtüğü",vir(r[A.eps],1)+"°","kutu merkezden sapma");
+    z+=h("kerteriz hatası",vir(fark,0)+"°","gerçeğe göre",fark>45?gf("--hayalet"):gf("--iyi"));
+    z+=h("hız komutu",r[A.v_los]==null?"—":vir(r[A.v_los],1)+" m/s",
+         r[A.b_hata]==null?"":"kutu hatası "+(r[A.b_hata]>0?"+":"")+vir(r[A.b_hata],1)+" px");
+    z+=h("LOS hızı λ̇",r[A.los_hiz]==null?"—":vir(r[A.los_hiz]*DEG,0)+" °/s","yasanın gördüğü");
+  }else{
+    z+=h("kutu","—","tespit/kayıt yok");
+    z+=h("gerçek kerteriz",vir(w180(losOf(r)-(r[A.d_yaw]||0)),0)+"°","burnumuza göre");
+  }
+  z+='</div>';
+  /* CUMLE */
+  let s="",sc="";
+  if(!r[A.gorsel]){
+    sc=" gps";
+    const e=Math.abs(w180(losOf(r)-(r[A.hiz_yon]==null?r[A.d_yaw]:r[A.hiz_yon])));
+    s="<b>GPS güdümü.</b> Komut, hedefin arkasındaki istasyon noktasına göre üretiliyor; kamera "+
+      "kullanılmıyor. Kurs hatamız <b>"+vir(e,0)+"°</b> — çarpışma rotası için gereken önalma <b>43°</b>, "+
+      "yani bu koşuda kerteriz dönmeye devam ediyor.";
+  }else if(r[A.eps]==null){
+    s="Bu karede güdüm logunda kayıt yok. Yasa yeni komut üretmedi; son komut sürüyor.";
+  }else if(r[A.kopru]){
+    sc=" hayalet";
+    const inn=inanc(r),fark=Math.abs(w180(inn-losOf(r)));
+    s="<b>Hayalet kare.</b> Dedektör hedefi görmüyor (<code>conf 0</code>). Kutu, hatırlanan son "+
+      "kerterizin bugünkü yaw'a göre yeniden çizilmesiyle üretildi. Biz döndükçe kutu merkeze "+
+      "yürüyor ve yasa <b>eps "+vir(r[A.eps],1)+"°</b> okuyor — yani \"hedefi merkezledim\" diyor. "+
+      "Gerçek hedef <span class='kotu'><b>"+vir(fark,0)+"° sapmada</b></span>."+
+      (String(r[A.durum]).indexOf("TERM")>=0
+        ? " Üstelik <b>TERMINAL</b> ilan edildi: hız <b>"+vir(r[A.v_los]||18,1)+" m/s</b>'e sabitlendi "+
+          "ve bu hayaletin üzerine dalındı."
+        : "");
+  }else{
+    const inn=inanc(r),fark=Math.abs(w180(inn-losOf(r)));
+    const bh=r[A.b_hata];
+    s="<b>Gerçek tespit</b> (conf "+vir(r[A.conf],2)+"). Kerteriz hatası <b>"+vir(fark,0)+"°</b> — "+
+      "algı sağlam. "+(bh==null?"":(bh>0
+        ? "Kutu hedeflenenden <b>"+vir(bh,1)+" px küçük</b> → yasa hızlanıyor: <b>"+vir(r[A.v_los],1)+" m/s</b>."
+        : "Kutu hedeflenenden <b>"+vir(-bh,1)+" px büyük</b> → yasa yavaşlıyor: <b>"+vir(r[A.v_los],1)+" m/s</b>."));
+    if(Math.abs(r[A.eps])>40) s+=" <b class='kotu'>Hedef kadraj kenarına dayandı</b> ("+
+      vir(Math.abs(r[A.eps]),0)+"° / 61°) — birkaç kare sonra kaybedilecek.";
+  }
+  el.innerHTML=z+'<div class="hkm'+sc+'"><span class="bas">yasa ne yaptı, neden</span>'+s+'</div>';
+}
+
+/* ═════════ SERIT GRAFIK ═════════ */
+const cvR=document.getElementById("serit");CVS.push(cvR);
+function cizSerit(){
+  const g=cvR.getContext("2d"),k=K(),W=cvR.mw,H=cvR.mh,L=44,Rr=8,U=16,D=17;
+  g.fillStyle=gf("--panel");g.fillRect(0,0,W,H);
+  const T0=k[0][A.t],T1=k[k.length-1][A.t],pw=W-L-Rr,ph=H-U-D;
+  const X=z=>L+pw*(z-T0)/(T1-T0);
+  /* faz bantlari */
+  for(let j=1;j<k.length;j++){
+    const c=!k[j][A.gorsel]?"#1A140B":(k[j][A.kopru]?"#231016":"#0E2320");
+    g.fillStyle=c;g.fillRect(X(k[j-1][A.t]),U,X(k[j][A.t])-X(k[j-1][A.t])+.6,ph);}
+  /* seriler */
+  const mx=Math.max(...k.map(r=>r[A.menzil]));
+  const seri=(fn,col,kal,olc)=>{g.strokeStyle=col;g.lineWidth=kal;g.beginPath();let ilk=true;
+    for(const r of k){const v=fn(r);if(v==null){ilk=true;continue;}
+      const y=U+ph-ph*Math.max(0,Math.min(1,olc(v)));
+      if(ilk){g.moveTo(X(r[A.t]),y);ilk=false;}else g.lineTo(X(r[A.t]),y);}g.stroke();};
+  /* kerteriz hatasi (0-180) — asil hikaye */
+  g.save();g.globalAlpha=.95;
+  seri(r=>r[A.eps]==null?null:Math.abs(w180(inanc(r)-losOf(r))),gf("--hayalet"),2,v=>v/180);
+  g.restore();
+  seri(r=>r[A.menzil],gf("--hedef"),1.6,v=>v/mx);
+  /* eksen yazilari */
+  g.font="9px "+gf("--mono");
+  g.fillStyle=gf("--hedef");g.fillText("menzil 0–"+Math.round(mx)+" m",6,U+11);
+  g.fillStyle=gf("--hayalet");g.fillText("kerteriz",6,U+ph-14);
+  g.fillStyle=gf("--hayalet");g.fillText("hatası 180°",6,U+ph-4);
+  g.fillStyle=gf("--sonuk");
+  g.fillText("GPS",L+4,11);
+  g.fillStyle=gf("--gorus");g.fillText("görsel · gerçek tespit",L+34,11);
+  g.fillStyle=gf("--hayalet");g.fillText("görsel · hayalet",L+168,11);
+  /* zaman ekseni */
+  g.fillStyle=gf("--sonuk");
+  for(let z=0;z<=T1;z+=2){if(z<T0)continue;
+    g.fillRect(X(z),U+ph,1,4);g.fillText(vir(z,0)+" s",X(z)-8,H-4);}
+  /* olay isaretleri */
+  for(const o of olaylar()){
+    g.strokeStyle=o.col;g.lineWidth=1;g.save();g.setLineDash([2,3]);
+    g.beginPath();g.moveTo(X(o.t),U);g.lineTo(X(o.t),U+ph);g.stroke();g.restore();
+    g.fillStyle=o.col;g.beginPath();g.arc(X(o.t),U,3,0,7);g.fill();}
+  /* imlec */
+  g.strokeStyle="#EAF2FA";g.lineWidth=1.2;g.beginPath();
+  g.moveTo(X(t),U-4);g.lineTo(X(t),U+ph+4);g.stroke();
+  g.fillStyle="#EAF2FA";g.beginPath();g.moveTo(X(t),U-5);g.lineTo(X(t)-4,U-11);g.lineTo(X(t)+4,U-11);g.fill();
+}
+
+/* ═════════ OLAYLAR ═════════ */
+let _olayBellek={};
+function olaylar(){
+  if(_olayBellek[si])return _olayBellek[si];
+  const k=K(),o=[];
+  const bul=f=>{for(let i=0;i<k.length;i++)if(f(k[i],i))return k[i];return null;};
+  const dv=bul(r=>r[A.gorsel]);
+  if(dv)o.push({t:dv[A.t],ad:"Görsel faza devir",col:gf("--gorus"),
+    ay:vir(dv[A.menzil],1)+" m menzil · hedef boresight'tan "+
+       (dv[A.eps]==null?"?":vir(Math.abs(dv[A.eps]),0))+"° ötede"});
+  const ky=k.reduce((a,r)=>r[A.menzil]<a[A.menzil]?r:a,k[0]);
+  o.push({t:ky[A.t],ad:"En yakın geçiş",col:gf("--hedef"),
+    ay:vir(ky[A.menzil],2)+" m · vuruş eşiği 3 m · "+
+       (ky[A.gorsel]?"görsel fazda":"<b style='color:"+gf("--gps")+"'>daha GPS fazındayken</b>")});
+  const h1=bul(r=>r[A.kopru]);
+  if(h1)o.push({t:h1[A.t],ad:"Hedef kadrajdan çıktı",col:gf("--hayalet"),
+    ay:"buradan sonrası hatırlanan kerteriz · conf 0"});
+  const tm=bul(r=>String(r[A.durum]).indexOf("TERM")>=0);
+  if(tm)o.push({t:tm[A.t],ad:"TERMİNAL ilan edildi",col:gf("--hayalet"),
+    ay:"hız "+vir(tm[A.v_los]||18,1)+" m/s sabit · kerteriz "+
+       (tm[A.eps]==null?"?":vir(Math.abs(w180(inanc(tm)-losOf(tm))),0))+"° yanlış"});
+  const gs=[...k].reverse().find(r=>r[A.gorsel]);
+  if(gs)o.push({t:gs[A.t],ad:"GPS'e geri düşüş",col:gf("--gps"),
+    ay:vir(gs[A.menzil],1)+" m'ye açılmış durumda"});
+  o.sort((a,b)=>a.t-b.t);
+  _olayBellek[si]=o;return o;
+}
+function cizOlaylar(){
+  const el=document.getElementById("olaylar");
+  el.innerHTML=olaylar().map((o,i)=>
+    '<button class="ol" data-t="'+o.t+'" style="border-top-color:'+o.col+'">'+
+    '<span class="z">t + '+vir(o.t,2)+' s</span>'+
+    '<span class="ad">'+o.ad+'</span><span class="ay">'+o.ay+'</span></button>').join("");
+  el.querySelectorAll(".ol").forEach(b=>b.onclick=()=>{
+    t=parseFloat(b.dataset.t);oynuyor=false;guncelle();ciz();});
+}
+
+/* ═════════ SURUCU ═════════ */
+function ciz(){
+  if(!cvS.mw)hepsiniOlcek();
+  cizSahne();cizKamera();cizKarar();cizSerit();
+  document.getElementById("saat").textContent=vir(t,2)+" s";
+  document.getElementById("kaydir").value=Math.round(2000*t/sonT());
+}
+function dongu(z){
+  if(oynuyor){t+=Math.min((z-sonKare)/1000,.1)*hizC;
+    if(t>=sonT()){t=sonT();oynuyor=false;guncelle();}ciz();}
+  sonKare=z;requestAnimationFrame(dongu);}
+function guncelle(){const b=document.getElementById("oynat");
+  b.textContent=oynuyor?"❚❚ Duraklat":"▶ Oynat";b.setAttribute("aria-pressed",oynuyor);}
+
+const sek=document.getElementById("sekmeler");
+SEG.forEach((s,i)=>{const b=document.createElement("button");
+  b.setAttribute("role","tab");b.setAttribute("aria-selected",i===0);
+  b.innerHTML="Angajman "+(i+1)+"<i>en yakın "+vir(s.en_yakin,2)+" m · "+vir(s.sure,1)+" s</i>";
+  b.onclick=()=>{si=i;t=0;oynuyor=!azalt;guncelle();cizOlaylar();
+    [...sek.children].forEach((c,j)=>c.setAttribute("aria-selected",i===j));ciz();};
+  sek.appendChild(b);});
+const hg=document.getElementById("hizGrup");
+[[.2,"⅕×"],[.5,"½×"],[1,"1×"]].forEach(([v,ad])=>{const b=document.createElement("button");
+  b.className="k";b.textContent=ad;b.setAttribute("aria-pressed",v===1);
+  b.onclick=()=>{hizC=v;[...hg.children].forEach(c=>c.setAttribute("aria-pressed",c===b));};
+  hg.appendChild(b);});
+const gg=document.getElementById("gosGrup");
+[["hayalet","Hayalet ışın"],["koni","Görüş konisi"],["iz","İz"]].forEach(([kk,ad])=>{
+  const b=document.createElement("button");b.className="k";b.textContent=ad;
+  b.setAttribute("aria-pressed",true);
+  b.onclick=()=>{goster[kk]=!goster[kk];b.setAttribute("aria-pressed",goster[kk]);ciz();};
+  gg.appendChild(b);});
+document.getElementById("oynat").onclick=()=>{if(t>=sonT())t=0;oynuyor=!oynuyor;guncelle();};
+document.getElementById("kaydir").oninput=e=>{t=sonT()*e.target.value/2000;oynuyor=false;guncelle();ciz();};
+addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;
+  if(e.key===" "){e.preventDefault();document.getElementById("oynat").click();}
+  if(e.key==="ArrowRight"){t=Math.min(sonT(),t+.05);oynuyor=false;guncelle();ciz();}
+  if(e.key==="ArrowLeft"){t=Math.max(0,t-.05);oynuyor=false;guncelle();ciz();}});
+let sur=null;
+cvS.addEventListener("pointerdown",e=>{sur=[e.clientX,e.clientY];cvS.setPointerCapture(e.pointerId);});
+cvS.addEventListener("pointermove",e=>{if(!sur)return;
+  kam.az+=(e.clientX-sur[0])*.008;
+  kam.el=Math.max(-.25,Math.min(1.4,kam.el+(e.clientY-sur[1])*.006));
+  sur=[e.clientX,e.clientY];ciz();});
+addEventListener("pointerup",()=>{sur=null;});
+cvS.addEventListener("wheel",e=>{e.preventDefault();
+  kam.zoom=Math.max(.45,Math.min(3.2,kam.zoom*(e.deltaY<0?1.11:.9)));ciz();},{passive:false});
+let srt=false;
+const seritGit=e=>{const r=cvR.getBoundingClientRect(),L=44,Rr=8;
+  const u=(e.clientX-r.left-L)/(r.width-L-Rr);
+  t=Math.max(0,Math.min(sonT(),sonT()*u));oynuyor=false;guncelle();ciz();};
+cvR.addEventListener("pointerdown",e=>{srt=true;cvR.setPointerCapture(e.pointerId);seritGit(e);});
+cvR.addEventListener("pointermove",e=>{if(srt)seritGit(e);});
+addEventListener("pointerup",()=>{srt=false;});
+addEventListener("resize",()=>{hepsiniOlcek();ciz();});
+
+document.getElementById("ebKaynak").textContent=V.kaynak||"—";
+/* tablo — medyanlar da burada hesaplanir ki metinle veri asla ayrisamasin */
+const olcum=SEG.map((s,i)=>{
+  const k=s.kare,vis=k.filter(r=>r[A.gorsel]),gps=k.filter(r=>!r[A.gorsel]),dv=vis[0];
+  const kom=k.filter(r=>r[A.eps]!=null&&r[A.gorsel]);
+  let sup=0;const iv=k.indexOf(dv);
+  for(let j=1;j<=Math.max(1,iv);j++)sup+=Math.abs(w180(losOf(k[j])-losOf(k[j-1])));
+  const h1=vis.find(r=>r[A.kopru]),en=a=>a.length?Math.min(...a.map(r=>r[A.menzil])):null;
+  return {devir:dv?dv[A.menzil]:null, enyakin:s.en_yakin, cikis:k[k.length-1][A.menzil],
+    sup:sup, gorme:(h1&&dv)?h1[A.t]-dv[A.t]:null,
+    hayalet:kom.length?100*kom.filter(r=>r[A.kopru]).length/kom.length:null,
+    kazanc:(en(gps)!=null&&en(vis)!=null)?en(gps)-en(vis):null};
+});
+const med=al=>{const v=olcum.map(o=>o[al]).filter(x=>x!=null).sort((a,b)=>a-b);
+  if(!v.length)return null;const m=v.length>>1;
+  return v.length%2?v[m]:(v[m-1]+v[m])/2;};
+const bo=(x,n,b)=>x==null?"—":vir(x,n)+(b||"");
+document.getElementById("tblSeg").innerHTML=olcum.map((o,i)=>
+  "<tr><td>Angajman "+(i+1)+"</td><td>"+bo(o.devir,1," m")+"</td><td>"+bo(o.enyakin,2," m")+
+  "</td><td style=\"color:"+(o.kazanc>0?gf("--iyi"):gf("--hayalet"))+"\">"+
+  (o.kazanc==null?"—":(o.kazanc>0?"+":"−")+vir(Math.abs(o.kazanc),2)+" m")+"</td><td>"+
+  bo(o.cikis,1," m")+"</td><td>"+bo(o.sup,0,"°")+"</td><td>"+bo(o.gorme,2," s")+"</td><td>"+
+  (o.hayalet==null?"—":"%"+Math.round(o.hayalet))+"</td></tr>").join("");
+document.getElementById("tblAlt").innerHTML=
+  "<tr><td>Medyan</td><td>"+bo(med("devir"),1," m")+"</td><td>"+bo(med("enyakin"),2," m")+
+  "</td><td>"+(med("kazanc")>0?"+":"−")+vir(Math.abs(med("kazanc")),2)+" m</td><td>"+
+  bo(med("cikis"),1," m")+"</td><td>"+bo(med("sup"),0,"°")+"</td><td>"+bo(med("gorme"),2," s")+
+  "</td><td>%"+Math.round(med("hayalet"))+"</td></tr>";
+hepsiniOlcek();cizOlaylar();oynuyor=!azalt;guncelle();ciz();
+requestAnimationFrame(z=>{sonKare=z;dongu(z);});
+</script>

@@ -68,13 +68,24 @@ Kod boyunca "vz_up" adiyla yukari-pozitif ara degisken kullanilir.
 
 from __future__ import annotations
 
+import collections
 import math
+import os
 import threading
 import time
 
 # ── Sabitler ────────────────────────────────────────────────────────────────
 CM = 100.0                          # DoW cm -> m bolucusu
 TIRMANMA_MAX_MS = 120.0 / 3.6       # 33.33 m/s @ throttle +1.0 (SDK_README:81)
+
+
+def _env_f(ad: str, vars: float) -> float:
+    """Env'den float oku (gps_guidance.py'deki desenin aynisi).
+    Cfg SINIF TANIMINDA okunur -> import'tan ONCE set edilmeli."""
+    try:
+        return float(os.environ.get(ad, vars))
+    except (TypeError, ValueError):
+        return vars
 
 
 def sarmala_pi(a: float) -> float:
@@ -188,6 +199,26 @@ class Cfg:
                               # KP_VZ/KI_VZ zaten sonlu-fark geri beslemeli
                               # ana_kontrol dongusunden alinmisti (ayni duzen).
 
+    # ── ATTITUDE ISARETI: DoW rotation -> NED/FRD ──────────────────────────
+    # ⛔ DUZELTME 2026-08-13. Denetimde (docs/kopru_denetim.md B5-roll) OLCULDU
+    # ama duzeltilmemisti: "etkisi kucuk, roll yalniz kadraj OLCUMUNE giriyor".
+    # ARTIK GECERSIZ — yeni gorsel yasa (bbox_ibvs, dal HEAD) roll'u KOMUTA
+    # sokuyor: bbox_ibvs.py:943 iris["roll"] -> los_seviye() -> T1a yatay
+    # roll/pitch telafisi, ve T1a VARSAYILAN ACIK (ROLL_TELAFI=True; kaynagin
+    # M1 kampanyasinda ucusta dogrulanmis ozelligi). Kurtarma.guncelle() de
+    # ayni roll'u okur.
+    # KANIT (U kosusu, oturmus faz, n=984): korelasyon(stick, bildirilen roll)
+    #   = -0.965; SOLA yatis komutunda (stick<0, n=733) DoW +4.70 deg bildiriyor.
+    #   NED/FRD'de sol kanat asagi = NEGATIF => DoW roll = -NED roll.
+    #   (Pitch farkli: -0.843 korelasyon + bagimsiz sinama (artik 0.39 deg ↔ ters
+    #   hipotez 24.40 deg) pitch'in AYNEN gectigini dogruladi — ona DOKUNULMAZ.)
+    # ETKI (olculdu, bbox_ibvs.los_seviye ile): ters isaretle yaw komutunda
+    #   14.6 deg'e kadar TERS YONDE hata (yatis 20 deg, hedef kadraj kenarinda).
+    #   Yani T1a salinimi azaltmak yerine ARTIRIRDI.
+    # GERI DONUS: AVCI_KOPRU_ROLL_ISARET=1 -> eski (duzeltilmemis) davranis.
+    ROLL_ISARET = _env_f("AVCI_KOPRU_ROLL_ISARET", -1.0)
+    PITCH_ISARET = 1.0        # AYNEN gecer (yukarida kanit) — knob YOK
+
     # ── YATAY: hiz -> yatis stick'i = TRIM ILERI-BESLEME + PI (Faz 2) ──
     # ESKI YAKLASIM IPTAL (2026-08-06, olcum curuttu): ArduCopter'dan turetilen
     # KP_V=2.0 + aci=atan(a/g) modeli "45 deg ~ 18 m/s" tesisi varsayiyordu;
@@ -245,6 +276,16 @@ class Cfg:
     YAW_HATA_MAX = math.radians(90.0)
 
     # ── Bayat setpoint korumasi (gudum 20 Hz -> normal ara 0.05 s) ──
+    # GORSEL fazda ayri esik (2026-08-10 olcumu; 0 = kapali, GPS esigi kullanilir).
+    # 1.0 s: olculen gorsel komut araligi p99 = 1.23 s, MAX 1.45 s. Kayip
+    # tespiti yasanin isi (supervisor 20 kare ~2 s), kopru onu beklemeli.
+    # 2.5 s (2026-08-10 denetimi duzeltmesi): 1.0 kendi gerekcesinin ALTINDAYDI.
+    # Olculen gorsel komut araligi p99 = 1.23 s, MAX 1.45 s; ayrica bbox_ibvs
+    # wait_pose timeout'u 0.5 s dolunca HIC setpoint gondermiyor. Kayip karari
+    # yasanin: supervisor KAYIP_M=20 kare @ ~8-9 FPS = ~2.2 s. Kopru onu
+    # beklemeli, yoksa 1.0-1.45 s'lik dedektor bosluklarinda 18 m/s seyirde
+    # tam fren yapip hedefi saniyede ~18 m aciyordu.
+    BAYAT_S_GORSEL = 2.5
     BAYAT_S = 0.30            # bu surede setpoint gelmezse guvenli birakma:
                               # thr=0 (hover, irtifa korunur) + pitch/roll/yaw=0
 
@@ -279,6 +320,36 @@ class Cfg:
                               # gurultusu 8.8 vs 9.7 daha iyi) + oyunun bildirdigi
                               # delay_s ile birebir. Iki bagimsiz kosuda da saglam.
 
+    # ══ PERIYODIK KESTIRICI (2026-08-19) — hedef konum hatasinin KOKU ═══
+    # ⭐ OLCULEN SORUN (yarisma modu, 1055 esli ornek):
+    #     HAM bozuk hedef GPS'i : medyan 21.6 m | p90 39.5
+    #     mevcut "j" filtresi   : medyan 14.9 m | p90 39.0
+    #   Angajman 10-30 m'de geciyor -> 15 m hatayla vurmak IMKANSIZ.
+    #   Ucusta olculdu: yarisma modunda 10 dk'da <3 m gecis %0
+    #   (teshis modunda %58, ayni sure). Yani ASIL DARBOGAZ BURASI --
+    #   gudum ayarlari (K_VZ, sonumleme, aspect...) 0.3-0.8 m mertebesinde.
+    #
+    # ⭐ BOZULMANIN CINSI: GURULTU DEGIL GECIKME. Bozuk veriye periyodik
+    #   model uydurulunca artik yalniz ~5 m -> sinyal kendi icinde duzenli.
+    #   Oyunun bildirdigi delay_s = 1.00 s x hedef 18 m/s = ~18 m; olculen
+    #   21.6 m ile birebir.
+    #
+    # ⭐ COZUM VE NEDENSEL OLCUM (her an yalniz gecmise uydurulur):
+    #     ileri 0.0 s (OLUMSUZ KONTROL) -> 21.3 m   <-- ham seviyesine doner
+    #     ileri 0.6 s                   -> 11.2 m
+    #     ileri 1.2 s (URETIM)          ->  5.8 m   p90 10.1
+    #     ileri 2.0 s                   -> 14.5 m
+    #   Doz-cevap 1.2 s'te tepe yapiyor; olumsuz kontrol kazancin
+    #   GECIKME TELAFISINDEN geldigini kanitliyor.
+    #
+    # ⚠ Uydurma AYRI IS PARCACIGINDA (bkz. isci_baslat): kontrol dongusune
+    #   maliyeti maks 0.14 ms (tik butcesinin %0.3). Dongude yapilsaydi
+    #   p99 18.7 ms / maks 121.8 ms olurdu.
+    # ⚠ Kapi ~90 s'de acilir (bir tur + ortusme); oncesinde HAM konuma duser.
+    # 0 = KAPALI (varsayilan) -> bit-ayni eski davranis.
+    PERIYODIK_AKTIF = _env_f("AVCI_PERIYODIK", 0.0) >= 0.5
+    PERIYODIK_ILERI_S = _env_f("AVCI_PERIYODIK_ILERI", 1.2)
+
     # ── TESHIS: HEDEFIN GERCEK GPS'i (get_debug_truth) ──
     # YARISMA KONFIGURASYONU DEGIL — teshis kosusu icin. True iken get_plane()
     # bozuk hedef kanalini HIC okumaz; telemetri satirindaki truth alanlarini
@@ -290,7 +361,22 @@ class Cfg:
     # NOT: truth her telemetri satirinda gelir -> yasa 5 Hz yerine ~50 Hz taze veri
     # gorur. Bu da "kusursuz veri"nin parcasidir; testi POZITIF yonde kayirir,
     # dolayisiyla "kilitlenemiyor" sonucu cikarsa KESINDIR.
-    HEDEF_TRUTH_AKTIF = False
+    # 2026-08-14: False -> True (kullanici istegi: "dogru gps verisini kullanalim,
+    # bozulmus GPS'i ve onun filtrelemesini degil").
+    # ACIK iken: bozuk hedef kanali HIC okunmaz, CT-EKF baypas edilir, hedef
+    # konumu oyunun truth alanindan ~50 Hz gelir.
+    # NEDEN (canli olculdu, 2026-08-14 18:xx, gorev sirasinda /api/telemetry):
+    #     ham GNSS hatasi        24.9 m
+    #     CT-EKF sonrasi         19.8 m   (kazanc yalniz %20.5)
+    #     en kotu                57.5 m
+    #     o anki gercek 207.9 m'ye karsi yasanin gordugu 185.9 m -> 22 m sapma
+    #   Ustelik oyun kasitli olarak: 1.0 sn GECIKME, 40 m ANI ZIPLAMA,
+    #   2 sn VERI DONMASI, +-10 m/s hiz gurultusu, 5 Hz rate limiti uyguluyor.
+    #   Bu veriyle hicbir gudum yasasi hassas takip yapamaz -- kullanicinin
+    #   "salak gibi takip ediyor, kesiyor, baska yere gidiyor" dedigi davranisin
+    #   birebir karsiligi: kesme = 2 sn donma, baska yer = 40 m ziplama.
+    # KAPATMAK ICIN: False yaz (yedek: dow_kopru.py.yedek_*).
+    HEDEF_TRUTH_AKTIF = False   # YARISMA MODU (2026-08-18 olcumu icin kapatildi)
 
     # ── OLCUM KANCALARI (yalniz olcum scriptleri; varsayilan KAPALI) ──
     PITCH_SABIT = 0.0         # 0 disi: yatay kapaliyken sabit pitch enjeksiyonu
@@ -335,6 +421,34 @@ class DowKopru:
         self._fd_z = None
         self._fd_zt = None
         self._fd_vz = 0.0                  # m/s, +yukari, EMA'li
+        # ── TANI LOGU (2026-08-10) — koprunun IC durumu diske yazilir ────────
+        # NEDEN: 10 Agu carpisma analizinde yasa logu yasanin V_MAX'i hic asmadigini
+        # gosterdi ama arac 28 m/s yapti. Koprunun kendi gordugu hiz (SDK velocity),
+        # hata, integrator ve stick'ler HICBIR YERE yazilmadigi icin sebep
+        # bayat attitude'dan TAHMIN edilmek zorunda kalindi -> uc hipotez de
+        # olcumle curudu. Bu log tahmini bitirir. Davranisa DOKUNMAZ (salt yazma,
+        # tamponlu; hata olursa sessizce kapanir, kontrol dongusu asla olmez).
+        # AVCI_KOPRU_LOG=0 ile kapatilir.
+        self._log_acik = os.environ.get("AVCI_KOPRU_LOG", "1") != "0"
+        self._log_kuyruk = collections.deque()
+        self._log_yazici = None
+        self._log_dur = threading.Event()
+        self._log_tampon = []
+        self._log_dosya = None
+        self._log_f = None
+        self._log_kolon = None
+        self._log_uyari = False
+        # bagimsiz hiz (konum farki) — SDK velocity'nin HAKEMI
+        self._fd_xy = None                 # (x, y, t)
+        self._fd_vh = 0.0
+        # tazelik takibi: SDK'nin hangi kanali ne kadar donuk kaliyor
+        self._son_yaw = None
+        self._son_yaw_t = None
+        self._son_v = None
+        self._son_v_t = None
+        # Supervisor hangi fazda? entegre.adim() her tik gunceller.
+        # Yalniz BAYAT_S secimini etkiler; komut/kontrol yolu DEGISMEZ.
+        self.gorsel_faz = False
         # ic dongu
         self._dongu = None
         self._dur = threading.Event()
@@ -371,13 +485,15 @@ class DowKopru:
         p, v, (roll, pitch, yaw) = self._drone_dow()
         pn = dow_to_ned_vek(p)
         vn = dow_to_ned_vek(v)                     # hiza kaydirma UYGULANMAZ (sabit ofset)
-        # pitch/roll ISARETI AYNEN GECER (burun-yukari / sag-kanat-asagi iki
-        # konvansiyonda da pozitif; kanit dosya basligi madde 2). Yalniz kadraj
-        # OLCUMU tuketir (gps_guidance:454), komut yoluna girmez.
+        # ATTITUDE ISARETI (Cfg.ROLL_ISARET / PITCH_ISARET, kanit orada):
+        #   pitch AYNEN gecer (+1), roll CEVRILIR (-1; DoW roll = -NED roll).
+        # roll artik SALT OLCUM DEGIL: bbox_ibvs T1a telafisi ve Kurtarma okur.
         return {"x": pn[0], "y": pn[1],
                 "z": -(p[2] - float(self.cfg.NED_ZEMIN_M)),
                 "vx": vn[0], "vy": vn[1], "vz": vn[2],
-                "roll": roll, "pitch": pitch, "yaw": dow_yaw_to_ned(yaw)}
+                "roll": float(self.cfg.ROLL_ISARET) * roll,
+                "pitch": float(self.cfg.PITCH_ISARET) * pitch,
+                "yaw": dow_yaw_to_ned(yaw)}
 
     def get_plane(self) -> dict:
         """{x,y,z, yaw, frozen} — m/rad, NED (gps_guidance:23).
@@ -413,11 +529,75 @@ class DowKopru:
                 self._gnss_cikti = self._gnss_guncelle(ham_cm)
             if self._gnss_cikti is not None:
                 p = self._gnss_cikti
+        # ══ PERIYODIK KESTIRICI (bkz. Cfg.PERIYODIK_AKTIF) ══════════════
+        # Hedefin KAPALI pistine Fourier modeli uydurup t+ILERI'de
+        # degerlendirir -> oyunun ~1 s gecikmesi telafi edilir.
+        # Olculen (nedensel): 14.9 m -> 5.8 m (p90 39.0 -> 10.1).
+        # ⚠ Kapali ya da hazir degilse ASAGISI HIC CALISMAZ -> bit-ayni.
+        # ⚠ Girdi HAM (bozuk) konum; truth kanali KULLANILMAZ.
+        if self.cfg.PERIYODIK_AKTIF and not truth_modu:
+            pk = self._periyodik_al()
+            if pk is not None:
+                try:
+                    _tm = time.monotonic()
+                    if not donuk:
+                        pk.ekle(_tm, ham[0], ham[1], ham[2])
+                    _pp = pk.kestir(_tm)
+                    if _pp is not None:
+                        p = (_pp[0], _pp[1], _pp[2])
+                        self._periyodik_kullanildi = True
+                    else:
+                        self._periyodik_kullanildi = False
+                    # ── MEKANIZMA KAPISI: kapinin gercekten calistigini
+                    #    loglardan dogrulayabilmek icin periyodik tani.
+                    #    Sonucu kabul etmeden ONCE buraya bakilir.
+                    if _tm - getattr(self, "_pk_son_log", 0.0) > 5.0:
+                        self._pk_son_log = _tm
+                        try:
+                            _d = pk.tani()
+                            _sap = math.dist(p, ham) if _pp is not None else 0.0
+                            print("[PK] hazir=%s periyot=%s kalite=%s ornek=%d "
+                                  "sure=%.0fs sapma=%.1fm"
+                                  % (_d["pk_hazir"],
+                                     ("%.2f" % _d["pk_periyot_s"]) if _d["pk_periyot_s"] else "-",
+                                     ("%.2f" % _d["pk_kalite_m"]) if _d["pk_kalite_m"] else "-",
+                                     _d["pk_ornek"], _d["pk_sure_s"], _sap),
+                                  flush=True)
+                        except Exception:
+                            pass
+                except Exception:
+                    self._periyodik_kullanildi = False
         pn = dow_to_ned_vek(p)
         return {"x": pn[0], "y": pn[1],
                 "z": -(p[2] - float(self.cfg.NED_ZEMIN_M)),
                 "yaw": dow_yaw_to_ned(yaw_dow),
                 "frozen": donuk}
+
+    def _periyodik_al(self):
+        """Periyodik kestiriciyi tembel kur; arkaplan iscisini baslat.
+
+        ⚠ Uydurma AYRI IS PARCACIGINDA: kontrol dongusunde yapilsaydi
+        p99 18.7 ms / maks 121.8 ms takilma olurdu (olculdu). Boyle
+        ekle+kestir maliyeti maks 0.14 ms.
+        """
+        pk = getattr(self, "_periyodik", None)
+        if pk is not None:
+            return pk
+        try:
+            from fusion.periyodik_kestirici import PeriyodikKestirici
+        except Exception as e:
+            print("[KOPRU] periyodik kestirici YUKLENEMEDI: %r" % (e,))
+            self._periyodik = False
+            return None
+        if pk is False:
+            return None
+        pk = PeriyodikKestirici(
+            ileri_s=float(getattr(self.cfg, "PERIYODIK_ILERI_S", 1.2)))
+        pk.isci_baslat(arali_s=0.5)
+        self._periyodik = pk
+        print("[KOPRU] periyodik kestirici ACIK (ileri %.2f s) — hedef konum "
+              "hatasi olculen 14.9 m -> 5.8 m" % pk.ileri_s)
+        return pk
 
     def _gnss_guncelle(self, ham_cm):
         """Bozuk hedef konumunu CT-EKF'ten gecir. Girdi/cikti: cm -> m (DoW dunya).
@@ -463,13 +643,27 @@ class DowKopru:
             t_sp = self._t_sp
 
         p_dow, v_dow, (_roll, _pitch, yaw_dow) = self._drone_dow()
+        yaw_yas, v_yas, vh_fd = self._tazelik(simdi, yaw_dow, v_dow, p_dow)
 
         # iki dikey hiz kestirimi de HER tik hesaplanir (log kiyasi icin)
         vz_up_sdk = v_dow[2]                              # DoW z zaten YUKARI
         vz_up_fd = self._vz_sonlu_fark(p_dow[2], simdi)
         vz_up_olc = vz_up_sdk if cfg.HIZ_KAYNAK == "sdk" else vz_up_fd
 
-        bayat = (t_sp is None) or (simdi - t_sp > cfg.BAYAT_S)
+        # ── BAYATLIK ESIGI FAZA GORE (2026-08-10, canli olculdu) ──────────
+        # GPS yasasi 20 Hz SABIT kosar: komut araligi medyan 0.047 s, p99 0.079,
+        # MAX 0.125 -> 0.30 s esigini HIC asmaz (olculdu: %0.0 bayat).
+        # GORSEL yasa (bbox_ibvs) KARE-GUDUMLU: medyan 0.062 s ama kuyruk uzun,
+        # p99 1.23 s, MAX 1.45 s -> araliklarin %8.1'i 0.30 s'yi asiyor. Her
+        # asimda o bosluktaki TUM 50 Hz tikleri bayat sayilip stickler
+        # SIFIRLANIYOR: olculen bayat tik orani GORSEL fazda %27.8 (GPS'te %0.0).
+        # Sonuc: komut 16.2 m/s istenirken gerceklesen 14.4'e dusuyor, hedef
+        # 18 m/s giderken saniyede ~3.5 m aciliyor -> 9 saniyede ~30 m kacis.
+        # Kayip tespiti ZATEN yasanin isi (supervisor KAYIP_M=20 kare ~2 s),
+        # koprunun bayat-guvenligi gorsel fazda gereksiz sikiligi getiriyordu.
+        _bayat_s = (cfg.BAYAT_S_GORSEL if (self.gorsel_faz and cfg.BAYAT_S_GORSEL)
+                    else cfg.BAYAT_S)
+        bayat = (t_sp is None) or (simdi - t_sp > _bayat_s)
 
         # ── Cerceve: setpoint'i DoW dunyasina getir ──
         v_sp_dow = ned_to_dow_vek(sp)
@@ -480,15 +674,17 @@ class DowKopru:
         #    ve olcum ayni dunya_to_govde ile govde cercevesine indirgenir.)
         e_fwd = e_right = 0.0
         pitch_ham = roll_ham = 0.0
+        sp_fwd = sp_right = olc_fwd = olc_right = 0.0
+        trim_fwd = trim_right = 0.0
         if cfg.YATAY_AKTIF and not bayat:
             sp_fwd, sp_right = dunya_to_govde(v_sp_dow[0], v_sp_dow[1], yaw_dow)
             olc_fwd, olc_right = dunya_to_govde(v_dow[0], v_dow[1], yaw_dow)
             e_fwd = sp_fwd - olc_fwd
             e_right = sp_right - olc_right
-            pitch_ham = (yatay_trim_stick(sp_fwd, cfg.YATAY_TRIM_NOKTA)
-                         + cfg.KP_VH * e_fwd + self._i_fwd)
-            roll_ham = (yatay_trim_stick(sp_right, cfg.YATAY_TRIM_NOKTA)
-                        + cfg.KP_VH * e_right + self._i_right)
+            trim_fwd = yatay_trim_stick(sp_fwd, cfg.YATAY_TRIM_NOKTA)
+            trim_right = yatay_trim_stick(sp_right, cfg.YATAY_TRIM_NOKTA)
+            pitch_ham = trim_fwd + cfg.KP_VH * e_fwd + self._i_fwd
+            roll_ham = trim_right + cfg.KP_VH * e_right + self._i_right
             # anti-windup: eksen doymamisken VE hata banttayken biriktir
             # (buyuk-hata rampasi integrali doldurup asma yapiyordu — olculdu)
             if (-cfg.PITCH_MAX < pitch_ham < cfg.PITCH_MAX
@@ -517,8 +713,11 @@ class DowKopru:
         thr_cmd = kirp(thr_ham, cfg.THR_DN, cfg.THR_UP)
 
         # ── 3) YAW: mutlak aci -> donus hizi (sarma + kacak kirpma) ──
-        yaw_hata = sarmala_pi(yaw_sp_dow - yaw_dow)
-        yaw_hata = kirp(yaw_hata, -cfg.YAW_HATA_MAX, cfg.YAW_HATA_MAX)
+        # ⚠ 2026-08-17: HAM hata saklaniyor. Onceden yalniz olu bant
+        #   uygulanmis deger loglaniyordu -> tiklerin %57.1'i "tam 0"
+        #   gorunuyor ve <3°'lik KALICI yanlilik gizleniyordu.
+        yaw_hata_ham = sarmala_pi(yaw_sp_dow - yaw_dow)
+        yaw_hata = kirp(yaw_hata_ham, -cfg.YAW_HATA_MAX, cfg.YAW_HATA_MAX)
         if abs(yaw_hata) < cfg.YAW_DEADBAND:
             yaw_hata = 0.0
         yaw_cmd = kirp(cfg.KP_YAW * yaw_hata, -cfg.YAW_MAX, cfg.YAW_MAX)
@@ -548,11 +747,139 @@ class DowKopru:
             "e_fwd": e_fwd, "e_right": e_right,
             "i_fwd": self._i_fwd, "i_right": self._i_right,
             "yaw_hata_deg": math.degrees(yaw_hata),
+            "yaw_hata_ham_deg": math.degrees(yaw_hata_ham),
             "thr_ham": thr_ham, "thr_doydu": int(thr_doydu),
             "thr": self._onceki["thr"], "pitch": self._onceki["pitch"],
             "roll": self._onceki["roll"], "yaw": self._onceki["yaw"],
+            # ── tani (2026-08-10): govde ayristirmasi + stick zinciri + tazelik ──
+            "sp_fwd": sp_fwd, "sp_right": sp_right,
+            "olc_fwd": olc_fwd, "olc_right": olc_right,
+            "trim_fwd": trim_fwd, "trim_right": trim_right,
+            "pitch_ham": pitch_ham, "roll_ham": roll_ham,
+            "pitch_cmd": pitch_cmd, "roll_cmd": roll_cmd,
+            # HAKEM: koprunun gordugu hiz (SDK) vs konumdan turetilen gercek hiz
+            "vh_sdk": math.hypot(v_dow[0], v_dow[1]),
+            "vh_fd": vh_fd,
+            "vh_sp": math.hypot(v_sp_dow[0], v_sp_dow[1]),
+            # tazelik: SDK kanallari kac saniyedir ayni degeri veriyor
+            "yaw_yas_s": yaw_yas, "v_yas_s": v_yas,
         }
+        self._tani_yaz(self.son_tani)
         return self.son_tani
+
+    # ── TANI LOGU — salt yazma, davranisa dokunmaz ──────────────────────────
+    def _tazelik(self, simdi, yaw_dow, v_dow, p_dow):
+        """SDK kanallarinin donukluk yasi + konumdan bagimsiz yatay hiz.
+
+        NEDEN: 10 Agu analizinde attitude'un tiklerin %17-51'inde DONUK kaldigi
+        (yaw'da 7 s'ye varan bloklar) olculdu. Kopru hem yaw'i (govde ayristirmasi)
+        hem SDK hizini (geri besleme) kullanir; bunlar bayatsa kontrolcu KOR olur.
+        Yas = ayni degerin kac saniyedir tekrarlandigi.
+        """
+        if self._son_yaw is None or abs(yaw_dow - self._son_yaw) > 1e-9:
+            self._son_yaw, self._son_yaw_t = yaw_dow, simdi
+        yaw_yas = simdi - (self._son_yaw_t if self._son_yaw_t is not None else simdi)
+        v_now = (v_dow[0], v_dow[1], v_dow[2])
+        if self._son_v is None or any(abs(a - b) > 1e-9 for a, b in zip(v_now, self._son_v)):
+            self._son_v, self._son_v_t = v_now, simdi
+        v_yas = simdi - (self._son_v_t if self._son_v_t is not None else simdi)
+        # bagimsiz yatay hiz (konum farki) — SDK velocity'nin hakemi
+        if self._fd_xy is not None:
+            dtp = simdi - self._fd_xy[2]
+            if dtp > 0.05:                 # ~20 Hz altinda ornekle (gurultu dogrultmasi)
+                self._fd_vh = math.hypot(p_dow[0] - self._fd_xy[0],
+                                         p_dow[1] - self._fd_xy[1]) / dtp
+                self._fd_xy = (p_dow[0], p_dow[1], simdi)
+        else:
+            self._fd_xy = (p_dow[0], p_dow[1], simdi)
+        return yaw_yas, v_yas, self._fd_vh
+
+    def _tani_yaz(self, tani):
+        """Kontrol yolundan I/O YOK: yalniz kuyruga birak (deque.append atomik).
+
+        OLCULDU (2026-08-10): dosya yazimi kontrol dongusunde 5.9-7.1 ms tepe
+        yapiyordu = 50 Hz butcesinin %30-36'si. Acik tutamak da cozmedi (maliyet
+        flush'in kendisi). Yazma ayri thread'e alindi -> kontrol tikinda kalan
+        is tek append. Bir tani logu ASLA ucusu bozamaz.
+        """
+        if not self._log_acik:
+            return
+        self._log_kuyruk.append(tani)
+        if self._log_yazici is None:
+            self._log_yazici = threading.Thread(target=self._tani_yazici_kos,
+                                                name="kopru-tani-log", daemon=True)
+            self._log_yazici.start()
+
+    def _tani_yazici_kos(self):
+        """Yazici thread: kuyrugu bosaltir. Hata olursa log kapanir, ucus surer."""
+        while not self._log_dur.is_set() or self._log_kuyruk:
+            if len(self._log_kuyruk) < 250 and not self._log_dur.is_set():
+                self._log_dur.wait(0.25)
+                continue
+            self._tani_bosalt()
+        self._tani_bosalt()
+
+    def _tani_bosalt(self):
+        if not self._log_acik or not self._log_kuyruk:
+            return
+        try:
+            self._log_tampon = []
+            while self._log_kuyruk:
+                self._log_tampon.append(self._log_kuyruk.popleft())
+            if self._log_f is None:
+                # Tutamak BIR KEZ acilir ve acik kalir: her flush'ta open/close
+                # Windows'ta 5.9 ms tutuyordu = 50 Hz butcesinin %30'u (olculdu
+                # 2026-08-10). Acik tutamakla ayni is ~0.2 ms. Kontrol dongusunu
+                # sarsmamak bu logun on sartidir.
+                dz = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "gazebo_kaynak", "logs")
+                os.makedirs(dz, exist_ok=True)
+                self._log_dosya = os.path.join(
+                    dz, "kopru_tani_%s.csv" % time.strftime("%Y%m%d_%H%M%S"))
+                self._log_kolon = list(self._log_tampon[0].keys())
+                self._log_f = open(self._log_dosya, "w", encoding="utf-8",
+                                   newline="", buffering=1 << 16)
+                self._log_f.write(",".join(self._log_kolon) + "\n")
+                print("[KOPRU] tani logu: %s" % self._log_dosya)
+            for s in self._log_tampon:
+                self._log_f.write(",".join(
+                    # ⚠ 2026-08-17: "%.6g" ile t=300320.123 -> 300320 oluyordu
+                    #   (843 benzersiz deger / 28749 satir). Bu logla gecikme
+                    #   ya da faz analizi YAPILAMIYORDU. t tam duyarlilikta.
+                    ((("%.6f" if k == "t" else "%.6g") % s[k])
+                     if isinstance(s[k], (int, float)) else str(s.get(k, "")))
+                    for k in self._log_kolon) + "\n")
+            self._log_f.flush()        # cokme/kill aninda son 5 s kaybolmasin
+            self._log_tampon = []
+        except Exception as e:
+            if not self._log_uyari:
+                print("[KOPRU] tani logu yazilamadi, kapatiliyor:", repr(e))
+                self._log_uyari = True
+            self._log_acik = False
+            self._log_tampon = []
+            try:
+                if self._log_f is not None:
+                    self._log_f.close()
+            except Exception:
+                pass
+            self._log_f = None
+
+    def tani_log_kapat(self):
+        """Yazici thread'i durdur, kuyrugu bosalt, tutamagi kapat."""
+        self._log_dur.set()
+        y = self._log_yazici
+        if y is not None and y.is_alive():
+            y.join(timeout=2.0)
+        self._log_yazici = None
+        self._tani_bosalt()                    # thread olmese bile kuyruk insin
+        try:
+            if self._log_f is not None:
+                self._log_f.flush()
+                self._log_f.close()
+        except Exception:
+            pass
+        finally:
+            self._log_f = None
 
     def _uygula(self, thr, pitch, roll, yaw):
         """ana_kontrol.py:795-801 ile ayni: rate-limit + atomik gonderim."""
@@ -577,6 +904,7 @@ class DowKopru:
         if self._dongu is not None:
             self._dongu.join(timeout=1.0)
             self._dongu = None
+        self.tani_log_kapat()          # tamponda kalan son tikler diske insin
 
     def _dongu_kos(self):
         period = 1.0 / self.cfg.LOOP_HZ

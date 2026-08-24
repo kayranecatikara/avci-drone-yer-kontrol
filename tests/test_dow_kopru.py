@@ -109,7 +109,11 @@ def test_get_iris_birim_ve_cerceve():
     assert iris["vx"] == pytest.approx(1.0)
     assert iris["vy"] == pytest.approx(2.0)     # -(-2)
     assert iris["vz"] == pytest.approx(-3.0)
-    assert iris["roll"] == pytest.approx(math.radians(10.0))
+    # roll CEVRILIR (2026-08-13): DoW roll = -NED roll. Bu satir eskiden
+    # +radians(10) bekliyordu ve ISARET HATASINI KILITLIYORDU — denetim
+    # (kopru_denetim.md B5-roll) hatayi bulmus ama "etkisi kucuk" diye
+    # duzeltilmemisti. Yeni gorsel yasa roll'u komuta soktugu icin duzeltildi.
+    assert iris["roll"] == pytest.approx(-math.radians(10.0))
     # pitch AYNEN gecer (iki konvansiyonda da burun-yukari pozitif; taslaktaki
     # -pitch hatasi duzeltildi)
     assert iris["pitch"] == pytest.approx(math.radians(20.0))
@@ -480,3 +484,51 @@ def test_send_velocity_yalniz_setpoint_yazar():
     assert k._sp_yaw_ned == 0.5
     assert k._t_sp is not None
     assert len(k.sdk.gonderilen) == n_once        # komut GONDERMEDI (adim isi)
+
+
+# ── ATTITUDE ISARETI (2026-08-13 duzeltmesi; kanit dow_kopru.Cfg.ROLL_ISARET) ──
+# NEDEN KILIT: yeni gorsel yasa (bbox_ibvs, dal HEAD) roll'u KOMUTA sokuyor
+# (T1a telafisi, varsayilan ACIK). Ters isaret yaw komutunda 14.6 deg'e kadar
+# TERS YONDE hata uretiyordu. Bu testler regresyonu engeller.
+
+def test_get_iris_roll_isareti_cevrilir():
+    """DoW roll = -NED roll (olculdu: korelasyon -0.965, n=984)."""
+    sdk = FakeSDK()
+    k = _kopru(sdk)
+    for dow_roll_deg in (+20.0, -20.0, +4.7, 0.0, +45.0):
+        sdk.telemetry["drone"]["rotation"] = (dow_roll_deg, 0.0, 0.0)
+        assert k.get_iris()["roll"] == pytest.approx(
+            -math.radians(dow_roll_deg), abs=1e-12)
+
+
+def test_get_iris_pitch_isareti_AYNEN_gecer():
+    """Pitch'e DOKUNULMAZ — bagimsiz sinama dogruladi (artik 0.39 deg)."""
+    sdk = FakeSDK()
+    k = _kopru(sdk)
+    for dow_pitch_deg in (+12.5, -12.5, -37.0, 0.0):
+        sdk.telemetry["drone"]["rotation"] = (0.0, dow_pitch_deg, 0.0)
+        assert k.get_iris()["pitch"] == pytest.approx(
+            math.radians(dow_pitch_deg), abs=1e-12)
+
+
+def test_get_iris_sola_yatis_NED_negatif():
+    """Olcumun kendisi: sola yatis komutunda DoW +4.70 deg bildiriyordu.
+    NED/FRD'de sol kanat asagi NEGATIF olmali."""
+    sdk = FakeSDK()
+    k = _kopru(sdk)
+    sdk.telemetry["drone"]["rotation"] = (+4.70, 0.0, 0.0)   # DoW'un bildirdigi
+    assert k.get_iris()["roll"] < 0.0                        # NED: sol = negatif
+
+
+def test_roll_isareti_env_ile_geri_alinabilir(monkeypatch):
+    """AVCI_KOPRU_ROLL_ISARET=1 -> eski (duzeltilmemis) davranis."""
+    import importlib
+    monkeypatch.setenv("AVCI_KOPRU_ROLL_ISARET", "1")
+    import kopru.dow_kopru as dk
+    importlib.reload(dk)
+    try:
+        assert dk.Cfg.ROLL_ISARET == 1.0
+    finally:
+        monkeypatch.delenv("AVCI_KOPRU_ROLL_ISARET", raising=False)
+        importlib.reload(dk)
+    assert dk.Cfg.ROLL_ISARET == -1.0        # varsayilan: DUZELTILMIS

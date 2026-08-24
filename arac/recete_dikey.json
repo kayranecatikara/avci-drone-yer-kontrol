@@ -1,0 +1,95 @@
+[
+ {
+  "ad": "D0_dikey_kapali",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "KONTROL: dikey ofset hep 1.55 m (eski davranis)"
+ },
+ {
+  "ad": "D1_dikey8",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "8 m altinda dikey ofset sifira surulur"
+ },
+ {
+  "ad": "D2_dikey12",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "12",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "12 m altinda (daha erken kapanma)"
+ },
+ {
+  "ad": "D3_dikey8_duz",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_TERM_LAM_MAX": "13",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "D1 + terminal duz segmenti bekler (gece en iyi tek deger buydu)"
+ }
+]

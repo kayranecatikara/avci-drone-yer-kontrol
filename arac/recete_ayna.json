@@ -1,0 +1,67 @@
+[
+ {
+  "ad": "A_ayna_PN",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "1.6",
+   "AVCI_DPP_K": "0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "AYNA DUZELTILDI + eski PN yasasi (yasa artik dogru yone donuyor)"
+ },
+ {
+  "ad": "B_ayna_DPP",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "1.5",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "0",
+   "AVCI_DPP_K": "1.4",
+   "AVCI_DPP_KR": "0.7",
+   "AVCI_DPP_FF": "1.0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "AYNA DUZELTILDI + DPP sigma dongusu"
+ },
+ {
+  "ad": "C_ayna_PN_hayaletsiz",
+  "env": {
+   "AVCI_GPS_FF_KORU": "1",
+   "AVCI_DPP_RSET": "6.0",
+   "AVCI_IBVS_CONF": "0.25",
+   "AVCI_VIS_CONF": "0.25",
+   "AVCI_KOPRU_RANGE": "6.0",
+   "AVCI_IBVS_KOPRU_ATALET": "0.0",
+   "AVCI_GPS_TERM_DIKEY": "8",
+   "AVCI_IBVS_PN": "1.6",
+   "AVCI_DPP_K": "0",
+   "AVCI_IBVS_DIKEY_UFUK": "1",
+   "AVCI_IBVS_HIZ_SICAK": "1.5",
+   "AVCI_KILIT_S": "5.0",
+   "AVCI_KILIT_CONF": "0.25",
+   "AVCI_KILIT_DOLULUK": "0.80",
+   "AVCI_KILIT_BOSLUK_MOD": "sure"
+  },
+  "not": "A + hayalet KAPALI -- ayna duzelince hayalet hala gerekli mi?"
+ }
+]
