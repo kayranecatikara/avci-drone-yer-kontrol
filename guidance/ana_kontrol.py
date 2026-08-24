@@ -385,7 +385,24 @@ class Cfg:
     #     IoU ortanca      0.94  -> 0.94    (kutu kalitesi korundu)
     #   Yaninda talon_v4.engine (TensorRT FP16, imgsz 960) var -> otomatik secilir.
     #   Geri donmek icin: "talon_v3.pt" yaz.
-    VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "talon_v4.pt")   # tespit modeli (task=detect, sinif: talon)
+    # ══ talon_v5 (2026-08-24) ══════════════════════════════════════════════
+    # OLCULDU: v4 ile v5, AYNI karelerde (v4'un val'i, talonR; yeni cekimler
+    # DISARIDA -- v5 onlarin %85'iyle egitildi, iceri alsak haksiz avantaj olur).
+    #     bant        v4      v5
+    #     15-20 m   100.0%  100.0%
+    #     20-25 m    94.4%   97.2%
+    #     25-30 m    89.7%   89.7%
+    #     30-35 m    92.2%   94.1%
+    #     35-43 m    80.9%   89.7%
+    #     TUMU       90.6%   93.9%
+    # ASIL KAZANC 35-43 m ZEMIN arka planinda: %65.6 -> %84.4 (+18.8).
+    # GOK tarafi %94.4 -> %94.4: iyi calisan yari BOZULMADI (tasarim boyleydi).
+    # ⚠ TEK BEDEL: 169 negatif karenin BIRINDE guven 0.272 (v4'te maks 0.099).
+    #   Esigi 0.30'a cekmek onu eler AMA iki gercek tespiti de kaybettirir
+    #   (biri 15-20 m -- terminal menzil). Esik 0.25'te BIRAKILDI cunku
+    #   takipci zaten min_hits=3 istiyor: tek karelik yanlis pozitif
+    #   ONAYLANMIS iz uretemez, dolayisiyla kilide donusemez.
+    VIS_MODEL_PATH   = os.path.join(_PROJ_ROOT, "models", "talon_v5.pt")   # tespit modeli (task=detect, sinif: talon)
     # ⚠ talon_pose.pt (9 Tem) -> talon_pose_v2.engine (16 Agu 09:20).
     # v2 gece egitildi: mAP50-95 0.9212 (v1'in cok ustunde), 6 keypoint,
     # flip_idx [0,2,1,3,5,4]. TensorRT .engine secildi cunku POSE 2026-07-10'da

@@ -38,7 +38,15 @@ class PozDedektor:
                     self.device = "cpu"
             if self.half is None:
                 self.half = (self.device == "cuda")
-            self.model = YOLO(model_path)
+            # ⚠ TensorRT .engine gorev bilgisi TASIMIYOR: ultralytics
+            # "assuming task=detect" deyip tahmin ediyor, bu kontrol de haklı
+            # olarak reddediyordu. Cozum: gorevi ACIKCA ver.
+            #   [POZ] pose modeli YUKLENEMEDI (ValueError("model 'pose' degil:
+            #         'detect'")) -- 2026-08-16, talon_pose_v2.engine
+            if str(model_path).lower().endswith((".engine", ".onnx", ".plan")):
+                self.model = YOLO(model_path, task="pose")
+            else:
+                self.model = YOLO(model_path)
             if getattr(self.model, "task", None) != "pose":
                 raise ValueError("model 'pose' degil: %r" % getattr(self.model, "task", None))
             self.hazir = True
@@ -98,6 +106,107 @@ class PozDedektor:
                 "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
                 "W": W, "H": H, "t": _t.perf_counter(),
                 "kp_xy": [[float(u), float(v)] for u, v in kxy],
+                "kp_conf": ([1.0] * 6 if kcf is None else [float(c) for c in kcf]),
+            }
+        except Exception:
+            return None
+
+    # ── KROP YOLU (256x96 top-down poz modeli) ──────────────────────────────
+    # NEDEN: tam-kare poz modeli 960x960 kosar ve hedef 12-25 m'de 28x12 px'e
+    # duser -> 6 keypoint'i o kadar pikselden regresyona sokmak umutsuz. Krop
+    # modeli dedektorun kutusunu 1.5x payla kesip SABIT 256x96'ya getirir; hedef
+    # her menzilde ayni piksel buyuklugune gelir.
+    # OLCULDU (1532 val karesi, orijinal kare pikselinde, dedektor kutusuyla):
+    #     12-25 m ortanca 1.36 vs 1.77 px  (krop %23 iyi)
+    #     12-25 m p90     3.78 vs 5.02 px  (krop %25 iyi)
+    #     sag kanat p90  18.04 vs 27.21    sol kanat p90 20.18 vs 36.98
+    #     genel p90      19.46 vs 23.50    hedefi kacirma %0.4 vs %1.6
+    # Tam-kare model yalniz 0-6 / 6-12 m ORTANCASINDA az onde.
+    # ⚠ GEOMETRI krop_uret.py ile BIREBIR ayni olmali (PAY=1.5, oran 256/96,
+    #   kadraj disina tasinca ICERI kaydir). Farkli olursa model transfer etmez:
+    #   egitimdeki kroplar bu geometriyle uretildi.
+    # ⚠ Dedektor kutusunun gurultusu SORUN DEGIL: egitimde jitter (+-%12 kaydirma,
+    #   +-%20 olcek) vardi ve olculdu ki GT kutu -> dedektor kutusu gecisi
+    #   ortancayi %0.1 degistiriyor.
+    KROP_W, KROP_H, KROP_PAY = 256, 96, 1.5
+
+    def _krop_penceresi(self, cx, cy, bw, bh, W, H):
+        """krop_uret.py:krop_kutusu ile birebir (jitter kapali)."""
+        ar = self.KROP_W / float(self.KROP_H)
+        cw = max(bw * self.KROP_PAY, bh * self.KROP_PAY * ar)
+        ch = cw / ar
+        x0, y0 = cx - cw / 2.0, cy - ch / 2.0
+        x0 = min(max(x0, 0.0), max(0.0, W - cw))
+        y0 = min(max(y0, 0.0), max(0.0, H - ch))
+        return x0, y0, cw, ch
+
+    def tespit_krop(self, frame, det):
+        """frame: TAM KARE BGR ndarray. det: dedektor sonucu (cx,cy,w,h NORMALIZE).
+        tespit_et() ile AYNI sozlesmede dict doner; keypoint'ler TAM KARE
+        pikselindedir (cagiran ayrica kaydirma yapmamali)."""
+        if not self.hazir or frame is None or det is None:
+            return None
+        import time as _t
+        try:
+            H, W = int(frame.shape[0]), int(frame.shape[1])
+            cx, cy = float(det["cx"]), float(det["cy"])
+            bw, bh = float(det["w"]), float(det["h"])
+            # ⚠ SOZLESME KARISIKLIGI (2026-08-21 olculdu): depoda IKI kutu birimi
+            # dolasiyor. gorsel_tespit.tespit_et/tespit_hepsi PIKSEL dondurur
+            # ("px + perf_counter zaman damgasi"), _normalize_tespit ise 0..1
+            # NORMALIZE uretir. server.py'de poz cagri noktasindaki `det`
+            # dets[0]/takipci ciktisidir, yani PIKSEL. Ama hemen ustundeki
+            # yakinlik kapisi `det["w"] * bgr.shape[1]` diye carpiyor, yani
+            # NORMALIZE varsayiyor -> o kapi pratikte hicbir seyi engellemiyor
+            # (piksel x genislik daima POZ_MIN_KUTU_PX'i asar).
+            # Burada birimi TAHMIN ETMEK yerine OLCUYORUZ: normalize kutu
+            # tanimi geregi 1.0'i asamaz. Yanlis birim krop penceresini kadraj
+            # disina atar, pencere kenara kirpilir, hedef icine girmez ve
+            # tespit sessizce None doner -- canli testte tam bu oldu.
+            if max(bw, bh) <= 1.5 and 0.0 <= cx <= 1.5 and 0.0 <= cy <= 1.5:
+                cx, cy, bw, bh = cx * W, cy * H, bw * W, bh * H
+            if bw <= 0 or bh <= 0:
+                return None
+            x0, y0, cw, ch = self._krop_penceresi(cx, cy, bw, bh, W, H)
+            if cw < 8 or ch < 4:
+                return None
+            ix0, iy0 = int(round(x0)), int(round(y0))
+            ix1, iy1 = int(round(x0 + cw)), int(round(y0 + ch))
+            kesit = frame[iy0:iy1, ix0:ix1]
+            if kesit.size == 0:
+                return None
+            try:                                   # egitimdeki gibi tek yeniden olcek
+                import cv2
+                kesit = cv2.resize(kesit, (self.KROP_W, self.KROP_H),
+                                   interpolation=cv2.INTER_LINEAR)
+            except Exception:
+                pass                               # ultralytics kendi letterbox'i ile devam
+            res = self.model.predict(kesit, imgsz=(self.KROP_H, self.KROP_W),
+                                     conf=self.conf, device=self.device,
+                                     verbose=False, **self._fp16_kwargs)[0]
+        except Exception:
+            return None
+        boxes = getattr(res, "boxes", None)
+        kps = getattr(res, "keypoints", None)
+        if boxes is None or kps is None or len(boxes) == 0:
+            return None
+        try:
+            i = int(boxes.conf.argmax())
+            kxy = kps.xy[i].cpu().numpy()
+            if kxy.shape[0] != 6:
+                return None
+            kcf = (kps.conf[i].cpu().numpy() if kps.conf is not None else None)
+            # kesit koordinati -> TAM KARE pikseli
+            sx, sy = cw / float(self.KROP_W), ch / float(self.KROP_H)
+            kp = [[x0 + float(u) * sx, y0 + float(v) * sy] for u, v in kxy]
+            bx1, by1, bx2, by2 = [float(v) for v in boxes.xyxy[i]]
+            return {
+                "cx": x0 + (bx1 + bx2) / 2.0 * sx, "cy": y0 + (by1 + by2) / 2.0 * sy,
+                "w": (bx2 - bx1) * sx, "h": (by2 - by1) * sy,
+                "conf": float(boxes.conf[i]),
+                "cls": int(boxes.cls[i]) if boxes.cls is not None else -1,
+                "W": W, "H": H, "t": _t.perf_counter(),
+                "kp_xy": kp,
                 "kp_conf": ([1.0] * 6 if kcf is None else [float(c) for c in kcf]),
             }
         except Exception:

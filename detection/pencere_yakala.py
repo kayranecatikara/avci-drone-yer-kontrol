@@ -22,7 +22,12 @@ import time
 GAME_PROC_HINTS = ("dronesofwar",)      # oyun exe/surec adi bunu icermeli (kucuk harf)
 # Baslik-ipucu fallback'inde ELENECEK surecler: tarayici sekmesi/editor basligi
 # "Drones of War" icerebilir (orn. GitHub/Drive sayfasi) -> YANLIS pencere yakalanir.
-_TARAYICI_EXE = ("brave", "chrome", "msedge", "firefox", "opera", "vivaldi", "code")
+# 2026-08-15: "explorer" EKLENDI. Canlida yasandi: oyun klasoru File Explorer'da
+# acikken pencere basligi "Drones of War Teknofest - File Explorer" oluyor ve
+# baslik-ipucu fallback'ini geciyordu. Yakalama o pencereye baglanip surekli
+# "WATCHDOG: kare bayat/yanlis pencere" veriyordu -> gorsel tespit HIC calismaz.
+_TARAYICI_EXE = ("brave", "chrome", "msedge", "firefox", "opera", "vivaldi",
+                 "code", "explorer")
 _TARAYICI_BASLIK = (" - brave", " - google chrome", " - microsoft edge",
                     " - mozilla firefox", " - opera", "visual studio code")
 

@@ -326,8 +326,15 @@
     <section class="col">
       <h2>Görev Kontrol</h2>
       <div class="body">
-        <button id="startBtn" class="btn start" onclick="gorevBaslat()"><span class="ic">🚀</span> Görev Başlat (İnovasyonlu J)</button>
-        <button id="gercekBtn" class="btn kbtn-gercek" onclick="gercekTest()"><span class="ic">🎯</span> Gerçek GPS (test)</button>
+        <!-- 2026-08-14: iki ayri gudum butonu (kullanici istegi).
+             ESKISI: "Görev Başlat (İnovasyonlu J)" = bozuk GPS + CT-EKF filtresi
+                     "Gerçek GPS (test)"            = truth GPS
+             Ikisi de pipeline'i secmiyordu -> OTO'da kaliyor, sistem kendi karar
+             veriyordu. Artik her buton HEM kaynagi HEM pipeline'i birlikte kuruyor:
+               GPS Güdüm    -> truth GPS + pipeline GPS    (Gazebo'dan tasinan yasa)
+               Görsel Güdüm -> truth GPS + pipeline GÖRSEL  (kamera/IBVS)             -->
+        <button id="gpsBtn" class="btn start" onclick="gpsGudum()"><span class="ic">🛰️</span> GPS Güdüm</button>
+        <button id="gorselBtn" class="btn kbtn-gercek" onclick="gorselGudum()"><span class="ic">👁️</span> Görsel Güdüm</button>
         <button class="btn stop" onclick="gorevDurdur()"><span class="ic">⏹️</span> Görev Durdur</button>
         <button id="manuelBtn" class="btn" onclick="manuelTogle()"><span class="ic">🎮</span> Manuel Mod</button>
         <button id="tuneBtn" class="btn" onclick="tuneTogle()"><span class="ic">⚙️</span> Tune (Canlı Ayar)</button>
@@ -348,6 +355,15 @@
             Kötüleşirse geri al. İyi olunca <b>Değerleri Yazdır</b> ile kopyala, Cfg'ye yapıştır.
             (Not: değişiklikler server kapanınca sıfırlanır — kalıcı olması için yapıştırman şart.)</div>
           <div id="tuneList"></div>
+
+          <!-- GUDUM OZELLIKLERI: gorsel/hibrit yasa anahtarlari. Liste SUNUCUDAN
+               gelir (kopru/gorsel_ozellikler.py) -> yeni ozellik eklerken buraya
+               DOKUNULMAZ. Degisiklik bir sonraki kareden gecerli, restart YOK. -->
+          <div class="tune-grp" style="margin-top:14px">🎛 GÜDÜM ÖZELLİKLERİ (görsel/hibrit yasa)</div>
+          <div class="tnote">Her anahtar <b>anlık</b> açılıp kapanır — yeniden başlatma yok.
+            Değişim olay günlüğüne yazılır (A/B segment sınırı). Fare ile üstüne gel: ölçüm notu.</div>
+          <div id="ozList"><span style="font-size:11px;color:var(--muted)">yükleniyor…</span></div>
+
           <button class="btn" style="margin-top:8px" onclick="tuneYazdir()">📋 Değerleri Yazdır</button>
           <pre id="tuneDump" style="display:none;white-space:pre-wrap;font-size:11px;color:var(--accent);
             background:var(--panel);border:1px solid var(--border);border-radius:6px;padding:8px;margin-top:6px"></pre>
@@ -692,40 +708,44 @@
   // Görev Başlat = v2 ile uç. Gerçek GPS = filtreyi atla, doğrudan gerçek
   // konuma git (yalnızca sim/debug'da anlamlı, irtifa testi için).
   function kaynakSec(k){ gonderKomut("start_" + k); }
-  function kaynakVurgula(k){                          // aktif kaynağa göre buton vurgusu
-    $("startBtn").classList.toggle("active", k === "v2");
-    $("gercekBtn").classList.toggle("active", k === "gercek");
+
+  // 2026-08-14: buton vurgusu artik KAYNAGA degil, secilen GUDUM MODUNA gore.
+  // (ikisi de truth GPS kullaniyor; ayirt eden sey pipeline.)
+  let gudumSecili = null;                              // "GPS" | "GORSEL" | null
+  function kaynakVurgula(k){                           // k: telemetriden gelen kaynak (null = gorev pasif)
+    const aktif = (k !== null);
+    const g = $("gpsBtn"), v = $("gorselBtn");
+    if(g) g.classList.toggle("active", aktif && gudumSecili === "GPS");
+    if(v) v.classList.toggle("active", aktif && gudumSecili === "GORSEL");
+    if(!aktif) gudumSecili = null;
   }
-  function gorevBaslat(){ if(manuelAcik) manuelUIKapat(); kaynakSec("v2"); }
-  function gercekTest(){ if(manuelAcik) manuelUIKapat(); kaynakSec("gercek"); }
+
+  // Her buton HEM pipeline'i HEM kaynagi kuruyor. Sira onemli: once pipeline
+  // (vismode) gonderilir, sonra gorev baslatilir -> gorev ilk tikinden itibaren
+  // dogru yasada kosar, OTO'da bir sure gezinmez.
+  function gudumBaslat(mod){
+    if(manuelAcik) manuelUIKapat();
+    gudumSecili = mod;
+    visMode(mod);                                      // GPS | GORSEL
+    setTimeout(()=>kaynakSec("gercek"), 120);          // truth GPS ile gorevi baslat
+  }
+  function gpsGudum(){    gudumBaslat("GPS");    }
+  function gorselGudum(){ gudumBaslat("GORSEL"); }
   function gorevDurdur(){ if(manuelAcik) manuelUIKapat(); kaynakVurgula(null); gonderKomut("stop"); }
 
   // ===== CANLI TUNE: slider'lar Cfg'yi ANINDA degistirir (server restart YOK) =====
   // BASİT IBVS seti (2026-07-07): tek yasa = görüntü merkezi→bbox merkezi çizgisi.
   // Çizginin yatay bileşeni yaw'a, dikey bileşeni gaza; büyüklüğü ileri itkiyi kısar.
   // Eski PN slider yığını yasayla birlikte silindi. Sıra = ayarlama sırası.
+  // ⚠ 2026-08-13 TEMIZLIK: burada 18 slider vardi, 16'si OLUYDU — eski gorsel
+  // yasa (IBVS_*) silindiginde sabitleri Cfg'den kalkti ama slider'lar kaldi.
+  // Panel deger gosteriyor, oynatinca sunucu sessizce REDDEDIYORDU. Gorsel/hibrit
+  // yasanin ayarlari artik asagidaki 🎛 GUDUM OZELLIKLERI bolumunde
+  // (bbox_ibvs.Cfg + supervisor.SupCfg -> /api/gudum_ozellikleri).
   const TUNE_DEFS = [
-    ["GÖRSEL GÜDÜM · BASİT IBVS (sırayla dene)", [
-      ["IBVS_ILERI","★★★ İleri TAVAN   (yaklaşma hızı sınırı — boyut yasası bunu aşamaz; sert giriyorsa DÜŞÜR)",0,1.0,0.025],
-      ["IBVS_BOYUT_HEDEF","★★★ Boyut hedefi (KİLİT-TUT)   (bbox max ekseni bu orana sürülür; kilit eşiği %6'nın ÜSTÜNDE tut — uzak tutuyorsa ARTIR, fazla sokuluyorsa DÜŞÜR)",0.06,0.20,0.005],
-      ["IBVS_K_BOYUT","★★★ Boyut kazancı   (mesafe tutma sertliği; ileri komut sörf yapıyorsa DÜŞÜR; 0=KAPALI→eski sabit-ileri yasa)",0,40,1],
-      ["IBVS_GERI_MAX","★★ Geri kaçış tavanı   (fazla yakınken geri itki sınırı; hedef frenleyince üstüne biniyorsa ARTIR; 0=asla geri)",0,0.40,0.025],
-      ["IBVS_K_YAW","★★★ Yatay kazanç   (hedef sağ/sol kenarda kalıyorsa ARTIR; yatay salınım varsa DÜŞÜR)",0,2.0,0.05],
-      ["IBVS_K_DIKEY","★★★ Dikey kazanç   (hedef üst/alt kenardan kaçıyorsa ARTIR; dikey salınım varsa DÜŞÜR)",0,3.0,0.05],
-      ["IBVS_DIKEY_NISAN","★★ Dikey nişan (tilt-farkında)   (−0.3=ALTTAN VUR: hedefi merkez ÜSTÜNDE tut, araç altta+gökyüzü · 0=merkez · 1=HIZ VEKTÖRÜNÜ hedefe nişanla)",-0.8,1.2,0.05],
-      ["IBVS_MERKEZ_FREN","★★ Merkez freni   (sapma büyüyünce ileriyi kısar: önce ortala sonra ilerle; 0=hep tam gaz)",0,2.0,0.05],
-      ["IBVS_HANDOFF_S","★★ Yumuşak geçiş (GPS→görsel)   (geçişte hedef kadrajdan çıkıyorsa bu süre boyunca ileri-itki+dikey nişan 0'dan açılır; çok uzunsa yaklaşma gecikir, kısaysa lunge; 0=kapalı)",0,2.0,0.1],
-      ["IBVS_ALCAL_FREN","★★ Alçalma freni (anti-lift-carry)   (araç hedefin ÜSTÜNE çıkıyorsa ARTIR: fazla yükselince ileriyi kısıp alçalmayı mümkün kılar; 0=kapalı)",0,4.0,0.1],
-      ["IBVS_K_ROLL_LEAD","★★ Öngörü gücü (pose bank→yaw lead)   (hedef dönüşünü geç yakalıyorsa ARTIR; erken/salınım→DÜŞÜR; 0=kapalı)",0,2.0,0.05],
-      ["IBVS_SIGN_ROLL","★ Öngörü YÖNÜ (roll→yaw işareti)   (GÖRSEL modda FPV oku hedefin GERÇEK dönüşüyle TERS ise ÇEVİR: −1 ↔ +1)",-1,1,2],
-      ["IBVS_ROLL_CONF_MIN","Öngörü kapısı (kanat ucu güveni)   (yanlış bank sıçraması varsa ARTIR)",0.2,0.9,0.05],
-      ["VIS_EMA","★ Tespit yumuşatma   (bbox titrek→komut titrekse DÜŞÜR; tepki gecikiyorsa ARTIR)",0.05,1.0,0.05],
+    ["KÖPRÜ · CANLI AYAR", [
       ["YAW_MAX","★ Yaw tavanı   (yaw doygunlukta+hedef kenarda ise ARTIR)",0.30,0.90,0.025],
-      ["VIS_CONF_MIN","Tespit güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
-      ["VIS_LOST_TO_GPS_S","Kayıpta bekleme (s)   (0=kayıpta ANINDA GPS'e dön; titreme koruması VIS_STALE_S'te ayrı)",0,5.0,0.25],
-      ["VIS_KOPRU_S","★ Kayıp köprüsü / ölü-hesap (s)   (dedektör deliğinde bbox son hızıyla sanal sürülür; kilit SAYMAZ; 0=kapalı)",0,2.5,0.1],
-    ]],
-    ["GPS YAKLAŞMA · DİKEY (cascade hız kontrolü)", [
+      ["VIS_CONF_MIN","Dedektör güven eşiği   (yanlış tespit çoksa ARTIR; geç görüyorsa DÜŞÜR)",0.10,0.90,0.025],
     ]],
   ];
   let tuneAcik=false;
@@ -752,11 +772,55 @@
     fetch("/api/tune",{method:"POST",headers:{"Content-Type":"application/json"},
       body:JSON.stringify({param:key,value:parseFloat(value)})}).catch(()=>{});
   }
+
+  // ===== GUDUM OZELLIKLERI (bbox_ibvs.Cfg + supervisor.SupCfg) =====
+  // Liste sunucudan gelir; burada YALNIZ render var. Yeni ozellik eklemek icin
+  // kopru/gorsel_ozellikler.py OZELLIKLER listesine tek satir yeter.
+  async function ozKur(){
+    const box=$("ozList"); if(!box) return;
+    let d={}; try{ d=await (await fetch("/api/gudum_ozellikleri")).json(); }catch(e){}
+    if(!d.ok || !d.liste || !d.liste.length){
+      box.innerHTML='<span style="font-size:11px;color:var(--muted)">Yasa modülü yüklü değil'+
+        (d.hata?(' — '+d.hata):'')+'</span>'; return;
+    }
+    box.innerHTML="";
+    for(const o of d.liste){
+      const row=document.createElement("div"); row.className="tune-row";
+      row.title=o.aciklama||"";
+      if(o.tur==="bool"){
+        const ac=o.deger?"AÇIK":"kapalı", rk=o.deger?"var(--ok,#39d353)":"var(--muted)";
+        row.innerHTML='<div class="trlab"><span>'+o.etiket+'</span>'+
+          '<b id="oz_'+o.anahtar+'" style="color:'+rk+'">'+ac+'</b></div>'+
+          '<button class="btn" id="ozb_'+o.anahtar+'" style="width:100%;margin-top:2px;padding:3px">'+
+          (o.deger?"KAPAT":"AÇ")+'</button>';
+        box.appendChild(row);
+        row.querySelector("#ozb_"+o.anahtar).addEventListener("click",()=>{
+          const yeni=($("oz_"+o.anahtar).textContent!=="AÇIK");
+          ozSet(o.anahtar,yeni?1:0,()=>ozKur());
+        });
+      }else{
+        const st=(o.tur==="int")?1:((o.ust-o.alt)/100);
+        row.innerHTML='<div class="trlab"><span>'+o.etiket+'</span>'+
+          '<b id="oz_'+o.anahtar+'">'+o.deger+'</b></div>'+
+          '<input type="range" id="ozs_'+o.anahtar+'" min="'+o.alt+'" max="'+o.ust+
+          '" step="'+st+'" value="'+o.deger+'">';
+        box.appendChild(row);
+        const sl=row.querySelector("#ozs_"+o.anahtar);
+        sl.addEventListener("input",()=>{ $("oz_"+o.anahtar).textContent=sl.value;
+          ozSet(o.anahtar,sl.value); });
+      }
+    }
+  }
+  function ozSet(anahtar,deger,sonra){
+    fetch("/api/gudum_ozellikleri",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({anahtar:anahtar,deger:deger})})
+      .then(()=>{ if(sonra) sonra(); }).catch(()=>{});
+  }
   function tuneTogle(){
     tuneAcik=!tuneAcik;
     $("tunePanel").style.display=tuneAcik?"block":"none";
     $("tuneBtn").classList.toggle("active",tuneAcik);
-    if(tuneAcik) tuneKur();               // her acilista guncel Cfg degerlerini cek
+    if(tuneAcik){ tuneKur(); ozKur(); }   // her acilista guncel degerleri cek
   }
   async function tuneYazdir(){
     let cur={}; try{ cur=await (await fetch("/api/tune")).json(); }catch(e){}
