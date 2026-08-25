@@ -1,5 +1,4 @@
-# ============ Oyun dosyalari ============
-# Cok buyuk + yarisma materyali; repoya KONMAZ (README'deki gibi elle cikartilir).
+# ============ Oyun dosyaları ============
 Drones of War Teknofest/
 
 # ============ Python ============
@@ -7,23 +6,21 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 
-# ============ Sanal ortam (yerelde kalir) ============
+# ============ Sanal ortam ============
 .venv/
 venv/
 env/
 
-# ============ Model yapi ciktilari ============
-# TensorRT engine / ONNX uretildigi GPU + surucu + TRT surumune KILITLIDIR;
-# baska makinede yuklenmez -> her makinede yerelde uretilir. .pt depoda KALIR.
+# ============ Model çıktıları ============
 *.engine
 *.onnx
 
-# ============ Calisma ciktilari ============
+# ============ Çalışma çıktıları ============
 veri/
 *.log
 *.csv
 
-# ============ Editor / OS ============
+# ============ Editör / OS ============
 *.swp
 .vscode/
 .idea/

@@ -1,28 +1,13 @@
-# ============================================================
-#  PYTHON SURUMU: 3.10 - 3.13  (3.14 KULLANMAYIN)
-#  boxmot'un HICBIR surumu 3.14'u desteklemez: en yenisi (22.0.0)
-#  `Requires-Python >=3.10,<3.14` ilan eder, pip'in geri sardigi eski
-#  surumler ise numpy==1.26.4'e sabittir (cp314 wheel'i yok -> kaynak
-#  derleme -> MSVC gerekir). 3.14'te takipci sessizce devre disi kalir
-#  (perception/tracking.py hazir=False -> ham argmax kutusu) -> kareler
-#  arasi kimlik surekliligi ve parazit filtresi KAYBOLUR.
-# ============================================================
+#  PYTHON SÜRÜMÜ: 3.10 - 3.13  (3.14 KULLANMAYIN)
 
-# --- Simulasyon I/O + guduum ---
+# --- Simülasyon I/O ---
 numpy
 
-# --- Kare yakalama (oyun ekrani) ---
+# --- Kare yakalama ---
 mss
 Pillow
 
-# --- Gorsel tespit / takip ---
-# torch: CUDA'li kurulum icin https://pytorch.org (CPU wheel ~16x yavas kosar)
-#
-# ! WINDOWS: PyPI'daki varsayilan `pip install torch` wheel'i CPU-ONLY'dir.
-#   GPU icin torch'u ONCE ayri index'ten kur, SONRA bu dosyayi kur:
-#       pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-#   (RTX 50xx / Blackwell = sm_120 -> en az cu128 gerekir; cu126 ve altinda
-#    "no kernel image is available" alirsin.)
+# --- Görsel tespit / takip ---
 torch
 ultralytics
 opencv-python
