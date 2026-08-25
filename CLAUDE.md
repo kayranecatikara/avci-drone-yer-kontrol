@@ -424,12 +424,24 @@ etmek kapalı çevrimde ulaşılamayan bir noktaya nişan almaktır; eski yasa o
 28 m/s bıraktığı için araç hedefin ~30 m **önüne geçiyordu**. Profil görü
 sınırında sıfırlanınca araç hedefin **kuyruğuna oturur ve orada kalır**.
 
-⛔ **HÜCUM YASASI DEVRE DIŞI** (2026-08-25, kullanıcı kararı). Şu anki amaç
-temas değil, **kamera takibini iyileştirmek**. `ATTACK_RANGE_M`, `K_FWD`,
-`K_I`, `I_MAX` ve `CLOSE_CONTROL` anahtarı `visual_tracking.Cfg` içinde
-**yorum satırı** olarak duruyor (ölçülmüş değerler korundu); `compute()`
-içindeki dal kaldırıldı. Bu **güdüm davranışını değiştirmez** — aktif yasa
-zaten kuyruğa oturuyordu.
+⛔ **HÜCUM (SPIKE) YASASI KALDIRILDI** (2026-08-25, kullanıcı kararı). Şu anki
+amaç temas değil, **kamera takibini iyileştirmek**; spike fazına yarışmada
+10 s'lik görsel güdümden sonra geçilecek ve o faz **henüz yazılmadı**.
+`ATTACK_RANGE_M`, `K_FWD`, `K_I`, `I_MAX` ve `CLOSE_CONTROL` anahtarı önce
+`compute()` dalından, sonra (yorum satırı olarak da) `VisualCfg`'den tamamen
+silindi — kodda hiçbir izi kalmadı, ölçülmüş değerleri git geçmişindedir
+(`47eeddd`, `a3e77f9`). Bu **güdüm davranışını değiştirmedi**: aktif yasa
+zaten kapanma denetimiydi ve kuyruğa oturuyordu.
+
+⛔ **TERMİNAL KADRAJ KAYMASI DA KALDIRILDI** (2026-08-25, aynı gerekçe).
+Dikey referans `CY_REF_FAR`(470) → `CY_REF_NEAR`(540) arasında kutu boyutuyla
+harmanlanıyordu ("yakında merkeze al, nişan al"); bu **spike'a nişan alma**
+davranışıydı. Artık tek sabit referans var: `VisualCfg.CY_REF = 470 px @1080`.
+`CY_BLEND_PX_FAR`/`CY_BLEND_PX_NEAR` ve `nearness` telemetrisi silindi.
+⚠ Bu **güdüm davranışını DEĞİŞTİRİR**: kutu 40 px'ten büyükken (R < ~25 m)
+nişan noktası eskiden merkeze kayıyordu, artık kaymıyor — hedef son metrelerde
+kadrajda daha yukarıda tutulur. Spike fazı yazılırken bu kayma **o faza**
+konmalıdır, görsel takip yasasına değil.
 
 ⛔ **ELENEN EKLEMELER — geri koymayın** (hepsi ölçüldü ve işi kötüleştirdi):
 lead (13.75 m), merkez freni (13.00 m), sakin kamera (16.08 m), tam yaw bandı

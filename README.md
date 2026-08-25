@@ -248,7 +248,7 @@ dikey hız  = −K_CY · (cy − cy_ref)           hedefi kadrajda sabit tut
   `3 m ≤ R ≤ 50 m`. 3 m'nin altındaki kutu dev yanlış-pozitiftir (dedektör
   140 m'de üretebiliyor); 50 m'nin ötesinde tespit %9 — orada GPS fazı sürer.
 
-Ayar sabitleri `control/visual_tracking.py :: Cfg` içindedir. Ölçülmüş
+Ayar sabitleri `control/visual_tracking.py :: VisualCfg` içindedir. Ölçülmüş
 değerlerin gerekçeleri ve elenen denemeler `CLAUDE.md`'de kayıtlıdır —
 **geri eklemeden önce oraya bakın.**
 

@@ -39,7 +39,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from control.common import CM_TO_M, CommandSender, Telemetry
-from control.visual_tracking import Cfg as VisualCfg, VisualTracker
+from control.visual_tracking import VisualCfg, VisualTracker
 from control.gps_approach import GPSCfg, GPSTracker
 from control.main import Cfg as PhaseCfg, PhaseSupervisor
 from control.takeoff import TakeoffLaw
@@ -76,8 +76,7 @@ _event_id = 0
 _last_raw_packet = None
 _last_det = None  # son GECERLI tespit (yalniz gosterge)
 
-_mission = {"phase": "READY", "t0": None, "closest_m": None, "best_station_m": None,
-            "visual_closest_m": None}
+_mission = {"phase": "READY", "t0": None}
 _watch = {"gap": False, "last_packet_t": None,
           "_error_reported": False, "camera_frames": False, "camera_warned": False,
           "camera_frames0": 0}
@@ -93,8 +92,7 @@ def add_event(sv, message):
 
 
 def _mission_reset(phase):
-    _mission.update(phase=phase, t0=time.time(), closest_m=None, best_station_m=None,
-                    visual_closest_m=None)
+    _mission.update(phase=phase, t0=time.time())
     # ⚠ camera.status()["kare"] KUMULATIFTIR (gorevler arasi sifirlanmaz) ->
     #   "ilk kare geldi" olayi bu gorevin TABANINA gore olculur, yoksa ikinci
     #   koşuda daha hicbir kare gelmeden "calisiyor" derdi.
@@ -161,7 +159,7 @@ def _watch_camera():
 
 
 def _watch_mission():
-    """Her tik: kesinti + faz + en iyi metrikler. Kesinti gorev pasifken de izlenir."""
+    """Her tik: GNSS kesintisi + faz metni. Kesinti gorev pasifken de izlenir."""
     now = time.time()
     spt = _watch["last_packet_t"]
     age = (now - spt) if spt is not None else None
@@ -187,23 +185,6 @@ def _watch_mission():
     _mission["phase"] = ("VISUAL" if in_visual
                          else "TAKEOFF" if in_takeoff else brain.phase)
     _watch_camera()
-
-    if not in_visual:
-        # ⚠ Gorsel fazda beyin.step() KOSMAZ -> range_h/station_err DONMUS kalir.
-        #   Donmus degeri "en iyi" diye saymak sahte rekor uretir.
-        if brain.range_h is not None and (_mission["closest_m"] is None
-                                          or brain.range_h < _mission["closest_m"]):
-            _mission["closest_m"] = brain.range_h
-        if brain.station_err is not None and (
-                _mission["best_station_m"] is None
-                or brain.station_err < _mission["best_station_m"]):
-            _mission["best_station_m"] = brain.station_err
-    else:
-        # Gorsel fazin en yakin menzili KUTUDAN gelir (GPS'ten degil).
-        gm = visual.status().get("range_m")
-        if gm is not None and gm > 0 and (_mission["visual_closest_m"] is None
-                                          or gm < _mission["visual_closest_m"]):
-            _mission["visual_closest_m"] = gm
 
 
 # ==========================================================
@@ -340,18 +321,10 @@ def build_telemetry():
     with brain_lock:
         prev_cmd = dict(sender.prev)
         target_p = brain.target_p
-        target_v = brain.target_v
-        target_heading = brain.target_heading
-        station_err = brain.station_err
         range_h = brain.range_h
         diag = brain.status()
         mission_s = dict(_mission)
         watch_gap = bool(_watch["gap"])
-        # ⚠ Filtre teshisi CANLI okunur, `tani`den degil: `tani` yalnizca
-        #   ISTASYON dalinda tazelenir, oysa filtre gorev PASIFKEN de (ve
-        #   gorsel fazda da) beslenip isiniyor. Arayuz o isinmayi gormeli.
-        _f = getattr(brain, "filter", None)
-        filter_diag = _f.diag() if hasattr(_f, "diag") else {}
         sup = supervisor.status()
         gt = visual.status()
         det = dict(_last_det) if _last_det else None
@@ -382,8 +355,8 @@ def build_telemetry():
         },
         # HAM (bozuk) GNSS. ⛔ HIZ ALANI YOK: SDK'nin get_target_speed()'i
         # DAIMA 0 doner (kardes depoda 234587 ornekte dogrulandi), yani panele
-        # kalici bir "0.0 km/h" yazardi. Gercek kestirim filtreden gelir ve
-        # station.target_speed_kmh alaninda gosterilir.
+        # kalici bir "0.0 km/h" yazardi. Gercek hiz kestirimi FILTREDEDIR ve
+        # su an arayuze hic tasinmaz (istasyon paneli kaldirildi).
         "target": {"x": tx, "y": ty, "z": tz},
         "distance_m": distance_m,     # ham GNSS'e gore
         "clean_distance_m": range_h,  # FILTRELENMIS kestirime gore
@@ -393,22 +366,10 @@ def build_telemetry():
             "thr": prev_cmd.get("thr", 0.0), "pitch": prev_cmd.get("pitch", 0.0),
             "roll": prev_cmd.get("roll", 0.0), "yaw": prev_cmd.get("yaw", 0.0),
         },
-        "station": {
-            "err_m": station_err,
-            "err_horiz": diag.get("station_err_horiz"),
-            "err_vert": diag.get("station_err_vert"),
-            "range_m": GPSCfg.STATION_RANGE_M,
-            "alt_ratio": GPSCfg.STATION_ALT_RATIO,
-            "v_cmd": diag.get("v_cmd"),
-            "target_speed_kmh": (((target_v[0] ** 2 + target_v[1] ** 2) ** 0.5)
-                                 * MS_TO_KMH) if target_v else None,
-            "target_heading": target_heading,
-            # CT-EKF kapi teshisi: jammer sicramasi reddedildi mi (gosterge).
-            "filter": filter_diag,
-        },
         # --- GORSEL FAZ (yalniz HIBRIT modda anlamli) ---
+        # ⚠ Faz metni BURADA YOK: tek kaynak "mission.phase" (gozetmenden gelir).
+        #   Ayrica tasinirsa arayuzde iki ayri faz gostergesi olusur.
         "visual": {
-            "phase": sup["phase"],
             "lock": sup["lock"], "lock_need": sup["lock_need"],
             "lock_s": sup["lock_s"], "lock_s_need": sup["lock_s_need"],
             "station_ticks": sup["station_ticks"],
@@ -416,9 +377,6 @@ def build_telemetry():
             "handoff_count": sup["handoff_count"],
             "gnss_stale": sup["gnss_stale"],
             "camera_only_gate": sup["camera_only_gate"],
-            "handoff_range_m": PhaseCfg.HANDOFF_RANGE_M,
-            "handoff_station_err_m": PhaseCfg.HANDOFF_STATION_ERR_M,
-            "lost_s": PhaseCfg.LOST_S,
             "conf": det.get("conf") if det else None,
             "conf_min": VisualCfg.CONF_MIN,
             "range_m": visual_range,  # KUTUDAN (GPS'ten degil)
@@ -427,16 +385,13 @@ def build_telemetry():
             "e_cy": gt.get("e_cy"),
             "bridge": bool(gt.get("bridge")),
             "bridge_frames": gt.get("bridge_frames"),
-            "closest_m": mission_s.get("visual_closest_m"),
         },
         "camera": {
             "frames": cam.get("frames", 0), "fps": cam.get("fps", 0.0),
-            "det_ms": cam.get("det_ms", 0.0), "source": cam.get("source"),
+            "det_ms": cam.get("det_ms", 0.0),
         },
         "mission": {
             "phase": mission_s.get("phase", "READY"),
-            "closest_m": mission_s.get("closest_m"),
-            "best_station_m": mission_s.get("best_station_m"),
             "t0": mission_s.get("t0"),
         },
         "events": event_list,
@@ -539,7 +494,7 @@ class Handler(BaseHTTPRequestHandler):
             data = self._read_json()
             cmd = data.get("cmd", "")
             msg = "Bilinmeyen komut"
-            if cmd in ("start_gps", "start", "start_gnss"):   # eski adlar da kabul
+            if cmd == "start_gps":
                 msg = mission_start(MODE_GPS)
             elif cmd == "start_hybrid":
                 msg = mission_start(MODE_HYBRID)

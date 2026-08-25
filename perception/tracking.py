@@ -12,7 +12,7 @@ Bu sarmalayici tek-hedef sozlesmesi sunar:
 
 Cikti yalnizca O KARDE OLCULEN izleri icerir (coast/tahmin kutusu yayinlanmaz):
 guduum ancak gercek gorsel temasla komut uretsin; tespit deliklerini gorsel faz
-kendi bayatlik esigiyle (control.visual_tracking.Cfg.STALE_S) yonetir.
+kendi bayatlik esigiyle (control.visual_tracking.VisualCfg.STALE_S) yonetir.
 
 DAYANIKLILIK: boxmot kurulu degilse ready=False -> update() ham argmax kutusunu
 dondurur (takip katmani devre disi, sistem calismaya devam eder).

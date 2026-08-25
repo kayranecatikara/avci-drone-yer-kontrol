@@ -31,7 +31,7 @@
   .dot.wait{background:var(--warn);box-shadow:0 0 10px var(--warn)}
   .dot.bad{background:var(--danger);box-shadow:0 0 10px var(--danger)}
 
-  /* ---- Ana 3 panel ---- */
+  /* ---- 3 Ana panel ---- */
   main{display:grid;grid-template-columns:250px 1fr 330px;gap:12px;padding:12px;min-height:0}
   .col{background:var(--panel);border:1px solid var(--border);border-radius:10px;
     display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -39,7 +39,7 @@
     padding:14px 16px;border-bottom:1px solid var(--border);text-transform:uppercase}
   .col .body{padding:14px 16px;overflow:auto;flex:1;min-height:0}
 
-  /* ---- Sol panel: butonlar ---- */
+  /* ---- Sol panel ---- */
   .btn{display:flex;align-items:center;gap:10px;width:100%;padding:12px 14px;
     margin-bottom:10px;background:var(--panel2);border:1px solid var(--border);
     border-radius:8px;color:var(--text);font-size:14px;cursor:pointer;
@@ -54,7 +54,7 @@
   .grpsep{font-size:10px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;
     margin:14px 0 8px;border-top:1px solid var(--border);padding-top:10px}
 
-  /* ---- Sağ panel: telemetri ---- */
+  /* ---- Sağ panel---- */
   .card{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
     padding:12px 14px;margin-bottom:12px}
   .card .title{font-size:12px;letter-spacing:1px;font-weight:600;margin-bottom:10px;
@@ -67,14 +67,14 @@
   .row .k{font-size:12px;color:var(--muted)}
   .row .v{font-size:14px}.row .v small{color:var(--muted);font-size:11px}
   .dist{background:linear-gradient(135deg,#13202b,#161c27);border:1px solid var(--border);
-    border-radius:8px;padding:14px;text-align:center}
+    border-radius:8px;padding:14px;margin-bottom:12px;text-align:center}
   .dist .k{font-size:11px;letter-spacing:1px;color:var(--muted)}
   .dist .v{font-size:30px;color:var(--accent);margin-top:4px}
   .dist .v small{font-size:14px;color:var(--muted)}
 
   .status{font-size:12px;color:var(--muted);padding:8px 16px;border-top:1px solid var(--border)}
 
-  /* ---- Orta panel: kuşbakışı harita (büyük) + olay günlüğü (altta) ---- */
+  /* ---- Orta panel ---- */
   #minimapWrap{position:relative;background:#06080c;border:1px solid var(--border);border-radius:8px;overflow:hidden}
   #minimap{width:100%;height:100%;display:block}
   .mm-legend{position:absolute;left:8px;bottom:6px;font-size:10px;line-height:1.5;color:var(--muted);
@@ -116,48 +116,26 @@
 <body>
 
   <header>
-    <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span>
-        <span id="modeBadge" class="badge idle" style="margin-left:10px">MOD —</span></h1>
+    <h1>🛸 AVCI DRONE <span class="em">— YER KONTROL İSTASYONU</span></h1>
     <div class="conn"><span id="dot" class="dot bad"></span><span id="connText">Bağlantı bekleniyor…</span></div>
   </header>
 
   <main>
-    <!-- SOL: Görev kontrolü — iki mod, tek durdurma -->
+    <!-- SOL -->
     <section class="col">
       <h2>Görev Kontrol</h2>
       <div class="body">
         <button id="startGpsBtn" class="btn start" onclick="missionStart('start_gps')"><span class="ic">🛰️</span> GPS Takibi Başlat</button>
-        <div class="note" style="margin:-4px 0 12px">
-          Kalkış → hedefin <b>kuyruğundaki istasyona</b> oturma ve orada kalma.
-          Kamera hattı hiç çalışmaz (dedektör yüklenmez).
-        </div>
         <button id="startHybridBtn" class="btn start" onclick="missionStart('start_hybrid')"><span class="ic">🎥</span> Hibrit Takip Başlat <small style="color:var(--muted)">(GPS + Kamera)</small></button>
-        <div class="note" style="margin:-4px 0 12px">
-          Aynı GPS fazıyla başlar; <b>devir kapısı</b> açılınca görsel faza geçer
-          ve komut <b>yalnızca kameradan</b> türer. Hedef kaybolursa GPS istasyon
-          tutmaya geri döner.
-        </div>
         <button class="btn stop" onclick="missionStop()"><span class="ic">⏹️</span> Durdur</button>
-        <div class="grpsep">Bu arayüz güdüm üretmez</div>
-        <div class="note">
-          Komut <code>control/</code> paketinden gelir: GPS fazı
-          <code>gps_approach.py</code>, görsel faz <code>visual_tracking.py</code>,
-          faz kapısı <code>main.py</code>. Arayüz yalnızca gösterir ve tetikler.
-        </div>
-        <div class="grpsep">Hibrit modda</div>
-        <div class="note">
-          Kamera hattı oyun <b>ekranını</b> yakalar — oyun penceresi
-          <b>görünür/önde</b> kalmalı, yoksa dedektöre masaüstü pikseli gider.
-          Görsel fazda GPS/GNSS komuta <b>girmez</b>.
-        </div>
       </div>
     </section>
 
-    <!-- ORTA: Kuşbakışı harita (büyük) + olay günlüğü (altta) -->
+    <!-- ORTA -->
     <section class="col">
       <h2>Kuşbakışı Harita</h2>
       <div class="body" style="padding:12px;display:flex;flex-direction:column;gap:10px;overflow:hidden">
-        <!-- ANA ALAN: kuşbakışı mini-harita (avcı / ham-bozuk hedef / temiz hedef) -->
+        <!-- ANA ALAN: Kuşbakışı Mini Harita  -->
         <div id="minimapWrap" style="flex:1;min-height:0">
           <canvas id="minimap"></canvas>
           <div class="mm-legend">
@@ -167,7 +145,7 @@
             <div><i style="background:#ffb454"></i>İstasyon (hedefin kuyruğu)</div>
           </div>
         </div>
-        <!-- ALT: görev olay günlüğü -->
+        <!-- ALT: Görev Olay Günlüğü -->
         <div id="eventLogWrap" style="height:220px;flex:0 0 auto">
           <div class="log-title">📜 Görev Olay Günlüğü</div>
           <div id="eventLog"></div>
@@ -175,11 +153,11 @@
       </div>
     </section>
 
-    <!-- SAĞ: Telemetri -->
+    <!-- SAĞ PANEL -->
     <section class="col">
       <h2>Telemetri</h2>
       <div class="body">
-        <!-- GÖREV DURUMU: faz çipleri (kalkış → istasyon → görsel) -->
+        <!-- GÖREV DURUMU -->
         <div class="card" style="border-color:#2a3550">
           <div class="title" style="color:var(--accent)">🚩 GÖREV DURUMU</div>
           <div class="phase-strip" id="phaseStrip">
@@ -188,42 +166,34 @@
             <span class="phase-chip" data-phase="STATION">İSTASYON</span>
             <span class="phase-chip" data-phase="VISUAL">GÖRSEL</span>
           </div>
-          <div class="row"><span class="k">En yakın mesafe <small>(GPS)</small></span><span class="v mono" id="msClosest">—</span></div>
-          <div class="row"><span class="k">En iyi istasyon hatası</span><span class="v mono" id="msBestStation">—</span></div>
         </div>
 
-        <!-- İSTASYON TUTMA: GPS fazının BİRİNCİL ölçütü -->
-        <div class="card" style="border-color:#2a3550">
-          <div class="title" style="color:var(--accent)">📍 İSTASYON TUTMA</div>
-          <div class="row"><span class="k">İstasyon hatası</span><span class="v mono" id="stErr">—</span></div>
-          <div class="row"><span class="k">— yatay / dikey</span><span class="v mono" id="stErrHV">—</span></div>
-          <div class="row"><span class="k">İstek hızı</span><span class="v mono" id="stVcmd">—</span></div>
-          <div class="row"><span class="k">Hedef hızı (filtre)</span><span class="v mono" id="stTargetSpeed">—</span></div>
-          <div class="row"><span class="k">Hedef yönü</span><span class="v mono" id="stTargetHeading">—</span></div>
-          <div class="row"><span class="k">GNSS kapısı <small>(CT-EKF)</small></span><span class="v mono" id="stFilter">—</span></div>
-          <div class="note" id="stNote">—</div>
-        </div>
-
-        <!-- GÖRSEL TAKİP: yalnız HİBRİT modda anlamlı. Buradaki her sayı
-             KUTU PİKSELİNDEN türer — hedefin GPS'i görsel fazda okunmaz. -->
+        <!-- GÖRSEL TAKİP -->
         <div class="card" id="visualCard" style="border-color:#3a2c50">
-          <div class="title" style="color:#b98cff">🎥 GÖRSEL TAKİP
-            <span id="vsBadge" class="badge idle">KAPALI</span></div>
-          <div class="row"><span class="k">Kilit <small>(ard arda kare)</small></span><span class="v mono" id="vsLock">—</span></div>
-          <div class="row"><span class="k">İstasyona oturma <small>(tik)</small></span><span class="v mono" id="vsStationTicks">—</span></div>
+          <div class="title" style="color:#b98cff">🎥 GÖRSEL TAKİP</div>
+          <div class="row"><span class="k">Kilit </span><span class="v mono" id="vsLock">—</span></div>
+          <div class="row"><span class="k">İstasyona oturma </span><span class="v mono" id="vsStationTicks">—</span></div>
           <div class="row"><span class="k">Tespit güveni</span><span class="v mono" id="vsConf">—</span></div>
-          <div class="row"><span class="k">Menzil <small>(kutudan)</small></span><span class="v mono" id="vsRange">—</span></div>
+          <div class="row"><span class="k">Menzil </span><span class="v mono" id="vsRange">—</span></div>
           <div class="row"><span class="k">Kutu boyutu</span><span class="v mono" id="vsSize">—</span></div>
-          <div class="row"><span class="k">İleri hız <small>(kapanma)</small></span><span class="v mono" id="vsFwdSpeed">—</span></div>
-          <div class="row"><span class="k">Kadraj hatası <small>(e_cy)</small></span><span class="v mono" id="vsEcy">—</span></div>
-          <div class="row"><span class="k">Köprü <small>(ölü-hesap)</small></span><span class="v mono" id="vsBridge">—</span></div>
+          <div class="row"><span class="k">İleri hız </span><span class="v mono" id="vsFwdSpeed">—</span></div>
+          <div class="row"><span class="k">Kadraj hatası </span><span class="v mono" id="vsEcy">—</span></div>
+          <div class="row"><span class="k">Köprü </span><span class="v mono" id="vsBridge">—</span></div>
           <div class="row"><span class="k">Devir sayısı</span><span class="v mono" id="vsHandoff">—</span></div>
-          <div class="row"><span class="k">En yakın <small>(görsel)</small></span><span class="v mono" id="vsClosest">—</span></div>
           <div class="row"><span class="k">Kamera</span><span class="v mono" id="vsCamera">—</span></div>
-          <div class="note" id="vsNote">—</div>
         </div>
 
-        <!-- GÜDÜM KOMUTLARI: oyuna giden 4 çubuk -->
+        <!-- MESAFE + İRTİFA -->
+        <div class="dist">
+          <div class="k">HAM GPS — AVCI MESAFE</div>
+          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
+          <div class="k" style="margin-top:10px">TEMİZ (FİLTRE) — AVCI MESAFE</div>
+          <div class="v mono" style="font-size:20px;color:var(--accent2)"><span id="distClean">—</span> <small>m</small></div>
+          <div class="k" style="margin-top:10px">İRTİFA FARKI (HEDEF − AVCI)</div>
+          <div class="v mono" style="font-size:20px" id="zDelta">—</div>
+        </div>
+
+        <!-- GÜDÜM KOMUTLARI -->
         <div class="card" style="border-color:#26314a">
           <div class="title" style="color:var(--accent2)">🕹️ GÜDÜM KOMUTLARI</div>
           <div class="cmdrow"><span class="cmdlab">Gaz</span><div class="cmdbar"><div class="cmdzero"></div><div class="cmdfill" id="gdThr"></div></div><span class="cmdval" id="gdThrV">—</span></div>
@@ -242,28 +212,10 @@
         </div>
 
         <div class="card target">
-          <div class="title">🎯 HEDEF İHA <small style="color:var(--muted);font-weight:400">(ham GPS)</small></div>
+          <div class="title">🎯 HEDEF İHA</div>
           <div class="row"><span class="k">Konum X</span><span class="v mono" id="tx">—</span></div>
           <div class="row"><span class="k">Konum Y</span><span class="v mono" id="ty">—</span></div>
           <div class="row"><span class="k">Konum Z</span><span class="v mono" id="tz">—</span></div>
-          <div class="note">Hedef hızı burada yok: SDK <code>get_target_speed()</code>
-            daima 0 döner. Gerçek kestirim <b>İSTASYON TUTMA → Hedef hızı (filtre)</b>
-            satırındadır.</div>
-        </div>
-
-        <div class="dist">
-          <div class="k">HAM GPS — AVCI MESAFE</div>
-          <div class="v mono"><span id="dist">—</span> <small>m</small></div>
-          <div class="k" style="margin-top:10px">TEMİZ (FİLTRE) — AVCI MESAFE</div>
-          <div class="v mono" style="font-size:20px;color:var(--accent2)"><span id="distClean">—</span> <small>m</small></div>
-        </div>
-
-        <!-- İRTİFA / Z TEŞHİS (yalnız ham) -->
-        <div class="card" style="border-color:#2a3550;margin-top:12px">
-          <div class="title" style="color:var(--accent2)">🔎 İRTİFA / Z TEŞHİS</div>
-          <div class="row"><span class="k">Drone Z (konum)</span><span class="v mono" id="zDz">—</span></div>
-          <div class="row"><span class="k">Hedef Z (ham)</span><span class="v mono" id="zTz">—</span></div>
-          <div class="row"><span class="k">Δ hedef−drone</span><span class="v mono" id="zDelta">—</span></div>
         </div>
       </div>
     </section>
@@ -293,7 +245,7 @@
   const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
   const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
   const f2 = (x)=> (x==null? "—" : Number(x).toFixed(2));
-  const dash = ()=>["dx","dy","dz","dspd","dyaw","tx","ty","tz","dist","distClean"]
+  const dash = ()=>["dx","dy","dz","dspd","dyaw","tx","ty","tz","dist","distClean","zDelta"]
                     .forEach(id=>$(id).textContent="—");
 
   // ===== Gorev durumu: faz cipleri =====
@@ -303,45 +255,11 @@
     document.querySelectorAll("#phaseStrip .phase-chip").forEach(ch=>{
       ch.classList.toggle("on", ch.dataset.phase===phase);
     });
-    $("msClosest").innerHTML     = ms.closest_m!=null ? f1(ms.closest_m)+' <small>m</small>' : "—";
-    $("msBestStation").innerHTML = ms.best_station_m!=null ? f1(ms.best_station_m)+' <small>m</small>' : "—";
   }
 
-  // Istasyon = hedefin MENZIL m gerisinde, R*ORAN m altinda duran sanal nokta.
-  // GPS fazi bu noktayi tutmaya calisir; "istasyon hatasi" birincil olcuttur.
-  function updateStation(s){
-    s = s || {};
-    $("stErr").innerHTML = s.err_m!=null
-      ? '<span style="color:'+(s.err_m<8?'var(--accent)':s.err_m<25?'var(--warn)':'var(--danger)')+'">'
-        +f1(s.err_m)+' <small>m</small></span>' : "—";
-    $("stErrHV").innerHTML = (s.err_horiz!=null && s.err_vert!=null)
-      ? f1(s.err_horiz)+' / '+f1(s.err_vert)+' <small>m</small>' : "—";
-    $("stVcmd").innerHTML          = s.v_cmd!=null ? f1(s.v_cmd)+' <small>m/s</small>' : "—";
-    $("stTargetSpeed").innerHTML   = s.target_speed_kmh!=null ? f1(s.target_speed_kmh)+' <small>km/h</small>' : "—";
-    $("stTargetHeading").innerHTML = s.target_heading!=null ? f0(s.target_heading)+' <small>°</small>' : "— <small>(yön yok)</small>";
-
-    // GNSS kapisi: Mahalanobis testi. d2 > gate^2 olan olcum jammer sicramasi
-    // sayilip REDDEDILIR; ust uste ret kacis esigine ulasinca P sisirilip
-    // filtre yeni rejime yeniden kilitlenir.
-    const fl = s.filter || {};
-    $("stFilter").innerHTML = !fl.started
-      ? '— <small>(filtre ısınıyor)</small>'
-      : (fl.accept === false
-          ? '<span style="color:var(--warn)">REDDEDİLDİ</span> <small>d²='
-            +f1(fl.d2)+' · ret '+(fl.ret||0)+'/'+(fl.escape_thresh||0)+'</small>'
-          : '<span style="color:var(--accent)">kabul</span> <small>d²='
-            +f1(fl.d2)+' (eşik '+f0((fl.gate||0)*(fl.gate||0))+')</small>');
-    if(s.range_m!=null) $("stNote").textContent =
-      "Hedefin "+f1(s.range_m)+" m gerisi, "+f1(s.range_m*(s.alt_ratio||0))+" m altı "
-      +"(alt oranı "+(s.alt_ratio!=null?s.alt_ratio:"—")+"). Hedef hızı ileri beslenir.";
-  }
-
-  // ===== Mod rozeti + hangi baslatma dugmesi etkin =====
+  // ===== Hangi baslatma dugmesi etkin =====
   function updateMode(t){
     const active = !!t.mission_active, mode = t.mode || "GPS", hybrid = (mode === "HYBRID");
-    const badge = $("modeBadge");
-    badge.className = "badge " + (active ? "on" : "idle");
-    badge.textContent = active ? (hybrid ? "HİBRİT · GPS + KAMERA" : "GPS") : "MOD —";
     $("startGpsBtn").classList.toggle("active", active && !hybrid);
     $("startHybridBtn").classList.toggle("active", active && hybrid);
   }
@@ -352,12 +270,7 @@
   function updateVisual(t){
     const v = t.visual || {}, cam = t.camera || {};
     const hybrid = (t.mode === "HYBRID") && !!t.mission_active;
-    const guiding = hybrid && v.phase === "VISUAL";
     $("visualCard").style.opacity = hybrid ? "1" : ".45";
-
-    const badge = $("vsBadge");
-    badge.className = "badge " + (guiding ? "on" : "idle");
-    badge.textContent = !hybrid ? "KAPALI" : (guiding ? "GÜDÜMDE" : "DEVİR BEKLİYOR");
 
     // Kapi 1: kesintisiz gorsel kanit — SURE **VE** KARE birlikte.
     // Hangisinin bagladigi dedektor hizina gore degisir, o yuzden IKISI de gosterilir.
@@ -384,23 +297,13 @@
       ? '<span style="color:var(--warn)">AKTİF</span> <small>('+(v.bridge_frames||0)+' kare)</small>'
       : (v.bridge_frames ? '— <small>('+v.bridge_frames+' kare kullanıldı)</small>' : "—");
     $("vsHandoff").textContent = (v.handoff_count!=null) ? v.handoff_count : "—";
-    $("vsClosest").innerHTML   = v.closest_m!=null ? f1(v.closest_m)+' <small>m</small>' : "—";
 
     // Kamera hatti sessizce olebilir (torch/model yuklenemezse kare hic gelmez).
     const frames = cam.frames || 0;
     $("vsCamera").innerHTML = !hybrid ? '— <small>(kapalı)</small>'
       : (frames === 0 ? '<span style="color:var(--warn)">kare yok</span> <small>(model yükleniyor?)</small>'
-         : f1(cam.fps)+' <small>FPS · '+f0(cam.det_ms)+' ms<br>'+_esc(cam.source||"?")+'</small>');
+         : f1(cam.fps)+' <small>FPS · '+f0(cam.det_ms)+' ms</small>');
 
-    $("vsNote").textContent = !hybrid
-      ? "Görsel faz yalnızca HİBRİT modda çalışır."
-      : (guiding
-         ? "Komut yalnızca kameradan türüyor (IBVS). Hedef "
-           + f1(v.lost_s) + " s görülmezse GPS'e dönülür."
-         : "Devir için iki koşul birlikte: " + f1(v.lock_s_need) + " s VE "
-           + v.lock_need + " kare kesintisiz kilit, VE "
-           + "istasyon hatası < " + f0(v.handoff_station_err_m) + " m / menzil < "
-           + f0(v.handoff_range_m) + " m.");
   }
 
   function setCmdBar(id, value){
@@ -529,9 +432,7 @@
       $("dist").textContent = f1(t.distance_m);
       $("distClean").textContent = (t.clean_distance_m != null) ? f1(t.clean_distance_m) : "—";
 
-      // Irtifa / Z teshis (yalniz ham)
-      $("zDz").innerHTML   = f1(d.z)+' <small>m</small>';
-      $("zTz").innerHTML   = f1(g.z)+' <small>m</small>';
+      // Irtifa farki (yalniz ham GPS): hedef Z − drone Z
       if(g.z!=null && d.z!=null){
         const delta = g.z - d.z;                       // ham hedef Z − drone Z
         const color = delta>0 ? 'var(--warn)' : 'var(--accent)';
@@ -540,7 +441,6 @@
       } else { $("zDelta").innerHTML = "—"; }
 
       updateMission(t.mission);
-      updateStation(t.station);
       updateVisual(t);
       updateGuidance(t.guidance);
       updateEvents(t.events, t.mission);

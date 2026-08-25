@@ -44,7 +44,7 @@ _DEFAULT_MODEL = "talon_v3.pt"
 MODEL_PATH = os.path.join(_MODEL_DIR,
                           os.environ.get("AVCI_MODEL", _DEFAULT_MODEL))
 
-# Predict esigi: guduum kapisi (control.visual_tracking.Cfg.CONF_MIN) bunun USTUNDE
+# Predict esigi: guduum kapisi (control.visual_tracking.VisualCfg.CONF_MIN) bunun USTUNDE
 # calisir. Taban dusuk tutulur ki takipci (HybridSort/BYTE) zayif kutularla mevcut
 # izi yasatabilsin — dusuk-conf kutu yeni iz ACAMAZ.
 CONF_FLOOR = 0.10
