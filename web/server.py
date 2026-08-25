@@ -423,7 +423,7 @@ def build_telemetry():
             "conf_min": VisualCfg.CONF_MIN,
             "range_m": visual_range,  # KUTUDAN (GPS'ten degil)
             "size_px": gt.get("size_px"),
-            "v_attack": gt.get("v_attack"),
+            "v_fwd": gt.get("v_fwd"),
             "e_cy": gt.get("e_cy"),
             "bridge": bool(gt.get("bridge")),
             "bridge_frames": gt.get("bridge_frames"),

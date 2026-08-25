@@ -401,11 +401,35 @@ ikisi birlikte anlamlıdır.
 `K_YAW=1.0` (tam düzeltme), `YAW_RATE_MAX=120 °/s`. Araç 214 yapabiliyor ama
 hızlı yaw görüntüyü bulandırıp dedektörü kırar — **bilinçli olarak korundu**.
 
-### İleri hız
-Kutu boyutu hatası üzerinden PI; denge kutusu = **temas** kutusu
-(`ATTACK_RANGE_M=1.0`), yani "şu menzilde dur" noktası yoktur → hata hep
-pozitif kalır, hız tavanda oturur, kapanma sabit olur. `V_ATTACK=28 m/s`:
-Talon 17.98 m/s uçuyor, 18 ile kapanma 0.02 m/s = asla yakalayamayız.
+### İleri hız — KAPANMA HIZI DENETİMİ (hücum PI'si DEĞİL)
+
+⚠ **Bu madde 2026-08-25'te düzeltildi**: eskiden burada anlatılan "temas
+kutusuna kadar tam gaz PI"si aslında `CLOSE_CONTROL=False` dalıydı ve **aktif
+değildi**. Aktif yasa baştan beri kapanma denetimiydi; doküman geride kalmıştı.
+O ölü dal artık koddan da kaldırıldı.
+
+```
+v_yer = v_hedef_LOS + v_kapanma(R),   v_kapanma = K_CLOSE · (R − TRAIL_RANGE_M)
+```
+
+Hedefin LOS hızı **kutu büyümesinden** kestirilir (`R = C/kutu`, `Rdot`
+süzülür) — GPS yok, §KATI KURAL temiz. `V_MAX = 28 m/s` bir **hız tavanıdır**,
+hücum hızı değil: Talon 17.98 m/s uçtuğu için 18 ile kapanma 0.02 m/s = asla
+yakalayamayız; 28 → kapanma ~10 m/s.
+
+⭐ **PROFİL `TRAIL_RANGE_M` (3 m) DE SIFIRLANIR, `ATTACK_RANGE_M` (1 m) DE
+DEĞİL.** `RANGE_MIN_M`(3 m) altında `aim_box` kutuyu reddeder, ardından
+`BRIDGE_S`(1 s) + `LOST_S`(2 s) gelir → **3 saniye kör uçuş**. 1 m'ye regüle
+etmek kapalı çevrimde ulaşılamayan bir noktaya nişan almaktır; eski yasa orada
+28 m/s bıraktığı için araç hedefin ~30 m **önüne geçiyordu**. Profil görü
+sınırında sıfırlanınca araç hedefin **kuyruğuna oturur ve orada kalır**.
+
+⛔ **HÜCUM YASASI DEVRE DIŞI** (2026-08-25, kullanıcı kararı). Şu anki amaç
+temas değil, **kamera takibini iyileştirmek**. `ATTACK_RANGE_M`, `K_FWD`,
+`K_I`, `I_MAX` ve `CLOSE_CONTROL` anahtarı `visual_tracking.Cfg` içinde
+**yorum satırı** olarak duruyor (ölçülmüş değerler korundu); `compute()`
+içindeki dal kaldırıldı. Bu **güdüm davranışını değiştirmez** — aktif yasa
+zaten kuyruğa oturuyordu.
 
 ⛔ **ELENEN EKLEMELER — geri koymayın** (hepsi ölçüldü ve işi kötüleştirdi):
 lead (13.75 m), merkez freni (13.00 m), sakin kamera (16.08 m), tam yaw bandı

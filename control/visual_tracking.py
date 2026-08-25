@@ -8,7 +8,8 @@ hedefin 3B konumunu kestirmeye gerek yoktur.
     menzil (R)   = RANGE_C_REF / kutu_boyutu          (benzer ucgenler, p = C/R)
     kerteriz     = piksel + KENDI IMU'muz          (ego-motion telafili)
     yaw          = burnu kerterize cevir
-    ileri hiz    = kutu boyutu hatasi uzerinden PI (temas kutusuna kadar tam)
+    ileri hiz    = KAPANMA HIZI denetimi: v_yer = v_hedef_LOS + K*(R - TRAIL)
+                   -> profil TRAIL_RANGE_M'de sifirlanir, arac kuyruga OTURUR
     dikey hiz    = hedefi KADRAJDA sabit yukseklikte tut (cy -> cy_ref)
 
 ⛔⛔ YARISMA KURALI — YAPISAL GARANTI
@@ -190,19 +191,32 @@ class Cfg:
     #
     # Kayip esigi de SURE cinsindendir (main.Cfg.LOST_S) — ayni gerekce.
 
-    # ============ ILERI HIZ: kutu boyutundan PI ============
-    V_ATTACK = 28.0       # m/s; hucum hizi tavani. Talon 17.98 m/s uctugu
-                          # icin 18 ile kapanma 0.02 m/s = ASLA yakalayamayiz.
-                          # Arac 34.6 yapabiliyor; 28 -> kapanma ~10 m/s.
-                          # (Tavanin tamami kullanilmadi: hiz butcesi dikeyle
-                          #  paylasiliyor.)
+    # ============ ILERI HIZ: yatay hiz tavani ============
+    V_MAX = 28.0          # m/s; YATAY HIZ TAVANI (hucum hizi DEGIL — yalnizca
+                          # kirpma siniri). Talon 17.98 m/s uctugu icin 18 ile
+                          # kapanma 0.02 m/s = asla yakalayamayiz. Arac 34.6
+                          # yapabiliyor; 28 -> kapanma ~10 m/s. (Tavanin tamami
+                          # kullanilmadi: hiz butcesi dikeyle paylasiliyor.)
     V_MIN = 0.0           # m/s; asla geri gitme
-    ATTACK_RANGE_M = 1.0  # m; PI'nin sifir noktasi = TEMAS menzili. "Su
-                          # menzilde dur" noktasi YOK -> hata hep pozitif
-                          # kalir, hiz tavanda oturur, kapanma sabit olur.
-    K_FWD = 0.35          # (m/s)/px @1920; P kazanci   (yalniz CLOSE_CONTROL=False)
-    K_I = 0.04            # (m/s)/(px*s) @1920; I kazanci (yalniz CLOSE_CONTROL=False)
-    I_MAX = 8.0           # m/s; integral doyumu          (yalniz CLOSE_CONTROL=False)
+
+    # ⛔⛔ HUCUM (KAMIKAZE) YASASI DEVRE DISI — 2026-08-25, kullanici karari.
+    #   Su anki amac TEMAS degil, KAMERA TAKIBINI iyilestirmek. Asagidaki dort
+    #   sabit yalnizca eski "temas kutusuna kadar tam gaz" PI'sine aitti ve o
+    #   dal `compute()`ten KALDIRILDI. Olculmus degerler geri donus icin
+    #   duruyor; geri acmak isterseniz `compute()` icindeki ileri hiz dalini da
+    #   geri yazmaniz gerekir (git: bu commit'ten onceki surum).
+    #
+    #   ⚠ AKTIF YASA ZATEN HUCUM DEGIL: kapanma profili `TRAIL_RANGE_M`(3 m)
+    #     de sifirlanir, `ATTACK_RANGE_M`(1 m) de degil -> arac hedefin
+    #     kuyruguna oturur ve orada KALIR. Bu satirlarin kaldirilmasi guduum
+    #     davranisini DEGISTIRMEZ; yalnizca olu dali ve yaniltici adi siler.
+    #
+    # ATTACK_RANGE_M = 1.0  # m; PI'nin sifir noktasi = TEMAS menzili. "Su
+    #                       # menzilde dur" noktasi YOK -> hata hep pozitif
+    #                       # kalir, hiz tavanda oturur, kapanma sabit olur.
+    # K_FWD = 0.35          # (m/s)/px @1920; P kazanci
+    # K_I = 0.04            # (m/s)/(px*s) @1920; I kazanci
+    # I_MAX = 8.0           # m/s; integral doyumu
 
     # ============ KAPANMA HIZI DENETIMI ============
     # ⛔ ESKI YASANIN KUSURU (olculdu, kodun kendisinden turetildi): yukaridaki
@@ -228,7 +242,7 @@ class Cfg:
     # Bu, GPS istasyon yasasindaki ILERI BESLEME ile ayni fikirdir: saf P
     # hareketli hedefi yakalayamaz (bkz. gps_approach basligi). Gorsel fazda
     # hedef hizini GNSS'ten alamayiz, o yuzden KUTU BUYUMESINDEN kestiriyoruz.
-    CLOSE_CONTROL = True  # False -> eski sabit-V_ATTACK yasasi (A/B icin durur)
+    # CLOSE_CONTROL = True  # eski A/B anahtari; TEK YASA kaldi (bkz. yukarisi)
 
     # ⛔ PROFIL `TRAIL_RANGE_M`'DE SIFIRLANIR, `ATTACK_RANGE_M`'DE DEGIL.
     #   Neden: `RANGE_MIN_M`(3 m) altinda `aim_box` kutuyu REDDEDER (dev
@@ -262,7 +276,7 @@ class Cfg:
                           #  muhafazakar (olu zaman 46 ms + yatis 0.211 s +
                           #  ~1 kare tespit gecikmesi profilin icinde kalsin).
     V_CLOSE_MAX = 12.0    # m/s; azami kapanma hizi. 12 -> uzak menzilde
-                          #  v_yer = 18 + 12 = 30 -> zaten V_ATTACK'e kirpilir,
+                          #  v_yer = 18 + 12 = 30 -> zaten V_MAX'e kirpilir,
                           #  yani UZAK MENZILDE DAVRANIS AYNEN KORUNUR.
     R_TAU = 0.20          # s; profilde kullanilan menzilin suzgeci (hafif)
     V_TGT_TAU = 0.5       # s; HEDEF HIZI kestiriminin suzgeci. TARANDI
@@ -368,7 +382,6 @@ class VisualTracker:
 
     def reset(self):
         """Her yeni gorsel faz basinda cagrilir (devir / GPS'e donus sonrasi)."""
-        self.speed_I = 0.0      # ileri hiz PI'sinin integrali (yalniz eski yasa)
         self._bridge = None     # son gecerli kutunun ATALET yonu
         self._bridge_count = 0  # mekanizma sutunu: kac kare koprude uculdu
         # --- kapanma hizi denetimi durumu ---
@@ -415,7 +428,7 @@ class VisualTracker:
             self._R_prev = R
             self._dt_acc = 0.0
             if self._v_tgt_los is None:
-                self._v_tgt_los = clamp(own_los, 0.0, float(p.V_ATTACK))
+                self._v_tgt_los = clamp(own_los, 0.0, float(p.V_MAX))
         elif R != self._R_prev and self._dt_acc > 1e-6:
             self._Rdot = (R - self._R_prev) / self._dt_acc
             self._R_prev = R
@@ -425,17 +438,17 @@ class VisualTracker:
             raw = own_los + self._Rdot
             b = self._dt_acc / (float(p.V_TGT_TAU) + self._dt_acc)
             self._v_tgt_los += b * (raw - self._v_tgt_los)
-            self._v_tgt_los = clamp(self._v_tgt_los, 0.0, float(p.V_ATTACK))
+            self._v_tgt_los = clamp(self._v_tgt_los, 0.0, float(p.V_MAX))
             self._dt_acc = 0.0
 
         # (c) sabit-yavaslama yaklasma profili: GORU SINIRINA (TRAIL_RANGE_M)
         #     sifir goreli hizla varacak sekilde kapanma tavani. Uzak menzilde
-        #     V_CLOSE_MAX baglar ve toplam zaten V_ATTACK'e kirpilir ->
+        #     V_CLOSE_MAX baglar ve toplam zaten V_MAX'e kirpilir ->
         #     UZAK MENZIL DAVRANISI AYNEN KORUNUR.
         gap = max(0.0, self._R_f - float(p.TRAIL_RANGE_M))
         v_close = min(float(p.V_CLOSE_MAX), float(p.K_CLOSE) * gap)
         self._v_cmd = clamp(self._v_tgt_los + v_close,
-                            float(p.V_MIN), float(p.V_ATTACK))
+                            float(p.V_MIN), float(p.V_MAX))
         return self._v_cmd
 
     # ------------------------------------------------------------------
@@ -509,21 +522,13 @@ class VisualTracker:
         yaw_rate = clamp(float(p.KP_YAW_RATE) * wrap_deg(yaw_des - own_yaw),
                          -float(p.YAW_RATE_MAX), float(p.YAW_RATE_MAX))
 
-        # --- 4) ILERI HIZ ---
-        if p.CLOSE_CONTROL:
-            # KAPANMA HIZI DENETIMI: v_yer = v_hedef_LOS + v_kapanma(R).
-            # Hedef hizi KUTU BUYUMESINDEN turetilir (bkz. Cfg.CLOSE_CONTROL).
-            v = self._closing_speed(R, yaw_des, own_vel_ms, dt,
-                                    bridge=bool(det.get("bridge")))
-        else:
-            # ESKI YASA — A/B icin duruyor. Guduum zarfinin tamaminda doygundur
-            # (v = V_ATTACK sabit) ve hedefin hizini hic bilmez.
-            target_size = (RANGE_C_REF * sw) / float(p.ATTACK_RANGE_M)
-            err_px = (target_size - size) / sw  # 1920 referansina normalize
-            self.speed_I = clamp(self.speed_I + float(p.K_I) * err_px * dt,
-                                 -float(p.I_MAX), float(p.I_MAX))
-            v = clamp(float(p.K_FWD) * err_px + self.speed_I,
-                      float(p.V_MIN), float(p.V_ATTACK))
+        # --- 4) ILERI HIZ: KAPANMA HIZI DENETIMI ---
+        # v_yer = v_hedef_LOS + v_kapanma(R); hedef hizi KUTU BUYUMESINDEN
+        # turetilir (GPS YOK). Profil TRAIL_RANGE_M'de sifirlanir -> kuyruga
+        # oturulur. Eski "temas kutusuna kadar tam gaz" PI dali KALDIRILDI
+        # (2026-08-25; bkz. Cfg icindeki HUCUM YASASI DEVRE DISI notu).
+        v = self._closing_speed(R, yaw_des, own_vel_ms, dt,
+                                bridge=bool(det.get("bridge")))
 
         # --- 5) YATAY: hiz nisan (LOS) yonunde ---
         heading = math.radians(yaw_des)
@@ -552,7 +557,7 @@ class VisualTracker:
             "range_m": round(R, 2) if R else -1.0,
             "size_px": round(size, 1),
             "azimuth": round(azimuth, 2), "elevation": round(elevation, 2),
-            "v_attack": round(v, 2), "speed_I": round(self.speed_I, 2),
+            "v_fwd": round(v, 2),
             # mekanizma sutunu: bu ucu sifirsa kapanma denetimi calismiyordur
             "r_dot": round(self._Rdot, 2),
             "v_tgt_los": (round(self._v_tgt_los, 2)

@@ -214,7 +214,7 @@
           <div class="row"><span class="k">Tespit güveni</span><span class="v mono" id="vsConf">—</span></div>
           <div class="row"><span class="k">Menzil <small>(kutudan)</small></span><span class="v mono" id="vsRange">—</span></div>
           <div class="row"><span class="k">Kutu boyutu</span><span class="v mono" id="vsSize">—</span></div>
-          <div class="row"><span class="k">Hücum hızı</span><span class="v mono" id="vsAttackSpeed">—</span></div>
+          <div class="row"><span class="k">İleri hız <small>(kapanma)</small></span><span class="v mono" id="vsFwdSpeed">—</span></div>
           <div class="row"><span class="k">Kadraj hatası <small>(e_cy)</small></span><span class="v mono" id="vsEcy">—</span></div>
           <div class="row"><span class="k">Köprü <small>(ölü-hesap)</small></span><span class="v mono" id="vsBridge">—</span></div>
           <div class="row"><span class="k">Devir sayısı</span><span class="v mono" id="vsHandoff">—</span></div>
@@ -378,7 +378,7 @@
       : '— <small>(geçerli kutu yok)</small>';
     $("vsRange").innerHTML       = v.range_m!=null ? f1(v.range_m)+' <small>m</small>' : "—";
     $("vsSize").innerHTML        = v.size_px!=null ? f0(v.size_px)+' <small>px</small>' : "—";
-    $("vsAttackSpeed").innerHTML = v.v_attack!=null ? f1(v.v_attack)+' <small>m/s</small>' : "—";
+    $("vsFwdSpeed").innerHTML    = v.v_fwd!=null ? f1(v.v_fwd)+' <small>m/s</small>' : "—";
     $("vsEcy").innerHTML         = v.e_cy!=null ? f0(v.e_cy)+' <small>px</small>' : "—";
     $("vsBridge").innerHTML      = v.bridge
       ? '<span style="color:var(--warn)">AKTİF</span> <small>('+(v.bridge_frames||0)+' kare)</small>'
