@@ -8,17 +8,18 @@ web — yer kontrol istasyonu (yerel HTTP arayuzu). Gorevin KOSTURUCUSU burasidi
                   temiz hedef / istasyon noktasi) + telemetri + olay gunlugu
 
 IKI MOD
-    GPS     — yalniz GPS fazi (kalkis + istasyon tutma). Kamera hatti HIC
-              calismaz; dedektor (torch/ultralytics) yuklenmez.
-    HIBRIT  — GPS + KAMERA. Ayni GPS faziyla baslar, devir kapisi acilinca
+    GPS     — kalkis + istasyon tutma. Kamera hatti HIC calismaz; dedektor
+              (torch/ultralytics) yuklenmez.
+    HIBRIT  — GPS + KAMERA. Ayni kalkis/GPS fazlariyla baslar, devir kapisi acilinca
               (control.main.PhaseSupervisor) gorsel faza gecer ve komut
               YALNIZCA kameradan turer. Hedef kaybolursa GPS'e donulur.
 
 Guduum control/ paketinden gelir; bu paket YALNIZ gozlem, baslat/durdur ve
 donguyu kosturma kabugudur — GUDUM YASASI ICERMEZ:
+    kalkis fazi control.takeoff.TakeoffLaw
     GPS fazi    control.gps_approach.GPSTracker
     gorsel faz  control.visual_tracking.VisualTracker
-    faz kapisi  control.main.PhaseSupervisor
+    faz kapisi  control.main.PhaseSupervisor  (KALKIS -> GPS -> GORSEL)
     komut kapisi control.common.CommandSender (TEK cikis)
 
 ⛔ Gorsel fazda GPS/GNSS komuta GIRMEZ (yarisma kurali). Cagrilan tek GPS

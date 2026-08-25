@@ -1,9 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-control/gps_approach.py — GPS FAZI: KALKIS + ISTASYON TUTMA.
+control/gps_approach.py — GPS FAZI: ISTASYON TUTMA.
 
 AMAC: hedefin KUYRUGUNDAKI bir noktaya (istasyon) hizla oturmak ve orada
 KALMAK. Gorsel devir oradan yapilir.
+
+⚠ KALKIS BU MODULDE DEGILDIR. Tirmanma yasasi `control/takeoff.py`, "kalkis
+   bitti mi?" karari `control/main.py :: PhaseSupervisor.takeoff_tick`
+   icindedir. Bu sinif ilk `step()`inde aracin ZATEN HAVADA oldugunu varsayar
+   ve dogrudan yatay komut uretir.
 
 ⛔ YARISMA KURALI: bu modul YALNIZ gorsel temas YOKKEN cagrilir. Gorsel faz
    basladiginda `step()` hic calistirilmaz; yalnizca `clean_target()`
@@ -50,12 +55,6 @@ class GPSCfg:
     # --- DONGU ---
     LOOP_HZ = 50.0
     DT = 1.0 / LOOP_HZ
-
-    # --- KALKIS ---
-    TAKEOFF = True
-    TAKEOFF_ALT_M = 45.0  # m; zemine goreli tirmanma yuksekligi
-    TAKEOFF_VZ = 12.0     # m/s; tirmanma hizi setpoint'i
-    TAKEOFF_TOL_M = 3.0   # m; bu tolerans icinde "kalkis bitti"
 
     # --- ISTASYON (GPS fazinin HEDEFI) ---
     STATION_RANGE_M = 8.0     # m; hedefin kac metre ARKASINDA duracagiz
@@ -193,12 +192,8 @@ class GPSTracker:
         self.target_heading = None       # hedefin gidis yonu (derece) | None
         self._fresh = False
 
-        # kalkis
-        self._takeoff_done = (not self.cfg.TAKEOFF)
-        self._ground_z = None
-
         # gozetmen/arayuz icin durum (guduume GIRMEZ)
-        self.phase = "TAKEOFF" if self.cfg.TAKEOFF else "STATION"
+        self.phase = "STATION"
         self.range_h = None      # m; hedefe 3B menzil (devir kapisi okur)
         self.station_err = None  # m; istasyon hatasi (devir kapisi okur)
         self.diag = {}
@@ -246,29 +241,12 @@ class GPSTracker:
     #  KONTROL ADIMI
     # ================================================================
     def step(self):
+        """Bir tik istasyon tutma. ⚠ Arac ZATEN HAVADA varsayilir: kalkis
+        `control/takeoff.py`de, karari gozetmendedir."""
         dp = self.tlm.position_m()
         _roll, _pitch, yaw = self.tlm.orientation_deg()
         v_meas = self.tlm.velocity_ms()
         hp = self.clean_target()
-
-        if self._ground_z is None:
-            self._ground_z = dp[2]
-        height = dp[2] - self._ground_z
-
-        # ---- KALKIS: yalniz DIKEY tirmanis, yatay komut YOK ----
-        if not self._takeoff_done:
-            self.phase = "TAKEOFF"
-            already_high = (hp is not None and dp[2] >= hp[2] - 20.0)
-            if already_high or height >= (self.cfg.TAKEOFF_ALT_M
-                                          - self.cfg.TAKEOFF_TOL_M):
-                self._takeoff_done = True
-            else:
-                thr, _, _, _ = self.conv.convert((0.0, 0.0, -self.cfg.TAKEOFF_VZ),
-                                                 v_meas, math.radians(yaw), 0.0)
-                self.sender.send(thr, 0.0, 0.0, 0.0)
-                self.diag = {"state": "TAKEOFF", "height": height}
-                return
-        self.phase = "STATION"
 
         # ---- HEDEF YOK: irtifayi tut, savrulma ----
         if hp is None:

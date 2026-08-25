@@ -18,8 +18,8 @@ Arayüzün **iki modu** vardır ve ikisi de aynı `control/` kodunu çağırır:
 
 | mod | ne koşar | kamera |
 |---|---|---|
-| **GPS** | yalnız GPS fazı (kalkış + istasyon tutma) | hiç açılmaz, dedektör yüklenmez |
-| **HİBRİT** | GPS fazı → devir kapısı → görsel faz | açık; komut görsel fazda yalnız kameradan |
+| **GPS** | kalkış → GPS fazı (istasyon tutma) | hiç açılmaz, dedektör yüklenmez |
+| **HİBRİT** | kalkış → GPS fazı → devir kapısı → görsel faz | açık; komut görsel fazda yalnız kameradan |
 
 Arayüz **güdüm yasası içermez ve komut üretmez**: yasayı `control/` üretir,
 arayüz döngüyü koşturur, gösterir ve tetikler. Ortada kuşbakışı harita,
@@ -29,8 +29,8 @@ akmaz — yalnızca tespit sayıları gösterilir).
 
 ⚠ `control/main.py` artık **yalnızca faz geçişidir** (`PhaseSupervisor`): komut
 üretmez, döngü tutmaz, giriş noktası değildir. `python -m control.main`
-**çalışmaz**. Kapı eşikleri (HANDOFF_FRAMES, HANDOFF_STATION_ERR_M, LOST_S...) orada
-tek yerde durur; koşturucu değişse de kapı değişmez.
+**çalışmaz**. Kapı eşikleri (TAKEOFF_ALT_M, HANDOFF_FRAMES, HANDOFF_STATION_ERR_M,
+LOST_S...) orada tek yerde durur; koşturucu değişse de kapı değişmez.
 
 Simülasyon ortamı bir **Unreal Engine oyunudur** (Drones of War). Gazebo,
 MAVLink, ArduPilot SITL gibi katmanlar bu projede **YOKTUR** ve eklenmez;
@@ -44,7 +44,8 @@ Güdüm artık **üç katmandır** ve katmanlar birbirine dokunmadan değiştiri
 
 ```
 YASA (m/s hız setpoint'i)     ->  ÇEVİRİCİ (ölçülmüş zarf)  ->  KOMUT KAPISI
-control/gps_approach.py           common.VelocityToStick        common.CommandSender
+control/takeoff.py                common.VelocityToStick        common.CommandSender
+control/gps_approach.py
 control/visual_tracking.py
 
 hangi yasa koşacak?           ->  control/main.py :: PhaseSupervisor   (KAPI)
@@ -202,7 +203,9 @@ yasası için doğrudan kritiktir: hız **ileri beslenen** terimdir.
 **ilk 4 saniyededir** (t=1.3–4.0 s; ısınma penceresi medyan 23.6 m, max 52 m).
 Isınma sonrası her fazda max 13–17 m, dönüşlerde bile. Kalkış ~4 s sürdüğü ve
 o sırada yatay komut üretilmediği için transient doğal olarak maskeleniyor —
-**kalkışı kısaltırsanız bu maske kalkar.**
+**kalkışı kısaltırsanız bu maske kalkar.** Maskeyi ayakta tutan iki şey
+`control/takeoff.py`'de ve `web/server.py :: _takeoff_step`'tedir: kalkışta
+yatay komut üretilmez, ama filtre yine de her tik beslenir.
 
 ⭐ **`GPSCfg.FILTER_EVERY_TICK = True`** — filter 50 Hz'de beslenir. Filtre paket
 tekrarını kendi tanır (`np.allclose`) ve arada ölü-hesapla ilerler. Yalnız
@@ -213,7 +216,46 @@ sonra 5 s'de yeniden kilitleniyor. `False` = eski davranış.
 
 ---
 
-## FAZ DEVİR KAPISI
+## FAZ AKIŞI VE KAPILAR
+
+```
+KALKIŞ ──(irtifa kapısı)──> GPS (istasyon) ──(devir kapısı)──> GÖRSEL
+                                 ^                                │
+                                 └──────────(kayıp, LOST_S)───────┘
+```
+
+Üç fazın da **yasası ayrı bir modülde**, **kapısı `PhaseSupervisor`'da**dır.
+Koşturucu (`web/server.py`) yalnızca faza göre dağıtım yapar.
+
+### KALKIŞ KAPISI (2026-08-25) — kalkış `gps_approach`'tan çıkarıldı
+Tırmanma yasası **`control/takeoff.py :: TakeoffLaw`** (yalnız dikey hız
+setpoint'i; `TakeoffCfg.VZ = 12 m/s`), "bitti mi?" kararı
+**`PhaseSupervisor.takeoff_tick`**. İki yoldan **biri** yeter:
+1. zemine göreli `TAKEOFF_ALT_M − TAKEOFF_TOL_M` (45 − 3 = 42 m), **ya da**
+2. hedefin irtifasına `TAKEOFF_TARGET_GAP_M` (20 m) kadar yaklaşıldı — hedef
+   alçaktaysa 45 m'ye tırmanmak boşuna yoldur.
+
+⛔ 2. kol hedefin GPS'ini okur ve **meşrudur**: devir kapısının 2. koşuluyla
+aynı gerekçe — faz geçişi kapısıdır, güdüm yasası değildir, görsel temas henüz
+yoktur.
+
+⛔ **KALKIŞTA YATAY KOMUT YOKTUR** ve bu bir tercih değil, filtrenin ısınma
+transientinin **maskesi**dir (bkz. §GNSS FİLTRESİ). `TakeoffLaw.step()`
+pitch/roll/yaw'a sıfır yazar. Buraya yatay komut eklerseniz 23.6 m medyanlı
+transient doğrudan güdüme girer.
+
+⭐ **KALKIŞTA DA `clean_target()` ÇAĞRILIR** (`web/server.py :: _takeoff_step`).
+Atlanması **sessiz** bir bozulma olurdu: filtre kalkış boyunca ısınmazsa
+transient olduğu gibi istasyon fazının ilk saniyelerine — yani yatay komutun
+**üretildiği** yere — taşınır. ⚠ Sıra doğrulandı ama **oyunda değil**: sahte
+drone ile kuru koşuda filtre kapı açılmadan ısınıyor (0.40 s vs 1.50 s). Gerçek
+kalkış süresi ve ısınma canlıda doğrulanmalı (bkz. §CANLI DOĞRULAMA BEKLEYEN).
+
+⚠ `GPSTracker` artık kalkış **durumu tutmaz** (`_takeoff_done`, `_ground_z`
+gitti) ve `step()` aracın **zaten havada** olduğunu varsayar. `GPSTracker.phase`
+yalnızca `STATION` üretir; arayüzün `TAKEOFF` çipini gözetmen sürer.
+
+### DEVİR KAPISI (GPS → GÖRSEL)
 İki koşul **birlikte** (`control/main.py :: PhaseSupervisor`):
 1. **Görsel kilit** — kesintisiz olarak **hem** `VisualCfg.HANDOFF_LOCK_S` (1.0 s)
    **hem** `VisualCfg.HANDOFF_FRAMES` (10) ayrı **karede** güdüme girebilecek kutu.

@@ -7,10 +7,11 @@ Bu sunucu GUDUM URETMEZ ve GUDUM YASASI ICERMEZ. Yalnizca donguyu kosturur:
 komutu `control/` uretir, arayuz gosterir ve baslat/durdur eder.
 
 IKI MOD
-  GPS     — yalniz GPS fazi: kalkis + bozuk GNSS'i temizleyip hedefin
-            kuyrugundaki istasyona oturma (`control.gps_approach.GPSTracker`).
+  GPS     — kalkis (`control.takeoff.TakeoffLaw`) + bozuk GNSS'i temizleyip
+            hedefin kuyrugundaki istasyona oturma
+            (`control.gps_approach.GPSTracker`).
             Kamera hatti HIC calismaz (dedektor yuklenmez).
-  HIBRIT  — GPS + KAMERA. Ayni GPS fazi ile baslar; devir kapisi acilinca
+  HIBRIT  — GPS + KAMERA. Ayni kalkis/GPS fazlari ile baslar; devir kapisi acilinca
             (`control.main.PhaseSupervisor`) gorsel faza gecer ve komut
             YALNIZCA kameradan turer (`control.visual_tracking.VisualTracker`).
             Hedef kaybolursa GPS istasyon tutmaya geri donulur.
@@ -41,6 +42,7 @@ from control.common import CM_TO_M, CommandSender, Telemetry
 from control.visual_tracking import Cfg as VisualCfg, VisualTracker
 from control.gps_approach import GPSCfg, GPSTracker
 from control.main import Cfg as PhaseCfg, PhaseSupervisor
+from control.takeoff import TakeoffLaw
 from perception import camera, detection_state
 from sdk import drone_sdk as drone
 
@@ -59,7 +61,8 @@ MODE_HYBRID = "HYBRID"
 # ==========================================================
 tlm = Telemetry(drone)
 sender = CommandSender(drone)      # oyuna giden TEK komut kapisi
-brain = GPSTracker(drone, sender)  # GPS fazi (kalkis + istasyon)
+takeoff = TakeoffLaw(drone, sender)  # kalkis fazi (yalniz dikey tirmanis)
+brain = GPSTracker(drone, sender)  # GPS fazi (istasyon tutma)
 visual = VisualTracker()           # gorsel faz (IBVS)
 supervisor = PhaseSupervisor()     # YALNIZ faz kapisi — komut uretmez
 brain_lock = threading.Lock()
@@ -75,7 +78,7 @@ _last_det = None  # son GECERLI tespit (yalniz gosterge)
 
 _mission = {"phase": "READY", "t0": None, "closest_m": None, "best_station_m": None,
             "visual_closest_m": None}
-_watch = {"gap": False, "last_packet_t": None, "takeoff_prev": None,
+_watch = {"gap": False, "last_packet_t": None,
           "_error_reported": False, "camera_frames": False, "camera_warned": False,
           "camera_frames0": 0}
 
@@ -95,7 +98,7 @@ def _mission_reset(phase):
     # ⚠ camera.status()["kare"] KUMULATIFTIR (gorevler arasi sifirlanmaz) ->
     #   "ilk kare geldi" olayi bu gorevin TABANINA gore olculur, yoksa ikinci
     #   koşuda daha hicbir kare gelmeden "calisiyor" derdi.
-    _watch.update(takeoff_prev=None, camera_frames=False, camera_warned=False,
+    _watch.update(camera_frames=False, camera_warned=False,
                   camera_frames0=camera.status().get("frames", 0))
 
 
@@ -174,13 +177,15 @@ def _watch_mission():
         _mission["phase"] = "READY"
         return
 
+    # ⚠ Faz metni TEK KAYNAKTAN — gozetmenden — gelir. `brain.phase` artik
+    #   yalnizca "STATION" uretir; kalkis GPSTracker'dan CIKARILDI. Kalkis
+    #   bitisi olayini `_takeoff_step` yazar (kapiyi o an gozetmen acar);
+    #   burada ayrica izlenmez, yoksa iki yerde iki ayri kalkis tanimi olurdu.
     in_visual = (mission_mode == MODE_HYBRID
                  and supervisor.phase == PhaseSupervisor.VISUAL)
-    _mission["phase"] = "VISUAL" if in_visual else brain.phase  # KALKIS | ISTASYON
-    if brain._takeoff_done and _watch["takeoff_prev"] is False:
-        add_event("good", "Kalkis tamamlandi (~%.0f m) — istasyon tutma basladi"
-                  % GPSCfg.TAKEOFF_ALT_M)
-    _watch["takeoff_prev"] = bool(brain._takeoff_done)
+    in_takeoff = (supervisor.phase == PhaseSupervisor.TAKEOFF)
+    _mission["phase"] = ("VISUAL" if in_visual
+                         else "TAKEOFF" if in_takeoff else brain.phase)
     _watch_camera()
 
     if not in_visual:
@@ -202,6 +207,41 @@ def _watch_mission():
 
 
 # ==========================================================
+# KALKIS ADIMI — her iki modda da AYNI (kamera fark etmez)
+# ==========================================================
+def _takeoff_step(t):
+    """KALKIS fazinin bir tiki: dikey tirmanis + kalkis kapisi.
+
+    Bu islev KAPI KARARI VERMEZ ve GUDUM YASASI ICERMEZ: komutu
+    `control.takeoff.TakeoffLaw`, kapiyi `PhaseSupervisor.takeoff_tick` uretir.
+
+    ⭐ FILTRE BURADA DA BESLENIR — atlanmasi SESSIZ bir bozulma olurdu.
+      GNSS filtresinin ISINMA TRANSIENTI ilk ~4 saniyededir (pencere medyani
+      23.6 m, max 52 m) ve kalkis tam o pencereyi kapatir. Kalkista
+      beslemezsek transient oldugu gibi ISTASYON fazinin ilk saniyelerine —
+      yani yatay komutun URETILDIGI yere — tasinir.
+    """
+    global _last_det
+    takeoff.step()
+    brain.clean_target()  # KOMUTA GIRMEZ; filtre isinsin diyedir (bkz. docstring)
+
+    # Kamera yalnizca hibrit modda calisir; GPS modunda tespit okunmaz.
+    det = seq = None
+    if mission_mode == MODE_HYBRID:
+        det, seq = supervisor.read_detection(t)
+        _last_det = det
+
+    # Hedefin irtifasina gore bosluk (kalkis kapisinin (b) kolu); hedef yoksa None.
+    gap = None
+    if brain.target_p is not None:
+        gap = takeoff.alt_z - brain.target_p[2]
+
+    if supervisor.takeoff_tick(t, takeoff.height, target_alt_gap=gap,
+                               det=det, seq=seq, last_raw=brain.last_raw):
+        add_event("good", supervisor.handoff_message())
+
+
+# ==========================================================
 # HIBRIT ADIM — faz kapisi gozetmende, guduum control/ icinde
 # ==========================================================
 def _hybrid_step(t, dt):
@@ -212,9 +252,11 @@ def _hybrid_step(t, dt):
     _last_det = det
 
     # ==================== GPS FAZI ====================
+    # (KALKIS fazi buraya HIC girmez: kontrol dongusu onu `_takeoff_step`e
+    #  yonlendirir, cunku kalkis moddan BAGIMSIZDIR.)
     if supervisor.phase == PhaseSupervisor.GPS:
-        brain.step()  # kalkis + istasyon tutma
-        if supervisor.gps_tick(t, det, seq, takeoff_done=brain._takeoff_done,
+        brain.step()  # istasyon tutma
+        if supervisor.gps_tick(t, det, seq,
                                station_err=brain.station_err, range_h=brain.range_h,
                                last_raw=brain.last_raw):
             visual.reset()  # taze integral + taze kopru
@@ -265,6 +307,8 @@ def control_loop():
             with brain_lock:
                 if not mission_active:
                     brain.clean_target()  # gorev pasifken bile filtre isinsin
+                elif supervisor.phase == PhaseSupervisor.TAKEOFF:
+                    _takeoff_step(t)      # kalkis IKI MODDA da ayni
                 elif mission_mode == MODE_HYBRID:
                     _hybrid_step(t, dt)
                 else:
@@ -406,6 +450,7 @@ def mission_start(mode):
     """Yeni gorev: TUM durum sifirdan. mod: MODE_GPS | MODE_HYBRID."""
     global mission_active, mission_mode
     with brain_lock:
+        takeoff.reset()  # zemin referansi ARM aninda yeniden alinsin
         brain.reset()
         sender.reset()
         visual.reset()

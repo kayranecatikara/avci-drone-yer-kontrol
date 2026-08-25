@@ -5,7 +5,7 @@ control/main.py — FAZ GOZETMENI (yalnizca faz gecisi).
 Bu dosyada GUDUM YOKTUR, DONGU YOKTUR, GIRIS NOKTASI YOKTUR. Ne komut uretir,
 ne komut gonderir, ne de kendi basina calisir. Tek isi su soruyu yanitlamaktir:
 
-    "Su anda GPS fazinda mi, GORSEL fazda mi olmaliyiz?"
+    "Su anda KALKIS fazinda mi, GPS fazinda mi, GORSEL fazda mi olmaliyiz?"
 
 KOSTURUCU `web/server.py`'dir (yer kontrol arayuzu, hibrit mod). Dongu,
 telemetri, kamera hatti ve komut gonderimi orada; KAPILAR burada. Ayirmanin
@@ -14,7 +14,19 @@ degerlerdir ve tek bir yerde durmalidir — kosturucu degisince kapinin da
 degismesi, kardes depoda faz cirpinmasinin kok nedeniydi.
 
 FAZ AKISI
-    GPS (kalkis + istasyon) -> (devir kapisi) -> GORSEL -> (kayip) -> GPS ...
+    KALKIS -> (irtifa kapisi) -> GPS (istasyon) -> (devir kapisi) -> GORSEL
+                                     ^                                  |
+                                     +------------ (kayip) -------------+
+
+KALKIS KAPISI (KALKIS -> GPS). Iki yoldan BIRI yeter:
+  a) zemine goreli TAKEOFF_ALT_M - TAKEOFF_TOL_M yuksekligine ulasildi, YA DA
+  b) hedefin irtifasina TAKEOFF_TARGET_GAP_M'den fazla yaklasildi — hedef
+     alcaktaysa 45 m'ye tirmanmak bosuna yoldur.
+  ⛔ (b) HEDEFIN GPS'INI OKUR ve MESRUDUR: devir kapisinin 2. kosuluyla ayni
+    gerekce — bu bir FAZ GECISI kapisidir, guduum yasasi degildir ve gorsel
+    temas HENUZ YOKTUR.
+  Kalkisin YASASI bu dosyada DEGIL, `control/takeoff.py`'dedir; burasi yalnizca
+  "bitti mi?" der. Esik burada, tirmanma hizi orada durur.
 
 DEVIR KAPISI (GPS -> GORSEL). Iki kosul BIRLIKTE saglanmalidir:
   1) GORSEL KILIT — kesintisiz olarak HEM en az HANDOFF_LOCK_S saniye HEM de
@@ -55,10 +67,18 @@ from perception import detection_state
 
 
 class Cfg:
+    # --- KALKIS KAPISI (yasa: control/takeoff.py :: TakeoffLaw) ---
+    TAKEOFF = True               # False -> kalkis fazi HIC calismaz (arac havada
+                                 #  baslar); gozetmen dogrudan GPS fazinda acilir
+    TAKEOFF_ALT_M = 45.0         # m; zemine goreli hedef tirmanma yuksekligi
+    TAKEOFF_TOL_M = 3.0          # m; bu tolerans icinde "kalkis bitti"
+    TAKEOFF_TARGET_GAP_M = 20.0  # m; hedefin irtifasinin bu kadar altina
+                                 #  gelindiyse tirmanmaya devam etmek gereksiz
+
     # --- DEVIR KAPISI ---
     CAMERA_ONLY_GATE = False     # True -> devir YALNIZ kamera kapisiyla (asagidaki
                                  #  GPS kosulu YAPISAL olarak calismaz)
-    HANDOFF_RANGE_M = 15.0       # m; hedefe GPS menzili (dedektor menzile siddetle
+    HANDOFF_RANGE_M = 20.0       # m; hedefe GPS menzili (dedektor menzile siddetle
                                  #  bagli: ~14 m'de ham tespit %88-97, 40 m'de %50,
                                  #  70 m'de %33 — olculdu, n=2097 istasyon karesi)
     HANDOFF_STATION_ERR_M = 8.0  # m; istasyon hatasi bunun altindaysa "oturdu"
@@ -73,15 +93,19 @@ class Cfg:
 
 
 class PhaseSupervisor:
-    """GPS <-> GORSEL faz kapisi. Durumsuz degildir (sayaclari tutar) ama
+    """KALKIS -> GPS <-> GORSEL faz kapisi. Durumsuz degildir (sayaclari tutar) ama
     KOMUT URETMEZ; kosturucu her tik ilgili fazin `*_tick` islevini cagirir.
 
     Tipik kullanim (kosturucu tarafinda):
 
         det, seq = goz.read_detection(t)
-        if goz.faz == goz.GPS:
+        if goz.faz == goz.TAKEOFF:
+            kalkis.step()                       # control/takeoff.py
+            goz.takeoff_tick(t, kalkis.height, target_alt_gap=...,
+                             det=det, seq=seq, last_raw=...)
+        elif goz.faz == goz.GPS:
             gps.step()
-            if goz.gps_tick(t, det, seq, takeoff_done=..., station_err=...,
+            if goz.gps_tick(t, det, seq, station_err=...,
                            range_h=..., last_raw=...):
                 gorsel.reset()                  # devir oldu
         else:
@@ -91,6 +115,7 @@ class PhaseSupervisor:
                 gorsel.reset()                  # hedef kayip, GPS'e donuldu
     """
 
+    TAKEOFF = "TAKEOFF"
     GPS = "GPS"
     VISUAL = "VISUAL"
 
@@ -101,7 +126,7 @@ class PhaseSupervisor:
 
     def reset(self):
         """Yeni gorev: faz ve TUM sayaclar basa doner."""
-        self.phase = self.GPS
+        self.phase = self.TAKEOFF if self.cfg.TAKEOFF else self.GPS
         self.handoff_count = 0
         self._lock = 0           # ard arda GECERLI kare (tik degil)
         self._lock_since = None  # kesintisiz kanit zincirinin BASLANGIC damgasi
@@ -229,15 +254,53 @@ class PhaseSupervisor:
             self._station_ticks = 0
         return self._station_ticks >= self.cfg.HANDOFF_STATION_TICKS
 
+    def _is_climbed(self, height, target_alt_gap):
+        """Kalkis bitti mi? IKI yoldan BIRI yeter (bkz. modul basligi).
+
+        height         : m, zemine goreli yukseklik (TakeoffLaw.height)
+        target_alt_gap : m, kendi z'miz EKSI hedefin z'si; hedef bilinmiyorsa None.
+                         Negatif = hedefin ALTINDAYIZ.
+
+        ⛔ Ikinci kosul hedefin GPS'ini okur ve MESRUDUR: faz gecisi kapisidir,
+          guduum yasasi degildir — gorsel temas henuz YOKTUR.
+        """
+        if (target_alt_gap is not None
+                and target_alt_gap >= -self.cfg.TAKEOFF_TARGET_GAP_M):
+            return True
+        return height >= (self.cfg.TAKEOFF_ALT_M - self.cfg.TAKEOFF_TOL_M)
+
     # ================================================================
     #  KAPILAR
     # ================================================================
-    def gps_tick(self, t, det, seq, takeoff_done=True, station_err=None, range_h=None,
+    def takeoff_tick(self, t, height, target_alt_gap=None, det=None, seq=None,
+                     last_raw=None):
+        """KALKIS fazinda bir tik islenir. GPS fazina gecildiyse True doner.
+
+        height, target_alt_gap : kalkis kapisinin girdileri (bkz. `_is_climbed`)
+        det, seq               : `read_detection` ciktisi — VARSA verilir.
+
+        ⚠ KANIT ZINCIRI KALKISTA DA ISLER (`_process_frame`). Kalkis, kameranin
+          hedefi ilk gordugu yerdir; zinciri burada baslatmak devir kapisini
+          GPS fazinin ilk saniyelerinde hazir eder. Kapinin erken acilmasi
+          riski YOKTUR: devir ayrica istasyona OTURMAYI sart kosar ve kalkis
+          boyunca istasyon hatasi None'dir (`_is_settled` sayaci sifirlanir).
+        """
+        self._track_packet(last_raw, t)
+        self._process_frame(t, det, seq)
+        if not self._is_climbed(height, target_alt_gap):
+            return False
+
+        self.phase = self.GPS
+        self._message = ("Kalkis tamamlandi (%.0f m) — GPS istasyon tutma basladi."
+                         % height)
+        return True
+
+    def gps_tick(self, t, det, seq, station_err=None, range_h=None,
                  last_raw=None):
         """GPS fazinda bir tik islenir. GORSEL faza gecildiyse True doner.
 
         det, seq  : `read_detection` ciktisi
-        takeoff_done, station_err, range_h, last_raw : GPSTracker'in DURUM alanlari
+        station_err, range_h, last_raw : GPSTracker'in DURUM alanlari
                     (guduum degil gosterge/kapi verisi; gorsel temas YOK)
         """
         self._track_packet(last_raw, t)
@@ -247,7 +310,7 @@ class PhaseSupervisor:
         #   gelir. Kilit sartinin arkasina saklanirsa sayac kilit acilana
         #   kadar hic islemez ve kapi 0.5 s GECIKIR.
         settled = self._is_settled(t, station_err, range_h)
-        if not (takeoff_done and self._is_locked(t) and settled):
+        if not (self._is_locked(t) and settled):
             return False
 
         self.phase = self.VISUAL
@@ -279,7 +342,7 @@ class PhaseSupervisor:
         if lost_s <= self.cfg.LOST_S:
             return False
 
-        self.phase = self.GPS
+        self.phase = self.GPS  # ⚠ KALKIS'a DEGIL: arac zaten havadadir
         self._lock = 0
         self._lock_since = None
         self._station_ticks = 0
