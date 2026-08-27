@@ -12,6 +12,7 @@ venv/
 env/
 
 # ============ Model çıktıları ============
+*.pt
 *.engine
 *.onnx
 
@@ -27,6 +28,11 @@ veri/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# ============ Test kayitlari ============
+# Oyundan alinan ekran kayitlari (yuzlerce MB) — analiz icin tutulur,
+# repoya KONMAZ. Olcum sonuclari CLAUDE.md'ye yazilir, ham video degil.
+test/
 
 # ============ Claude Code ============
 .claude/

@@ -43,6 +43,7 @@ from control.visual_tracking import VisualCfg, VisualTracker
 from control.gps_approach import GPSCfg, GPSTracker
 from control.main import Cfg as PhaseCfg, PhaseSupervisor
 from control.takeoff import TakeoffLaw
+from control.spike import SpikeLaw
 from perception import camera, detection_state
 from sdk import drone_sdk as drone
 
@@ -64,6 +65,7 @@ sender = CommandSender(drone)      # oyuna giden TEK komut kapisi
 takeoff = TakeoffLaw(drone, sender)  # kalkis fazi (yalniz dikey tirmanis)
 brain = GPSTracker(drone, sender)  # GPS fazi (istasyon tutma)
 visual = VisualTracker()           # gorsel faz (IBVS)
+spike = SpikeLaw()                 # carpma fazi (terminal hucum)
 supervisor = PhaseSupervisor()     # YALNIZ faz kapisi — komut uretmez
 brain_lock = threading.Lock()
 mission_active = False
@@ -179,11 +181,23 @@ def _watch_mission():
     #   yalnizca "STATION" uretir; kalkis GPSTracker'dan CIKARILDI. Kalkis
     #   bitisi olayini `_takeoff_step` yazar (kapiyi o an gozetmen acar);
     #   burada ayrica izlenmez, yoksa iki yerde iki ayri kalkis tanimi olurdu.
-    in_visual = (mission_mode == MODE_HYBRID
-                 and supervisor.phase == PhaseSupervisor.VISUAL)
-    in_takeoff = (supervisor.phase == PhaseSupervisor.TAKEOFF)
-    _mission["phase"] = ("VISUAL" if in_visual
-                         else "TAKEOFF" if in_takeoff else brain.phase)
+    #
+    # ⛔ ESKI HALI SESSIZ BIR HATAYDI: "VISUAL degilse ve TAKEOFF degilse
+    #   brain.phase" diyordu; brain.phase HER ZAMAN "STATION" urettigi icin
+    #   gozetmene EKLENEN HER YENI FAZ arayuzde ISTASYON gorunuyordu. CARPMA
+    #   fazi eklenince bu ortaya cikti (kullanici bildirdi: "carpma fazina
+    #   gecince gorev istasyona donmus gozukuyor").
+    #
+    # ⭐ ARTIK TERSINE KURULU: etiket gozetmenin faz adiNDAN gelir; YALNIZ
+    #   GPS fazinda `brain.phase`e devredilir (istasyon etiketini o uretir).
+    #   Boylece yeni bir faz eklendiginde arayuz onu YANLIS gostermez —
+    #   en fazla hic cip yanmaz, ki bu gorunur bir eksikliktir, sessiz degil.
+    if supervisor.phase == PhaseSupervisor.GPS:
+        _mission["phase"] = brain.phase          # "STATION"
+    elif supervisor.phase == PhaseSupervisor.TAKEOFF:
+        _mission["phase"] = "TAKEOFF"
+    else:
+        _mission["phase"] = supervisor.phase     # VISUAL / SPIKE / ...
     _watch_camera()
 
 
@@ -244,6 +258,28 @@ def _hybrid_step(t, dt):
             add_event("good", "[DEVIR] " + supervisor.handoff_message())
         return
 
+    # ==================== CARPMA (SPIKE) FAZI ====================
+    # ⛔ Gorsel fazla AYNI kurallar: komut YALNIZ kameradan. `clean_target()`
+    #   yine cagrilir ama HICBIR KOMUTA GIRMEZ — faz geri donerse filtre
+    #   isinmis olsun diyedir (gorsel fazdaki gerekce ile birebir ayni).
+    if supervisor.phase == PhaseSupervisor.SPIKE:
+        brain.clean_target()
+        own_att = tlm.orientation_deg()
+        own_vel = tlm.velocity_ms()
+        box = visual.box(det, own_att, t)   # KOPRU TEK KAYNAKTAN (visual)
+        if box is not None:
+            thr, pitch, roll, yaw = spike.compute(box, own_att, own_vel, dt)
+            sender.send(thr, pitch, roll, yaw)
+        else:
+            # Gorsel fazdaki DERSIN aynisi: donus sifirlanir, ileri/dikey korunur.
+            prev_cmd = sender.prev
+            sender.send(prev_cmd["thr"], prev_cmd["pitch"], 0.0, 0.0)
+        if supervisor.spike_tick(t, det, seq, box_ok=(box is not None),
+                                 last_raw=brain.last_raw):
+            visual.reset()   # GPS'e donuldu -> kopru ve integral taze baslasin
+            add_event("warn", "[DEVIR] " + supervisor.handoff_message())
+        return
+
     # ==================== GORSEL FAZ ====================
     # Filtreyi taze tut (KOMUTA GIRMEZ; faz geri donerse isinmis olsun).
     brain.clean_target()
@@ -253,7 +289,10 @@ def _hybrid_step(t, dt):
 
     box = visual.box(det, own_att, t)  # taze tespit ya da KOPRU (olu-hesap)
     if box is not None:
-        thr, pitch, roll, yaw = visual.compute(box, own_att, own_vel, dt)
+        # ON-HIZLANMA: carpma gecisine SPIKE_LEAD_S kaldiysa fren KAPATILIR,
+        # boylece ileri kanalda faz gecisinde basamak kalmaz (bkz. Cfg).
+        thr, pitch, roll, yaw = visual.compute(box, own_att, own_vel, dt,
+                                               no_brake=supervisor.spike_armed(t))
         sender.send(thr, pitch, roll, yaw)
     else:
         # ⛔ DERS: burada son komut AYNEN tutuluyordu. Son komut sert bir
@@ -265,8 +304,13 @@ def _hybrid_step(t, dt):
 
     if supervisor.visual_tick(t, det, seq, box_ok=(box is not None),
                               last_raw=brain.last_raw):
-        visual.reset()
-        add_event("warn", "[DEVIR] " + supervisor.handoff_message())
+        if supervisor.phase == PhaseSupervisor.SPIKE:
+            # Taze PI integrali; eski integral I_MAX kadar on yuk demek olurdu.
+            spike.reset()
+            add_event("good", "[DEVIR] " + supervisor.handoff_message())
+        else:
+            visual.reset()
+            add_event("warn", "[DEVIR] " + supervisor.handoff_message())
 
 
 # ==========================================================
@@ -326,7 +370,9 @@ def build_telemetry():
         mission_s = dict(_mission)
         watch_gap = bool(_watch["gap"])
         sup = supervisor.status()
-        gt = visual.status()
+        # Faz hangisiyse GUDUM telemetrisi ondan gelir; arayuz tek alan okur.
+        gt = spike.status() if sup.get("phase") == PhaseSupervisor.SPIKE else visual.status()
+        bridge_frames = visual.status().get("bridge_frames")
         det = dict(_last_det) if _last_det else None
         mode = mission_mode
 
@@ -371,6 +417,7 @@ def build_telemetry():
         #   Ayrica tasinirsa arayuzde iki ayri faz gostergesi olusur.
         "visual": {
             "lock": sup["lock"], "lock_need": sup["lock_need"],
+            "framed": sup["framed"],
             "lock_s": sup["lock_s"], "lock_s_need": sup["lock_s_need"],
             "station_ticks": sup["station_ticks"],
             "station_ticks_need": sup["station_ticks_need"],
@@ -384,7 +431,9 @@ def build_telemetry():
             "v_fwd": gt.get("v_fwd"),
             "e_cy": gt.get("e_cy"),
             "bridge": bool(gt.get("bridge")),
-            "bridge_frames": gt.get("bridge_frames"),
+            # ⚠ Kopru TEK KAYNAKTAN (`visual.box`) — carpma fazinda da o kosar,
+            #   dolayisiyla sayac `spike.status()`te DEGIL, orada durur.
+            "bridge_frames": gt.get("bridge_frames", bridge_frames),
         },
         "camera": {
             "frames": cam.get("frames", 0), "fps": cam.get("fps", 0.0),
@@ -410,7 +459,8 @@ def mission_start(mode):
         sender.reset()
         visual.reset()
         supervisor.reset()
-        detection_state.reset()  # yeni gorev bayat kutuyla baslamasin
+        detection_state.reset()  # yeni gorev bayat KUTUYLA baslamasin
+        camera.reset()           # ... ve bayat KAREYLE de baslamasin
         _mission_reset("TAKEOFF")
         # ⚠ mod ve aktif bayragi AYNI kilit altinda kurulur: kamera thread'i
         #   ikisine BIRLIKTE bakar (camera_active), kontrol dongusu de oyle.

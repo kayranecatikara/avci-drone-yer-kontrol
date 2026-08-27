@@ -57,7 +57,7 @@ import time
 import numpy as np
 
 from perception import detection_state
-from perception.detector import MODEL_PATH, TargetDetector
+from perception.detector import TargetDetector
 from perception.tracking import Tracker
 
 FP16 = os.environ.get("AVCI_FP16", "1").lower() not in ("0", "off", "false")
@@ -87,6 +87,21 @@ def _take_frame():
     """(kare, seq, yakalama_zamani) — tuketicinin tek atislik goruntusu."""
     with _latest_lock:
         return _latest["frame"], _latest["seq"], _latest["t"]
+
+
+def reset():
+    """Yeni gorev: URETICININ elindeki son kareyi DUSUR.
+
+    ⛔ `_latest` gorevler arasi YASAR. Tuketici yeni gorevde `last_seq = 0`
+       ile basladigi icin oradaki ONCEKI GOREVDEN kalma kareyi "yeni" sanip
+       isler ve `detection_state`e o ANIN zaman damgasiyla yayinlar — yani
+       kare bayat oldugu halde TAZE gorunur ve `is_stale()` onu YAKALAYAMAZ.
+       Kare burada dusurulurse tuketici gercekten yeni bir kare gelene kadar
+       bekler. (`DeviceSource.drain()` URETICI tarafini temizler; bu ise
+       uretici ile tuketici ARASINDAKI tek kareyi temizler.)
+    """
+    with _latest_lock:
+        _latest["frame"] = None
 
 
 def _bgra_to_bgr(bgra):
@@ -375,22 +390,39 @@ def loop(active):
     tracker = Tracker()
     last_seq = 0
     _t_prev = None
+    was_active = False
     while True:
         if not active():
-            if tracker.tracks:
-                tracker.reset()  # yeni gorev bayat ID ile baslamasin
+            # ⛔ SIFIRLAMA KENAR TETIKLI, KOSULLU DEGIL. Eskiden kosul
+            #   `if tracker.tracks:` idi: gorev SON karesinde hedef yoksa
+            #   `tracks` bos olur, sifirlama ATLANIR ve HybridSort ornegi
+            #   (ic Kalman izleri + kare sayaci) BIR SONRAKI GOREVE tasinir.
+            #   Takipci o izleri max_age kadar ileri tasidigi icin yeni gorev
+            #   HAYALET kutuyla acilir — ve bunu ancak sunucuyu yeniden
+            #   baslatmak temizlerdi. Simdi aktif->pasif kenarinda KOSULSUZ
+            #   sifirlanir (ornek yeniden kurulur), pasifken bir daha degil.
+            if was_active:
+                tracker.reset()
+                was_active = False
             last_seq = 0
             _t_prev = None
             time.sleep(0.05)
             continue
+        was_active = True
 
         if detector is None:  # LAZY: ilk gorev tikinde yukle
             detector = TargetDetector(half=(True if FP16 else False))
             if detector.ready:
-                # Model adi SABIT DEGIL (AVCI_MODEL ile degisir) -> yolu yazdir.
-                print("[KAMERA] %s yuklendi (device=%s, half=%s, imgsz=%d). Siniflar: %s"
-                      % (os.path.basename(MODEL_PATH), detector.device,
-                         detector.half, detector.imgsz, detector.names))
+                # Model adi SABIT DEGIL (AVCI_MODEL / .engine ile degisir) ->
+                # FIILEN yuklenen yolu yazdir, kaynak sabiti degil.
+                print("[KAMERA] %s yuklendi (device=%s, half=%s, imgsz=%d%s). Siniflar: %s"
+                      % (os.path.basename(detector.model_path), detector.device,
+                         detector.half, detector.imgsz,
+                         ", TensorRT" if detector.engine else "", detector.names))
+                if detector.fallback:
+                    # Motor acilmadi. Sistem calisir ama YAVAS kosar -> sessiz kalma.
+                    print("[KAMERA] TensorRT motoru ACILMADI (%s) -> .pt ile devam."
+                          % detector.fallback)
                 if not tracker.ready:
                     print("[KAMERA] takipci YUKLENEMEDI (%s) -> ham tespit kullanilir."
                           % tracker.error)
@@ -411,10 +443,22 @@ def loop(active):
         last_seq = seq
 
         t0 = time.perf_counter()
+        fails0 = detector.fails
         dets = detector.detect_all(frame)
+        if detector.fails > fails0 and detector.fails <= 1:
+            # detect_all hatayi yutup BOS liste doner; bos liste "hedef yok"
+            # ile ayni gorunur. Ilk hatayi bir kez yaz -> sessiz bozulma olmasin.
+            print("[KAMERA] tespit HATASI (%s) -> kutu uretilmiyor."
+                  % detector.last_error)
         det = tracker.update(dets, frame)
         t1 = time.perf_counter()
 
+        if not active():
+            # Gorev bu cikarimin ortasinda (~14 ms) DURDU. Sonucu yayinlamak,
+            # bir sonraki gorevin ilk karesini ONCEKI gorevin kutusuyla
+            # acmak demektir; `mission_start`in `detection_state.reset()`i de
+            # bunu kacirir, cunku yayin ondan SONRA gelir.
+            continue
         detection_state.publish(det, frame_t=t1)
         _state["frames"] += 1
         _state["det_ms"] = (t1 - t0) * 1000.0

@@ -5,8 +5,11 @@ perception/detector.py — YOLO tabanli hedef (Talon) tespiti.
     TargetDetector(model_yolu).detect_all(bgr) -> [{cx,cy,w,h,conf,cls,W,H,t}, ...]
                                                    (conf'a gore AZALAN sirali)
 
-Model: perception/models/talon_v3.pt (task=detect, tek sinif: talon).
-Ortam degiskeniyle degistirilebilir: AVCI_MODEL=... / AVCI_IMGSZ=...
+Model: perception/models/talon_v3 (task=detect, tek sinif: talon).
+AGIRLIK SECIMI (bkz. _resolve_model): ayni agirligin TensorRT motoru
+(talon_v3.engine) varsa ONCELIKLIDIR, yoksa .pt kosar. Motor
+`python -m scripts.export_engine` ile URETILIR, burada uretilmez.
+Ortam degiskenleri: AVCI_MODEL=... / AVCI_IMGSZ=... / AVCI_ENGINE=0
 
 DAYANIKLILIK: ultralytics/torch kurulu degilse veya model yuklenemezse sessizce
 `hazir=False` olur ve tespit hep bos doner -> sistem GPS fazinda calismaya DEVAM
@@ -19,6 +22,8 @@ PERVANE MASKESI: avcinin KENDI pervanesi arada bir "ucak" olarak algilaniyor ve
 kadrajda SABIT bir bolgede duruyor. Merkezi maskede kalan kutular listeye hic
 girmez (secim ONCESI elenir) -> kendi pervanemiz hedef sanilmaz.
 """
+import ast
+import json
 import os
 import time
 
@@ -26,10 +31,10 @@ import time
 # Canli FPV'de maske pervaneyi tam ortmuyorsa bu listeyi duzenle.
 PROP_MASK = [(0.80, 0.55, 1.0, 0.95)]
 
-_MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
+MODELS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 
-# ⭐ AKTIF MODEL: talon_v3.pt (2026-08-15, 60 epoch, ultralytics 8.4.83).
-#   Onceki best.pt (2026-07-07, 200 epoch, 8.4.90) DEPODA DURUYOR ve tek
+# ⭐ AKTIF MODEL: talon_v3 (2026-08-15, 60 epoch, ultralytics 8.4.83).
+#   Onceki best (2026-07-07, 200 epoch, 8.4.90) DEPODA DURUYOR ve tek
 #   degisken ile geri alinabilir:  AVCI_MODEL=best.pt
 #   Ikisi de yolo11s tabanli, task=detect, TEK sinif ("talon") -> sinif
 #   indisleri ayni; asagidaki hicbir mantik degismez.
@@ -41,8 +46,6 @@ _MODEL_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "models")
 #      Farkli sikilikta kutulayan bir model tum menzilleri kaydirir ve
 #      aim_box'nun 3-50 m kapisi yanlis yerde acilir/kapanir.
 _DEFAULT_MODEL = "talon_v3.pt"
-MODEL_PATH = os.path.join(_MODEL_DIR,
-                          os.environ.get("AVCI_MODEL", _DEFAULT_MODEL))
 
 # Predict esigi: guduum kapisi (control.visual_tracking.VisualCfg.CONF_MIN) bunun USTUNDE
 # calisir. Taban dusuk tutulur ki takipci (HybridSort/BYTE) zayif kutularla mevcut
@@ -51,15 +54,92 @@ CONF_FLOOR = 0.10
 
 # ⛔ EGITIM COZUNURLUGU — MODELE BAGLIDIR, sabit degildir.
 #   Checkpoint metadata'sindan OKUNDU (train_args.imgsz):
-#       talon_v3.pt -> 960      <- AKTIF
-#       best.pt     -> 640
+#       talon_v3 -> 960      <- AKTIF
+#       best     -> 640
 #   Modeli degistirip burayi unutmak SESSIZ bir bozulmadir: cikarim egitimden
 #   farkli olcekte kosar, uzak/kucuk hedef once kaybolur (kutu hic cikmaz),
 #   sonra gorsel faz hic acilmaz. Bu yuzden varsayilan MODELDEN turetilir.
-_IMGSZ_BY_MODEL = {"talon_v3.pt": 960, "best.pt": 640}
-IMGSZ = int(os.environ.get(
-    "AVCI_IMGSZ",
-    _IMGSZ_BY_MODEL.get(os.path.basename(MODEL_PATH), 640)))
+#
+# ⭐ TABLO UZANTISIZ ANAHTARLANIR. Ayni agirligin .pt ve .engine surumu AYNI
+#   olcekte kosar; uzantiyla anahtarlansaydi motor tabloda bulunamaz, sessizce
+#   640'a duser ve uzak hedef kaybolurdu.
+_IMGSZ_BY_MODEL = {"talon_v3": 960, "best": 640}
+
+
+def imgsz_for_model(path):
+    """Agirligin egitim cozunurlugu — uzantidan (.pt / .engine) bagimsiz."""
+    return _IMGSZ_BY_MODEL.get(os.path.splitext(os.path.basename(path))[0], 640)
+
+
+def engine_imgsz(path):
+    """.engine basligina GOMULU imgsz — TensorRT'nin gercekten kostugu olcek.
+
+    Ultralytics motorun onune 4 bayt uzunluk + JSON basligi yazar. Bu okuma
+    SALT stdlib'dir: torch/tensorrt import EDILMEZ, modul yukleme maliyeti
+    degismez (dedektor tembel yuklenir ama bu dosya erken import edilir).
+    Baslik yoksa/bozuksa None doner.
+    """
+    try:
+        with open(path, "rb") as f:
+            n = int.from_bytes(f.read(4), "little")
+            if not (0 < n <= f.seek(0, 2) - 4):
+                return None
+            f.seek(4)
+            meta = json.loads(f.read(n))
+        sz = meta.get("imgsz")
+        if isinstance(sz, str):
+            sz = ast.literal_eval(sz)
+        if isinstance(sz, (list, tuple)):
+            return int(max(sz))
+        return int(sz) if sz else None
+    except Exception:
+        return None
+
+
+# ⭐ TENSORRT MOTORU VARSA VARSAYILAN ODUR (2026-08-27).
+#   Ayni agirligin .engine surumu perception/models/ icinde duruyorsa dedektor
+#   onu yukler, yoksa .pt'ye duser. Motor burada URETILMEZ, yalnizca KULLANILIR:
+#       python -m scripts.export_engine
+#   Kapatmak icin:  AVCI_ENGINE=0
+#
+# ⛔ MOTOR TASINMAZ ve REPOYA KONMAZ (.gitignore: *.engine). Karta, surucuye
+#   ve TensorRT surumune derlenir; baska makinede acilmaz. Acilmazsa
+#   TargetDetector SESSIZCE degil, GEREKCESIYLE .pt'ye doner (self.fallback).
+USE_ENGINE = os.environ.get("AVCI_ENGINE", "1").lower() not in ("0", "off", "false")
+
+
+def _resolve_model():
+    """(yol, gerekce) — hangi agirlik yuklenecek?"""
+    name = os.environ.get("AVCI_MODEL")
+    if name:  # elle secim her seyi ezer: uzantisi neyse o kosar
+        return os.path.join(MODELS_DIR, name), "AVCI_MODEL"
+    pt = os.path.join(MODELS_DIR, _DEFAULT_MODEL)
+    engine = os.path.splitext(pt)[0] + ".engine"
+    if not USE_ENGINE:
+        return pt, "AVCI_ENGINE=0"
+    if not os.path.isfile(engine):
+        return pt, "motor yok"
+    # ⚠ AVCI_IMGSZ MOTORU EZEMEZ. Static motorun girdi sekli derlenirken
+    #   sabitlendi; baska olcek TensorRT arka ucunda assert atar ve detect_all
+    #   SESSIZCE bos doner. Cakisirsa .pt'ye duseriz — boylece uzak menzil
+    #   taramasi (AVCI_IMGSZ=1920) bir sey bozmadan calismaya devam eder.
+    want = os.environ.get("AVCI_IMGSZ")
+    have = engine_imgsz(engine)
+    try:
+        clash = bool(want) and have is not None and int(want) != have
+    except ValueError:
+        clash = False
+    if clash:
+        return pt, "AVCI_IMGSZ=%s motorun %d olcusuyle cakisti" % (want, have)
+    return engine, "TensorRT motoru"
+
+
+MODEL_PATH, MODEL_REASON = _resolve_model()
+
+# Motorun olcegi tablodan degil BASLIKTAN okunur: motor hangi olcekte
+# derlendiyse hat o olcekte kosmak ZORUNDADIR (aksi halde assert -> bos liste).
+_ENGINE_SZ = engine_imgsz(MODEL_PATH) if MODEL_PATH.endswith(".engine") else None
+IMGSZ = _ENGINE_SZ or int(os.environ.get("AVCI_IMGSZ") or imgsz_for_model(MODEL_PATH))
 
 
 class TargetDetector:
@@ -73,10 +153,14 @@ class TargetDetector:
         self.imgsz = int(imgsz)
         self.device = device
         self.half = half  # FP16 (None -> cuda'da otomatik AC, cpu'da kapali)
+        self.model_path = model_path
+        self.engine = False       # TensorRT motoru mu kosuyor?
+        self.fallback = None      # motordan .pt'ye dusuldiyse GEREKCESI
+        self.fails = 0            # detect_all icinde yutulan hata sayisi
+        self.last_error = None
         self._fp16_kwargs = {}
         self.error = None
         try:
-            from ultralytics import YOLO
             if self.device is None:
                 try:
                     import torch
@@ -85,17 +169,60 @@ class TargetDetector:
                     self.device = "cpu"
             if self.half is None:
                 self.half = (self.device == "cuda")
-            self.model = YOLO(model_path)
-            self.names = dict(getattr(self.model, "names", {}) or {})
-            self.ready = True
-            self._warmup()
+            self._load(model_path)
         except Exception as e:
             self.ready = False
             self.error = repr(e)
 
-    def _warmup(self):
+    def _load(self, path):
+        """Agirligi yukle; TensorRT motoru acilmazsa GEREKCESIYLE .pt'ye don.
+
+        ⛔ SESSIZ DUSUS YOK. Motor karta/surucuye/TensorRT surumune derlenir,
+           yani makine degisince ACILMAZ. O anda dedektoru tamamen kaybetmek
+           (gorsel faz hic acilmaz) .pt ile devam etmekten KOTUDUR — ama
+           dustugumuz `self.fallback`'e yazilir ve camera.py ekrana basar.
+        """
+        from ultralytics import YOLO
+
+        engine = str(path).endswith(".engine")
+        if engine and self.device != "cuda":
+            # Motor yalnizca GPU'da kosar; CPU'da deserialize bile edilmez.
+            return self._load_pt(path, "CUDA yok")
+        try:
+            self.model = YOLO(path)
+            self.model_path = path
+            self.engine = engine
+            # ⚠ MOTORDA KESINLIK DERLENIRKEN GOMULDU. predict'e half/quantize
+            #   gecmek anlamsizdir: TensorRT arka ucu girdi tipini motorun
+            #   baglantilarindan okur, arg'i yok sayar (bazi surumlerde hata verir).
+            if engine:
+                self.half = False
+            self._warmup(strict=engine)
+            self.names = dict(getattr(self.model, "names", {}) or {})
+            self.ready = True
+        except Exception as e:
+            if engine:
+                return self._load_pt(path, repr(e))
+            raise
+
+    def _load_pt(self, engine_path, why):
+        """Motor kullanilamadi -> ayni agirligin .pt surumune don."""
+        self.fallback = why
+        self.engine = False
+        self.half = (self.device == "cuda")
+        pt = os.path.splitext(engine_path)[0] + ".pt"
+        # Olcu MOTORUN basligindan degil, artik AGIRLIGIN tablosundan gelir.
+        self.imgsz = int(os.environ.get("AVCI_IMGSZ") or imgsz_for_model(pt))
+        self._load(pt)
+
+    def _warmup(self, strict=False):
         """Ilk predict yavastir -> onceden isit. Ayni anda FP16 API'sini sec:
-        yeni ultralytics `quantize="fp16"`, eskisinde bu arg YOK -> `half=True`."""
+        yeni ultralytics `quantize="fp16"`, eskisinde bu arg YOK -> `half=True`.
+
+        strict=True (TensorRT motoru): hata YUTULMAZ. Motorun girdi sekli
+        derlenirken sabitlendi; yanlis olcekte arka uc assert atar ve o hata
+        yutulursa detect_all omur boyu BOS liste doner — sessiz bozulma.
+        """
         try:
             import numpy as np
             blank = np.zeros((self.imgsz, self.imgsz, 3), dtype="uint8")
@@ -112,7 +239,8 @@ class TargetDetector:
             self.model.predict(blank, imgsz=self.imgsz, conf=self.conf,
                                device=self.device, verbose=False)
         except Exception:
-            pass
+            if strict:
+                raise
 
     @staticmethod
     def _in_mask(cxn, cyn, mask):
@@ -136,7 +264,10 @@ class TargetDetector:
             res = self.model.predict(frame, imgsz=self.imgsz, conf=self.conf,
                                      device=self.device, verbose=False,
                                      **self._fp16_kwargs)[0]
-        except Exception:
+        except Exception as e:
+            # Bos liste "hedef yok" ile ayni gorunur -> hatayi en azindan SAY.
+            self.fails += 1
+            self.last_error = repr(e)
             return []
         boxes = getattr(res, "boxes", None)
         if boxes is None or len(boxes) == 0:

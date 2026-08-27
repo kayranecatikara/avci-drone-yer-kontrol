@@ -165,6 +165,7 @@
             <span class="phase-chip" data-phase="TAKEOFF">KALKIŞ</span>
             <span class="phase-chip" data-phase="STATION">İSTASYON</span>
             <span class="phase-chip" data-phase="VISUAL">GÖRSEL</span>
+            <span class="phase-chip" data-phase="SPIKE">ÇARPMA</span>
           </div>
         </div>
 
@@ -276,10 +277,15 @@
     // Hangisinin bagladigi dedektor hizina gore degisir, o yuzden IKISI de gosterilir.
     const lockFull = (v.lock != null && v.lock >= v.lock_need
                       && v.lock_s != null && v.lock_s >= v.lock_s_need);
+    // Kanit zinciri KADRAJ PENCERESI disinda kirilir: devir, gorsel yasanin
+    // ilk komutunu doyuracagi bir noktada yapilmaz. Sebebi yazmazsak "kapi
+    // neden acilmiyor?" sorusu gorunmez kalir.
+    const unframed = (v.framed === false && (v.lock || 0) === 0);
     $("vsLock").innerHTML = (v.lock != null)
       ? '<span style="color:'+(lockFull?'var(--accent)':'var(--text)')+'">'
         +f1(v.lock_s||0)+' / '+f1(v.lock_s_need)+' s</span>'
-        +' <small>('+v.lock+' / '+v.lock_need+' kare)</small>' : "—";
+        +' <small>('+v.lock+' / '+v.lock_need+' kare)</small>'
+        +(unframed ? ' <small style="color:var(--warn)">kadraj dışı</small>' : '') : "—";
 
     // Kapi 2: istasyona oturma. GNSS bayatsa bu kosul DUSER (menzil bilinemez).
     $("vsStationTicks").innerHTML = v.camera_only_gate ? '— <small>(kamera-tek kapı)</small>'

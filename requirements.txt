@@ -12,3 +12,14 @@ torch
 ultralytics
 opencv-python
 boxmot
+
+# --- TensorRT (OPSİYONEL, yalnız NVIDIA GPU) ---
+#   Çıkarımı hızlandırır; kurulu değilse sistem .pt ile aynen çalışır.
+#   BURAYA SABİTLENMEZ: paket adı CUDA sürümüne bağlıdır (torch'unki ile
+#   AYNI ana sürüm olmalı) ve indirme birkaç GB'dir.
+#       python -c "import torch; print(torch.version.cuda)"   -> 13.x ise:
+#       pip install onnx onnxslim "tensorrt-cu13==11.1.0.106"
+#       python -m scripts.export_engine --fp32
+#   SÜRÜM PİNİ TESADÜF DEĞİL: Windows Smart App Control en yeni sürümün
+#   (11.2.1.2) imzasız Python bağlayıcısını engelliyor. Ayrıntı: CLAUDE.md.
+#   Üretilen .engine SU KARTA/SÜRÜCÜYE derlenir, repoya konmaz (.gitignore).

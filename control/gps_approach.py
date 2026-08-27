@@ -125,9 +125,60 @@ class GPSTracker:
         self.filter = None
         self.reset()
 
-    def reset(self):
-        """Yeni görev için durumu sıfırlar."""
-        self.filter = GNSSFilterV2(lead_s=self.cfg.DELAY_S)
+    def _filter_lost(self):
+        """Filtre kilidini GERCEKTEN kaybetti mi? (sıcak taşımanın tek istisnası)
+
+        Sıcak filtreyi görevler arası taşımak doğru olanıdır — ama oyun yeniden
+        başlatılıp hedef BAŞKA YERDE doğduysa filtre eski kilidinde kalır ve
+        kaçış mekanizması (P şişirme) devreye girene kadar hedefi yüzlerce
+        metre yanlış gösterir. Ölçüldü (hedef 500 m ışınlandı, n=4): yeniden
+        kilitlenme **medyan 2.60 s, max 2.80 s**. Soğuk kurulum ise ~0.40 s'de
+        çıkış verir. Yani filtre kilidini kaybetmişken onu taşımak, ısınma
+        transientinden DAHA kötüdür.
+
+        Ölçüt filtrenin kendi teşhisidir: `ret` = üst üste kapı reddi sayacı.
+        Tek bir jammer sıçraması 1-2 ret üretir ve bu SAĞLIKLI çalışmadır;
+        eşiğin yarısını geçmişse artık rejim değişmiş demektir.
+
+        ⚠ ŞÜPHEDE KALIRSA FİLTREYİ KORU. Soğuk kurulum bilinen bir bozulmadır
+          (ısınma transienti); kilidini kaybetmiş filtre ise nadir bir durum.
+          Bu yüzden teşhis okunamazsa `False` döner.
+        """
+        try:
+            d = self.filter.diag()
+            if not d.get("started"):
+                return True  # zaten ısınmamış -> taşımanın anlamı yok
+            return d.get("ret", 0) >= max(1, int(d.get("escape_thresh", 12)) // 2)
+        except Exception:
+            return False
+
+    def reset(self, cold_filter=False):
+        """Yeni görev için GÖREV KAPSAMLI durumu sıfırlar.
+
+        ⭐ FİLTRE KORUNUR (`cold_filter=True` denmedikçe) — ve bu, görevi
+          durdurup yeniden başlatmanın en kritik ayrıntısıdır.
+
+          `web/server.py :: control_loop` görev PASİFKEN de her tik
+          `clean_target()` çağırır; tek amacı filtrenin ISINMIŞ kalmasıdır.
+          Filtreyi burada yeniden kurmak o ısınmayı **tam işe yarayacağı anda
+          çöpe atardı** ve o satır fiilen ölü kod olurdu.
+
+        ⛔ NEDEN ÖNEMLİ: ısınma transienti ilk ~4 saniyededir (pencere medyanı
+          23.6 m, max 52 m). İLK görevde bunu KALKIŞ maskeler (kalkış ~4 s
+          sürer ve o sırada yatay komut üretilmez). Ama görev havadayken
+          yeniden başlatılırsa kalkış kapısının 2. kolu (hedefin irtifasına
+          TAKEOFF_TARGET_GAP_M kadar yaklaşıldı) daha ilk tikte açılır —
+          kalkış saniyenin onda birinde biter ve **maske kalkar**. O zaman
+          transient doğrudan istasyon fazına, yani yatay komutun ÜRETİLDİĞİ
+          yere düşer: hedef 20-50 m yanlış yerde görünür, yasa büyük bir hız
+          komutu üretir ve araç sapıtır. Sıcak filtre bu zinciri kökünden
+          keser.
+
+          Gerçekten soğuk başlangıç isterseniz (ör. hedef değişti):
+          `brain.reset(cold_filter=True)`.
+        """
+        if cold_filter or self.filter is None or self._filter_lost():
+            self.filter = GNSSFilterV2(lead_s=self.cfg.DELAY_S)
 
         self.last_raw = None             # SDK'nin dondurdugu ham demet (paket izleme)
         self.target_p = None             # temiz hedef konumu (m)

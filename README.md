@@ -52,7 +52,8 @@ perception/         hedef tespit + takip
   detector.py         YOLO tespiti (models/talon_v3.pt) + pervane maskesi
   tracking.py         HybridSort (boxmot) kimlik sürekliliği
   detection_state.py  kamera thread'i ↔ güdüm döngüsü köprüsü
-  models/talon_v3.pt  eğitilmiş model — imgsz 960 (task=detect, sınıf: talon) ⭐ AKTİF
+  models/talon_v3.pt  eğitilmiş model — imgsz 960 (task=detect, sınıf: talon)
+  models/talon_v3.engine  aynı ağırlığın TensorRT motoru ⭐ VARSA AKTİF (repoya konmaz)
   models/best.pt      önceki model — imgsz 640; geri almak için AVCI_MODEL=best.pt
 sdk/                simülasyon I/O (resmi yarışma SDK'sı — DEĞİŞTİRİLMEZ)
 web/                yer kontrol arayüzü + görevin KOŞTURUCUSU (güdüm üretmez)
@@ -60,6 +61,7 @@ web/                yer kontrol arayüzü + görevin KOŞTURUCUSU (güdüm üret
   server.html         tek sayfa arayüz: kuşbakışı harita + telemetri + olay günlüğü
 scripts/start_game.sh   oyunu başlatır — Linux (Wine ile)
 scripts/start_game.ps1  oyunu başlatır — Windows (native, Wine yok)
+scripts/export_engine.py  .pt → TensorRT .engine çevirir, çevirimi ÖLÇER ve doğrular
 ```
 
 Veri akışı tek yönlüdür:
@@ -107,6 +109,57 @@ pip install -r requirements.txt
 Yarışma paketindeki oyunu depo köküne **`Drones of War Teknofest/`** klasörü
 olacak şekilde çıkartın (bu klasör repoya konmaz, `.gitignore`'dadır).
 
+### TensorRT motoru (opsiyonel, ölçülmüş hızlanma)
+
+`talon_v3.pt` aynı ağırlığın TensorRT motoruna çevrilebilir. **Dedektör motoru
+varsa kendiliğinden onu yükler**, yoksa `.pt` ile aynen çalışır — yani bu adım
+atlanabilir, hiçbir şey bozulmaz.
+
+```powershell
+python -c "import torch; print(torch.version.cuda)"   # 13.x ise cu13, 12.x ise cu12
+pip install onnx onnxslim "tensorrt-cu13==11.1.0.106"
+python -m scripts.export_engine --fp32                # çevirir + ÖLÇER + doğrular
+```
+
+**Bu depoda motor FP32 derlenir** (`--fp32`). FP32 motor `.pt` ile **birebir
+aynı** sayıyı üretir (skor farkı max 0.00000) ama FP16'dan yavaştır. Ölçüldü
+(oyun kapalı, prizde değil + "Silent" profil, her kol ayrı süreçte, n=200):
+
+| kol | kare başı | FPS | `.pt`'ye göre |
+|---|---:|---:|---:|
+| `.pt` | 19.50 ms | 51.3 | 1.00× |
+| **`.engine` FP32** | **13.85 ms** | **72.2** | **1.41×** |
+| `.engine` FP16 (`--fp32` vermeyin) | 10.36 ms | 96.5 | 1.88× |
+
+> ⚠ **Kazanç oranı GPU'nun güç durumuna bağlıdır**, tek bir çarpan yoktur.
+> Aynı gün daha yüksek güç durumunda ölçülen kolda FP16 kazancı 1.88× değil
+> **1.22×** çıktı: GPU tam saatteyken `.pt` hızlanıyor ve motorun üstünlüğü
+> eriyor. Motorla kalan sürenin çoğu artık CPU tarafındaki ultralytics
+> giderindedir (letterbox, NMS) ve o GPU saatiyle ölçeklenmez.
+
+> **TensorRT sürümü:** Windows Smart App Control açıksa **en yeni** sürümün
+> Python bağlayıcısı imzasız+itibarsız olduğu için engellenir
+> (`ImportError: DLL load failed ... Uygulama Denetimi ilkesi bu dosyayı
+> engelledi`). Çözüm SAC'ı kapatmak değil — geri dönüşü yoktur — bir önceki
+> sürümü kurmaktır. Bu makinede 10.13.3.9 … 11.1.0.106 geçiyor, 11.2.1.2
+> engelleniyor.
+
+Betik çevirimden sonra `.pt` ile `.engine`'i **aynı girdi tensörüyle** besleyip
+NMS öncesi ham çıktıları karşılaştırır (doğrulama karenin içeriğinden bağımsız
+olsun diye) ve ikisinin kare başı süresini basar.
+
+> ⛔ **Motor taşınmaz.** `.engine` şu karta, şu sürücüye ve şu TensorRT sürümüne
+> derlenir; başka makinede açılmaz. Bu yüzden `.gitignore`'dadır ve donanım,
+> sürücü, TensorRT ya da model değişince **yeniden üretilir**. Açılmazsa
+> dedektör sessizce değil, **gerekçesiyle** `.pt`'ye döner (olay günlüğüne
+> `TensorRT motoru ACILMADI (...)` düşer).
+
+> ⚠ **`AVCI_IMGSZ` motoru ezemez.** Motorun girdi şekli derlenirken sabitlenir
+> (960×960); başka ölçek TensorRT tarafında assert atar. Çakışırsa sistem
+> otomatik olarak `.pt`'ye düşer, böylece uzak menzil taraması
+> (`AVCI_IMGSZ=1920`) çalışmaya devam eder. Motoru başka ölçekte istiyorsanız
+> o ölçekte **yeniden üretin**.
+
 ## Çalıştırma
 
 **Linux:**
@@ -132,6 +185,15 @@ başlatılır. Sunucuda `Ctrl+C` motorları keser ve kapatır.
 > `python -m control.main` **çalışmaz**: o dosya artık yalnızca faz geçiş
 > kapısıdır (`PhaseSupervisor`), giriş noktası değildir.
 
+> **Görevi durdurup yeniden başlatmak için sunucuyu kapatmanız gerekmez.**
+> Durdur/başlat, güdüm durumunun tamamını sıfırlar; GNSS filtresi ise
+> bilinçli olarak **korunur** (soğuk filtre, araç havadayken yeniden
+> başlatıldığında ısınma transientini doğrudan güdüme sokuyordu — ölçüldü:
+> hedef konum hatası medyan 39.2 m → 2.5 m). Ayrıntı ve diğer üç düzeltme
+> `CLAUDE.md :: GÖREVİ DURDURUP YENİDEN BAŞLATMA` bölümünde.
+> Oyunu yeniden başlatıp hedef başka yerde doğduysa filtre bunu kendi teşhisiyle
+> anlayıp soğuk kurulur; elle zorlamak için `brain.reset(cold_filter=True)`.
+
 > **Oyun penceresi görünür/önde kalmalıdır.** Kamera hattı `mss` ile **ekranı**
 > yakalar; oyun başka bir pencerenin arkasında kalırsa dedektöre masaüstü
 > pikseli gider ve hedef "kaybolur". Kenarlıksız pencere modu en sağlıklısıdır.
@@ -150,13 +212,20 @@ Sol paneldeki **iki başlatma düğmesi** modu seçer:
 | **GPS Takibi Başlat** | yalnız GPS fazı: kalkış + istasyon tutma | hiç açılmaz — dedektör (torch) yüklenmez |
 | **Hibrit Takip Başlat** | GPS fazı → devir kapısı → görsel faz | açık; görsel fazda komut **yalnız kameradan** |
 
-Hibrit modda görsel takip paneli devir kapısının **iki koşulunu da canlı**
+Hibrit modda görsel takip paneli devir kapısının **koşullarını canlı**
 gösterir (kaç ard arda kare kilit, kaç tik istasyona oturmuş), ayrıca kutudan
 türeyen menzil, hücum hızı, kadraj hatası, köprü durumu ve kamera FPS'i.
 
 > Arayüz **ayrı bir beyin değildir**: `control/` paketindeki aynı kodu çağırır
 > ve komutu tek komut kapısından (`CommandSender`) gönderir. Güdüm yasası
 > içermez.
+
+> **Devir kapısının 3. koşulu: kadraj penceresi.** Hedef, görsel yasanın ilk
+> komutunu doyuracağı bir noktadaysa (kadrajın kenarına yakın) devir açılmaz —
+> kilit satırında **"kadraj dışı"** yazar. Eşikler mevcut güdüm sabitlerinden
+> türer (`YAW_RATE_MAX/KP_YAW_RATE` ve `VZ_CAP_VISUAL/K_CY`), ayrı bir tune
+> düğmesi yoktur. Kapı yalnız **devre** uygulanır: görsel faz sürerken hedef
+> kenara kayarsa faz düşmez, yasa onu geri getirir.
 
 > Dedektör **tembel** yüklenir: yalnızca hibrit görev başlatıldığında. Kamera
 > hattından kare gelmezse arayüz 15 s sonra olay günlüğünde uyarır (torch /
@@ -171,6 +240,7 @@ türeyen menzil, hücum hızı, kadraj hatası, köprü durumu ve kamera FPS'i.
 | `AVCI_FP16=0` | FP16 inference'i kapat |
 | `AVCI_MODEL=best.pt` | Başka bir ağırlık kullan (`perception/models/` içinde). `IMGSZ` bilinen modellerde kendiliğinden ayarlanır |
 | `AVCI_IMGSZ=1920` | Çıkarım çözünürlüğünü elle ez (uzak menzilde tespit zayıfsa) |
+| `AVCI_ENGINE=0` | TensorRT motorunu yok say, `.pt` ile koş (motor varken karşılaştırma yapmak için) |
 
 Linux'ta `AVCI_REGION="0,0,1280,720" python3 -m web.server`,
 Windows'ta `$env:AVCI_REGION="0,0,1280,720"; python -m web.server`.
