@@ -1,15 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-control/gps_approach.py — GPS FAZI: ISTASYON TUTMA
+control/gps_approach.py — GPS FAZI: İSTASYON TUTMA
 
-AMAÇ: Hedefin kuyruğundaki bir noktaya (istasyon) oturmak ve görsel temas kurmak
+AMAÇ: Hedefin kuyruğundaki bir noktaya (istasyon) oturmak ve orada KALARAK
+kesintisiz görsel temas kurmak. Bu faz ÖLDÜRÜCÜ faz değildir; son yaklaşma
+görsel fazın işidir. Dört işi vardır:
+    1. bozuk GNSS'i temizle ve hedefin hızını kestir (`clean_target`)
+    2. istasyona otur ve orada kal (`command`)
+    3. burnu hedefe dönük tut ki kamera hedefi görsün
+    4. görsel faza temiz devret (kapı `control/main.py`dedir, burada değil)
 
-TERIMLER
-  * İstasyon : Hedefe göre sabit göreli bir konum (x m gerisinde, y m altında)
+TERİMLER
+  * İstasyon — hedefe göre SABİT göreli bir nokta: `STATION_RANGE_M` metre
+    arkası, `STATION_RANGE_M * STATION_ALT_RATIO` metre altı.
+  * İleri besleme (feedforward) — hatanın oluşmasını beklemeden hedefin
+    kestirilen hızını doğrudan komuta eklemek.
+  * Kalıcı gecikme hatası — saf P kontrolcü hareketli referansı izlerken
+    dengeye `e = V/Kp`de oturur, yani HEP geride kalır. İleri beslemenin
+    varlık sebebi budur (bkz. `GPSCfg.STATION_FEEDFWD`).
 
-  * İleri besleme (feedforward): Hatayı beklemeden hedefin hızını doğrudan komuta eklemek
-
-  * Kalıcı gecikme hatası: Saf P kontrolcü hareketli referansı izlerken hep geride kalır.
+⛔ Bu dosyanın çıktısı YALNIZ GPS fazında komuta girer. Görsel temas
+   kurulduktan sonra hedefe ait hiçbir GNSS türevi komuta giremez (yarışma
+   kuralı). Görsel/çarpma fazlarında yalnızca `clean_target()` çağrılır ve
+   dönen değer HİÇBİR KOMUTA GİRMEZ — amacı filtreyi sıcak tutmaktır.
 """
 import math
 
@@ -18,39 +31,73 @@ from filter.gnss_filtre_v2 import GNSSFilterV2
 
 
 class GPSCfg:
+    """GPS fazının ayarları: istasyon geometrisi, kazançlar, zarf ve filtre.
+
+    Dikey/yaw tavanları burada TANIMLANMAZ, `ConverterCfg`ten okunur —
+    zarf tek kaynakta durur (üçe kopyalandıkları sürümde değerler kaymıştı).
+    """
+
     # --- DÖNGÜ ---
-    LOOP_HZ = 50.0
-    DT = 1.0 / LOOP_HZ
+    LOOP_HZ = 50.0      # Hz; koşturucunun (web/server.py) nominal tik hızı
+    DT = 1.0 / LOOP_HZ  # s; bir tikin nominal süresi (döngü uykusu ve ilk tik için)
 
-    # --- İSTASYON (GPS fazının hedefi) ---
-    STATION_RANGE_M = 8.0     # m; hedefin arkasında durulacak mesafe
-    STATION_ALT_RATIO = 0.75  # alt ofseti menzile ORANTILI: h = R * ORAN
-    STATION_ALT_M = 15.0      # m; ORAN 0 ise kullanilan SABIT alt ofset
-    STATION_KP = 0.9          # 1/s; yatay konum hatasu -> hız
-    STATION_KP_Z = 0.9        # 1/s; dikey konum hatası -> hız
-    STATION_FEEDFWD = True    # İleri besleme
+    # --- İSTASYON (GPS fazının nişan aldığı nokta) ---
+    # ⭐ GEOMETRİ ÖLÇÜLDÜ (24 uçuş, dönüşümlü A/B). Karşılaştırılan kollar ve
+    #   ortaya çıkan gerçek tespit oranları:
+    #       15 m / 0.45 -> %66.9   |   8 m / 0.45 -> %76.0
+    #       8 m / 0.75  -> %88.8   <- SEÇİLDİ (yanlış-pozitif de en düşük: %3.7)
+    #   İki düğme BAĞIMSIZDIR: MENZİL yalnız kutu boyutunu, ORAN yalnız gök
+    #   payını değiştirir. Oran büyüdükçe hedefin arka planı gökyüzü olur ve
+    #   dedektör onu daha temiz ayırır.
+    STATION_RANGE_M = 8.0     # m; hedefin TAM ARKASINDA durulacak mesafe
+    STATION_ALT_RATIO = 0.75  # oran (birimsiz); alt ofset = STATION_RANGE_M * bu değer.
+                              # Yükseliş açısı atan(oran) olur, yani menzilden BAĞIMSIZDIR.
+                              # 0 verilirse yerine sabit STATION_ALT_M kullanılır.
+    STATION_ALT_M = 15.0      # m; YALNIZ STATION_ALT_RATIO = 0 iken geçerli sabit alt ofset
+    STATION_KP = 0.9          # 1/s; yatay konum hatasını (m) hız komutuna (m/s) çeviren P kazancı
+    STATION_KP_Z = 0.9        # 1/s; dikey konum hatasını (m) dikey hıza (m/s) çeviren P kazancı
+    STATION_FEEDFWD = True    # hedefin kestirilen hızı komuta doğrudan eklensin mi?
+                              # ⭐ ŞART: saf P kontrolcü hareketli hedefi ASLA
+                              #   yakalayamaz, denge e = V/Kp'de kurulur (Kp=0.9,
+                              #   V=18 m/s -> 20 m KALICI hata). İleri beslemesiz
+                              #   sürümde menzil 100-255 m salındı ve kapanma hızı
+                              #   medyan -3.78 m/s idi, yani araç UZAKLAŞIYORDU.
 
-    # --- ZARF ---
-    VZ_MAX_CLIMB = ConverterCfg.VZ_MAX_CLIMB      # m/s;
-    VZ_MAX_DESCENT = ConverterCfg.VZ_MAX_DESCENT  # m/s;
-    YAW_RATE_MAX = ConverterCfg.YAW_RATE_MAX_DEG  # derece/s
+    # --- ZARF (tek kaynak: ConverterCfg; buraya sayı YAZILMAZ) ---
+    VZ_MAX_CLIMB = ConverterCfg.VZ_MAX_CLIMB      # m/s; azami tırmanma hızı
+    VZ_MAX_DESCENT = ConverterCfg.VZ_MAX_DESCENT  # m/s; azami alçalma hızı (asimetrik, çok daha küçük)
+    YAW_RATE_MAX = ConverterCfg.YAW_RATE_MAX_DEG  # derece/s; azami dönüş hızı
 
     # --- POLİTİKA ---
-    V_MAX = 33.0           # m/s; yatay hız tavanı
-    KP_YAW = 3.0           # yaw hatası (derece) -> yaw hızı (derece/s)
+    V_MAX = 33.0  # m/s; istasyona giderken izin verilen azami YATAY hız
+    KP_YAW = 3.0  # 1/s; yaw hatasını (derece) dönüş hızına (derece/s) çeviren P kazancı
 
     # --- HEDEF YÖNÜ ---
-    HEADING_MIN_SPEED = 1.0  # m/s;
+    HEADING_MIN_SPEED = 1.0  # m/s; hedefin kestirilen yatay hızı bunun altındaysa
+                             # gidiş yönü GÜVENİLMEZ sayılır ve istasyon hedefin
+                             # arkasına değil doğrudan üstüne/altına kurulur
+                             # (durgun hedefte atan2 gürültüden yön üretir).
 
-    # --- GNSS FİLTRE ---
-    DELAY_S = 1.0  # s; ham GNSS gecikmesi
-    FILTER_EVERY_TICK = True
+    # --- GNSS FİLTRESİ ---
+    DELAY_S = 1.0  # s; ham GNSS'in ölçülen gecikmesi (~1.13 s). Filtre çıkışını
+                   # bu kadar İLERİ taşır; kapatılmazsa 18 m/s'de ~20 m sabit hata olur.
+    FILTER_EVERY_TICK = True  # filtre her tikte mi beslensin (50 Hz), yalnız yeni
+                              # pakette mi (~5 Hz)? ⭐ True olmalı: filtre paket
+                              # tekrarını kendi tanır ve arada ölü-hesapla ilerler.
+                              # False iken hedef konumu 50 Hz'lik yasaya ~5 Hz'lik
+                              # MERDİVEN olarak girer.
 
 # ==========================================================
 #  ISTASYON YASASI
 # ==========================================================
 def station_point(target_p, target_heading_deg, cfg=GPSCfg):
-    """Hedefin kuyruğundaki istasyon noktası (m, Unreal dünya ekseni)"""
+    """Hedefin kuyruğundaki istasyon noktasını hesaplar.
+
+    target_p            : (x, y, z) m — TEMİZ (filtrelenmiş) hedef konumu
+    target_heading_deg  : derece — hedefin gidiş yönü; None ise arkaya kaydırma
+                          yapılmaz, yalnız alt ofset uygulanır
+    -> (x, y, z) m, Unreal dünya ekseni
+    """
     hx, hy, hz = target_p
     if cfg.STATION_ALT_RATIO > 0:
         z = hz - cfg.STATION_RANGE_M * cfg.STATION_ALT_RATIO
@@ -63,17 +110,27 @@ def station_point(target_p, target_heading_deg, cfg=GPSCfg):
 
 
 def command(drone_p, drone_yaw_deg, target_p, target_v, target_heading_deg, cfg=GPSCfg):
-    """İstasyon tutma komutu
+    """İSTASYON TUTMA YASASI — hız setpoint'i üretir (çubuk DEĞİL).
 
-    ÇIKTI: ((vx, vy), vz_ned, yaw_rate_deg_s, tani)
-      vx, vy : m/s, Unreal dünya yatay düzlemi
-      vz_ned : m/s, Pozitif = Aşağı (çevirici tarafından ters çevrilir)
+    GİRDİ
+      drone_p            : (x, y, z) m — kendi konumumuz
+      drone_yaw_deg      : derece — kendi burun yönümüz
+      target_p           : (x, y, z) m — TEMİZ hedef konumu (filtre çıkışı)
+      target_v           : (vx, vy, vz) m/s — TEMİZ hedef hızı (ileri beslenen terim)
+      target_heading_deg : derece | None — hedefin gidiş yönü
+    ÇIKTI
+      ((vx, vy), vz_ned, yaw_rate_deg_s, diag)
+        vx, vy         : m/s, Unreal dünya yatay düzlemi
+        vz_ned         : m/s, POZİTİF = AŞAĞI (çevirici tersine çevirir)
+        yaw_rate_deg_s : derece/s, istenen dönüş hızı
+        diag           : yalnız telemetri/kapı verisi; komuta girmez
 
-    YASA:  v = v_des (ileri besleme) + Kp * (istasyon - konum)
-      İlk terim hedefle aynı hızda uçmayı sağlar (kalıcı hata sıfır),
-      ikinci terim istasyona oturtur.
+    YASA:  v = v_hedef (ileri besleme) + Kp * (istasyon - konum)
+      İlk terim hedefle AYNI hızda uçmayı sağlar (kalıcı hatayı sıfırlar),
+      ikinci terim istasyon noktasına oturtur.
 
-    BURUN: her zaman hedefe donuk (Kamera tespiti için)
+    BURUN: her zaman hedefe dönük tutulur — kamera gövdeye sabit olduğu için
+    hedefin kadrajda kalmasının tek yolu budur.
     """
     sx, sy, sz = station_point(target_p, target_heading_deg, cfg)
     ex = sx - drone_p[0]
@@ -114,9 +171,18 @@ def command(drone_p, drone_yaw_deg, target_p, target_v, target_heading_deg, cfg=
 #  GPS FAZI SÜRÜCÜSÜ
 # ==========================================================
 class GPSTracker:
-    """Bozuk GNSS ile istasyon tutma"""
+    """GPS fazının sürücüsü: bozuk GNSS -> temiz hedef -> istasyon tutma.
+
+    `command()` yasasını GNSS filtresi, telemetri ve komut kapısıyla
+    birleştirir. Faz kararı VERMEZ; `phase` özniteliği yalnızca "STATION"
+    üretir (kalkış bu sınıftan çıkarıldı) ve `step()` aracın ZATEN HAVADA
+    olduğunu varsayar.
+
+    ⚠ `self.filter` bir ÖZNİTELİKTİR, `filter` builtin'ini gölgelemez.
+    """
 
     def __init__(self, drone, sender, cfg=GPSCfg):
+        """drone: SDK; sender: TEK komut kapısı; cfg: GPS fazı ayarları."""
         self.cfg = cfg
         self.drone = drone
         self.tlm = Telemetry(drone)
@@ -180,24 +246,39 @@ class GPSTracker:
         if cold_filter or self.filter is None or self._filter_lost():
             self.filter = GNSSFilterV2(lead_s=self.cfg.DELAY_S)
 
-        self.last_raw = None             # SDK'nin dondurdugu ham demet (paket izleme)
-        self.target_p = None             # temiz hedef konumu (m)
-        self.target_v = (0.0, 0.0, 0.0)  # temiz hedef hizi (m/s)
-        self.target_heading = None       # hedefin gidiş yönü (derece) | None
-        self._fresh = False
+        self.last_raw = None             # SDK'nın döndürdüğü ham GNSS demeti; yeni
+                                         # paket geldi mi anlamak için karşılaştırılır
+        self.target_p = None             # (x, y, z) m; TEMİZ hedef konumu | None (filtre ısınmadı)
+        self.target_v = (0.0, 0.0, 0.0)  # (vx, vy, vz) m/s; TEMİZ hedef hızı (ileri beslenen terim)
+        self.target_heading = None       # derece; hedefin gidiş yönü | None (hedef çok yavaş)
+        self._fresh = False              # son okumada YENİ paket geldi mi?
 
-        self.phase = "STATION"
-        self.range_h = None      # m; hedefe olan menzil
-        self.station_err = None  # m; istasyon hatası
-        self.diag = {}
+        self.phase = "STATION"   # bu sınıfın ürettiği tek faz etiketi (arayüz için)
+        self.range_h = None      # m; hedefe olan 3B (eğik) menzil — devir kapısının girdisi
+        self.station_err = None  # m; istasyon noktasına olan 3B hata — devir kapısının girdisi
+        self.diag = {}           # son tikin telemetrisi
 
     # ----------------------------------------------------------------
     #  BOZUK GNSS -> TEMIZ HEDEF (konum + hız + yön)
     # ----------------------------------------------------------------
     def clean_target(self):
-        """Ham GNSS paketini filtreye ver, temiz hedef konumunu döndür.
+        """Ham GNSS paketini filtreye verir; TEMİZ hedef konumunu döndürür.
 
-        GÖRSEL FAZDA da çağrılır fakat hiçbir komut göndermez. Amaç filtrenin sıcak kalmasıdır.
+        -> (x, y, z) m | None (filtre henüz ısınmadı)
+
+        Yan etki olarak `target_v` (m/s) ve `target_heading` (derece) da
+        tazelenir; istasyon yasası ikisini de kullanır.
+
+        ⚠ BİRİM SINIRI BURADA AÇIKÇA GEÇİLİR: filtre cm alanında çalışır,
+          çıktısı burada metreye çevrilir. `control/` içinde `*0.01`in
+          `Telemetry` dışında görüldüğü TEK yer burasıdır.
+
+        ⭐ GÖRSEL VE ÇARPMA FAZLARINDA DA, HATTA GÖREV PASİFKEN DE ÇAĞRILIR —
+          ama dönen değer o fazlarda HİÇBİR KOMUTA GİRMEZ. Tek amaç filtrenin
+          ISINMIŞ kalmasıdır: faz GPS'e geri düşerse ya da görev yeniden
+          başlatılırsa soğuk filtreyle açılmasın. (Soğuk filtrenin bedeli
+          ölçüldü: istasyon fazının ilk 1.5 s'inde hedef konum hatası medyan
+          39.2 m, korunduğunda 2.5 m.)
         """
         raw = self.tlm.target_raw_cm()
         self._fresh = (raw != self.last_raw)
@@ -222,6 +303,12 @@ class GPSTracker:
     #  KONTROL ADIMI
     # ================================================================
     def step(self):
+        """Bir GPS tiki: temiz hedefi al, istasyon komutunu üret, çubuğa yaz.
+
+        Hedef henüz yoksa (filtre ısınmadı) komut üretmez, `loiter()` ile
+        irtifayı tutar. Kapıların okuduğu `range_h` ve `station_err` bu
+        adımda tazelenir.
+        """
         dp = self.tlm.position_m()
         _roll, _pitch, yaw = self.tlm.orientation_deg()
         v_meas = self.tlm.velocity_ms()
@@ -248,4 +335,5 @@ class GPSTracker:
         self.diag = diag
 
     def status(self):
+        """Son tikin telemetrisi (yalnız gösterge; komuta girmez)."""
         return dict(self.diag)

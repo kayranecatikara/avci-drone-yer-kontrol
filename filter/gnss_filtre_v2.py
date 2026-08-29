@@ -38,6 +38,29 @@ import numpy as np
 
 
 class GNSSFilterV2:
+    """Hedefin jammer'la bozulmus GNSS'ini temizleyen CT-EKF.
+
+    DURUM VEKTORU (5 eleman, XY kanali):  [px, py, vx, vy, omega]
+        px, py  cm      hedefin konumu
+        vx, vy  cm/s    hedefin hizi   <- ISTASYON YASASININ ILERI BESLEDIGI TERIM
+        omega   rad/s   donus hizi     <- manevrayi ONGORMEYI saglayan eleman
+    Z kanali AYRI ve daha basit tutulur (2 eleman: [z, vz], cm ve cm/s):
+    irtifa manevrasi yatay donus kadar yapili degildir, ayni modele sokmak
+    gereksiz baglasim uretirdi.
+
+    KOD ICINDEKI [D1]..[D5] ETIKETLERININ ANLAMI
+        [D1] gercek Mahalanobis kapisi — sicramayi sabit esikle degil,
+             filtrenin O ANKI belirsizligine gore reddeder
+        [D2] kacis mekanizmasi — kapi ust uste reddederse P sisirilir, boylece
+             jammer YENI bir rejime gecerse filtre orada kilitlenebilir
+        [D3] ilk iki paket arasindaki GERCEK sureden hiz kestirimi (soguk baslangic)
+        [D4] fiziksel zarf — kestirim ucagin kinematik sinirlari disina cikamaz
+        [D5] olu-hesap (dropout) + adaptif surec gurultusu
+
+    ⛔ CIKISI YALNIZ GPS FAZINDA GUDUME GIRER. Gorsel temas kurulduktan sonra
+      hedefe ait hicbir GNSS turevi komuta giremez (yarisma kurali); o
+      fazlarda filtre yalnizca SICAK KALSIN diye beslenir.
+    """
 
     def __init__(self, lead_s=1.0, dt=0.2,
                  R=50.0, Qp=500.0, Qw=1e-2, Rz=150.0, Qz=10.0,
@@ -46,6 +69,59 @@ class GNSSFilterV2:
                  vz_max=2500.0, gate_z=5.0, joseph=True,
                  dr_max_s=2.5,
                  adaptive_q=True, q_ref=2.0, q_boost_max=25.0, q_ema=0.85):  # [D5]
+        """Filtre ayarlari. BIRIMLER: cm, cm/s, s, rad/s.
+
+        ZAMANLAMA
+          lead_s    s;   cikis bu kadar ILERI tasinir -> GNSS gecikmesini kapatir.
+                         Olculen gecikme ~1.13 s; kapatilmazsa 18 m/s'de ~20 m
+                         sabit hata kalir (hata = hiz x gecikme).
+          dt        s;   nominal paket periyodu. Surec gurultusu bu periyoda gore
+                         olceklenir ve ilk tikte gercek dt bilinmedigi icin
+                         kullanilir. Gercek dt her adimda perf_counter ile OLCULUR.
+          dr_max_s  s;   [D5] veri kesildiginde olu-hesapla en fazla bu kadar ileri
+                         gidilir. Sonrasinda kestirim DONDURULUR: uzun kesintide
+                         ekstrapolasyon hizla anlamsizlasir.
+
+        OLCUM VE SUREC GURULTUSU (Kalman'in "kime ne kadar guveneyim" ayari)
+          R    cm;      XY olcum gurultusunun standart sapmasi (Rxy = I*R^2).
+                        BUYUTMEK = "GPS'e daha az guven, modele daha cok"
+          Rz   cm;      Z olcum gurultusunun standart sapmasi
+          Qp   varyans; [D5] konum/hiz surec gurultusu (cm^2 ve (cm/s)^2),
+                        NOMINAL BIR ADIM basina. Buyutmek filtreyi cevikleştirir
+                        ama gurultuyu de gecirir.
+          Qw   varyans; omega surec gurultusu ((rad/s)^2), nominal adim basina.
+                        1e-3 yerine 1e-2 secildi: omega'nin manevrada daha hizli
+                        donmesine izin verir (~%38 iyilesme).
+          Qz   varyans; Z kanalinin surec gurultusu
+
+        KAPI VE KACIS
+          gate_xy        sigma (birimsiz); [D1] Mahalanobis kapisi. Olcum,
+                         beklenen belirsizligin bu kadar katindan uzaksa
+                         REDDEDILIR (d^2 < gate_xy^2 testi = ki-kare).
+          gate_z         sigma; Z kanali icin ayni kapi
+          escape_thresh  adet; [D2] ust uste kac ret sonra kacis tetiklenir.
+                         Tek bir jammer sicramasi 1-2 ret uretir ve bu SAGLIKLI
+                         calismadir; esik o yuzden yuksektir.
+          escape_gain    carpan (birimsiz); kacista P bu kadar sisirilir. Belirsizlik
+                         buyuyunce kapi genisler ve filtre yeni rejime kilitlenir
+                         (~2-3 s). Bu bir DIVERGENCE onleyicidir.
+          joseph         bool; kovaryans guncellemesinin Joseph bicimi. Sayisal
+                         olarak kararlidir: P'yi simetrik ve pozitif tutar.
+
+        FIZIKSEL ZARF [D4] — kestirim ucagin yapabildiginden fazlasini soyleyemez
+          w_max      rad/s; azami donus hizi
+          speed_max  cm/s;  azami yatay hiz (3000 = 30 m/s)
+          vz_max     cm/s;  azami dikey hiz (2500 = 25 m/s)
+
+        ADAPTIF SUREC GURULTUSU [D5] — IMM'in hafif muadili
+          adaptive_q   bool;      son innovation'lar buyudugunde Qw gecici olarak
+                                  yukseltilsin mi? Boylece omega manevrada hizli
+                                  doner, duz ucusta sakin kalir.
+          q_ref        d^2;       "normal" sayilan Mahalanobis uzakligi. Artis
+                                  carpani = d2_ema / q_ref.
+          q_boost_max  carpan;    Qw'ye uygulanabilecek azami artis
+          q_ema        0..1;      d^2 yumusatmasinin EMA katsayisi (buyuk = sakin)
+        """
         self.lead_s = lead_s
         self.dt   = dt
         self.gate_xy = gate_xy
@@ -72,14 +148,24 @@ class GNSSFilterV2:
         self._steps      = 0
         self._last_time = None
         self._t_update  = None
-        self._reject_count = 0  # [D2] ust uste ret sayaci
-        # teshis (istege bagli okunur)
+        self._reject_count = 0  # adet; [D2] UST USTE ret sayaci (kabul gelince sifirlanir)
+        # Teshis alanlari — istege bagli okunur, guduume GIRMEZ.
         self.last_d2 = None; self.last_accept = None
         self.adaptive_q = adaptive_q; self.q_ref = q_ref
         self.q_boost_max = q_boost_max; self.q_ema = q_ema
         self._d2_ema = q_ref
 
     def _ct(self, d, dt):
+        """COORDINATED TURN gecis modeli: durumu dt saniye ileri tasir.
+
+        d  : [px, py, vx, vy, omega] — cm, cm/s, rad/s
+        dt : s; ileri gidilecek sure (negatif olamaz)
+        -> ayni bicimde yeni durum
+
+        Varsayim: hedef SABIT donus hiziyla (omega) daire yayi cizer. Duz
+        ucus bu modelin omega -> 0 ozel halidir, o yuzden ayri bir model
+        gerekmez. Sifira bolunmeyi onlemek icin omega taban degerle korunur.
+        """
         px,py,vx,vy,w = d
         if abs(w) < 1e-6: w = 1e-6
         s,c = np.sin(w*dt), np.cos(w*dt)
@@ -88,6 +174,13 @@ class GNSSFilterV2:
                          vx*c-vy*s, vx*s+vy*c, w])
 
     def _jac(self, x, dt, eps=1e-5):
+        """_ct'nin Jacobian'i (5x5) — SAYISAL turevle, ileri fark.
+
+        EKF kovaryansi dogrusal bir gecis matrisi ister; CT modeli dogrusal
+        DEGILDIR (omega ile trigonometrik). Analitik turev yerine sayisal
+        turev secildi: model degistirilirse bu satirin guncellenmesi gerekmez.
+        eps : sayisal turevin adimi.
+        """
         f0=self._ct(x,dt); F=np.eye(5)
         for j in range(5):
             xp=x.copy(); xp[j]+=eps
@@ -95,6 +188,12 @@ class GNSSFilterV2:
         return F
 
     def _constrain(self):
+        """[D4] XY durumunu fiziksel zarfa kirpar (donus hizi ve yatay hiz).
+
+        Kestirim, ucagin YAPABILDIGINDEN fazlasini soyleyemez. Bu kirpma
+        jammer sicramasinin filtreye sizdirdigi anlamsiz hizlarin guduume
+        gecmesini engelleyen SON savunmadir.
+        """
         if self.w_max is not None and abs(self._x[4]) > self.w_max:
             self._x[4] = float(np.clip(self._x[4], -self.w_max, self.w_max))
         if self.speed_max is not None:
@@ -104,10 +203,27 @@ class GNSSFilterV2:
                 self._x[2] *= o; self._x[3] *= o
 
     def _constrain_z(self):
+        """[D4] Z kanalinin dikey hizini fiziksel zarfa kirpar."""
         if self.vz_max is not None:
             self._z[1] = float(np.clip(self._z[1], -self.vz_max, self.vz_max))
 
     def update(self, noisy_x, noisy_y, noisy_z, now=None):
+        """HAM (bozuk) GNSS olcumunu isler ve TEMIZ hedef konumunu dondurur.
+
+        noisy_x/y/z : cm; SDK'nin get_target_location() ciktisi
+        now         : s (perf_counter); verilmezse simdi. Gercek dt bundan olculur.
+        -> (x, y, z) cm — GECIKMESI TELAFI EDILMIS (lead_s kadar ileri tasinmis)
+           konum, ya da None (filtre henuz isinmadi: ilk iki paket gerekir)
+
+        Adimlar: paket tekrari mi? -> olu-hesap [D5] | soguk baslangic [D3] |
+        PREDICT (adaptif dt + adaptif Qw) | XY UPDATE (kapi [D1] + kacis [D2]) |
+        Z UPDATE | zarf kirpmasi [D4] | lead.
+
+        ⚠ AYNI PAKET TEKRAR GELIRSE olcum guncellemesi YAPILMAZ; bunun yerine
+          son durumdan olu-hesapla ileri gidilir. Bu sayede filtre 50 Hz'de
+          beslenebilir (`GPSCfg.FILTER_EVERY_TICK`) ve yasa 5 Hz'lik bir
+          MERDIVEN yerine surekli bir hedef konumu gorur.
+        """
         import time as _t
         if now is None: now = _t.perf_counter()
         bx,by,bz = float(noisy_x), float(noisy_y), float(noisy_z)
@@ -241,10 +357,17 @@ class GNSSFilterV2:
     def diag(self):
         """Kapi/kacis teshisi — YALNIZ gosterge, guduume GIRMEZ.
 
-        last_d2   : son olcumun Mahalanobis uzakligi (kare). gate_xy**2 uzeri
-                   = jammer sicramasi sayilip REDDEDILDI.
-        kabul    : son olcum filtreye alindi mi
-        ret      : ust uste ret sayaci (escape_thresh'e ulasinca P sisirilir)
+        d2            : son olcumun Mahalanobis uzakligi (KARE, birimsiz).
+                        gate_xy^2 uzeri = jammer sicramasi sayilip REDDEDILDI.
+        accept        : son olcum filtreye alindi mi (True/False)
+        ret           : adet; UST USTE ret sayaci
+        gate          : sigma; yururlukteki XY kapi esigi
+        escape_thresh : adet; kacisin tetiklenecegi ret sayisi
+        started       : filtre isindi mi (False iken update() None doner)
+
+        ⭐ `GPSTracker._filter_lost()` bu ciktiyi okur: gorevler arasi SICAK
+          tasinacak filtrenin kilidini gercekten kaybedip kaybetmedigine
+          `ret` degeri uzerinden karar verir.
         """
         return {"d2": self.last_d2, "accept": self.last_accept,
                 "ret": self._reject_count, "gate": self.gate_xy,

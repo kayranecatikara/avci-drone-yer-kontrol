@@ -40,17 +40,29 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from perception.detector import MODELS_DIR, imgsz_for_model  # noqa: E402
 
-# Olcum kareleri gercek yakalama cozunurlugunde uretilir: uctan uca sure
-# letterbox + BGR->tensor maliyetini de icerir, kare kucukse bu maliyet duser.
+# (yukseklik, genislik) piksel; olcum karesinin boyutu. GERCEK yakalama
+# cozunurlugunde uretilir, cunku uctan uca sure letterbox + BGR->tensor
+# maliyetini de icerir; kucuk kareyle olcmek o maliyeti gizler ve motoru
+# oldugundan iyi gosterir.
 BENCH_FRAME_HW = (1200, 1920)
 
 
 def _log(msg):
+    """Betigin tum ciktisi buradan gecer — [ENGINE] onekiyle, tamponsuz."""
     print("[ENGINE] %s" % msg, flush=True)
 
 
 def export(pt_path, imgsz, fp16=True, workspace=None):
-    """Ultralytics ile .pt -> .engine. Ciktiyi .pt'nin yaninda birakir."""
+    """Agirligi TensorRT motoruna cevirir (.pt -> .engine).
+
+    pt_path   : cevrilecek .pt agirligi
+    imgsz     : px; motorun girdi olcegi. STATIC motorda bu deger DERLENIRKEN
+                SABITLENIR; sonradan degistirilemez, yeniden uretmek gerekir.
+    fp16      : True -> FP16 motor (daha hizli, dosya yari boyutta)
+                False -> FP32 motor (.pt ile BIREBIR ayni sayi; bu depoda secilen)
+    workspace : GiB; TensorRT'nin calisma alani (None -> ultralytics varsayilani)
+    -> uretilen .engine dosyasinin yolu (.pt'nin yaninda birakilir)
+    """
     from ultralytics import YOLO
 
     kwargs = dict(format="engine", imgsz=imgsz, device=0, batch=1,
@@ -73,7 +85,11 @@ def export(pt_path, imgsz, fp16=True, workspace=None):
 
 
 def _backend(path, device="cuda:0", fp16=True):
-    """AutoBackend ile yukle — .pt ve .engine AYNI arayuzden kosar."""
+    """Agirligi AutoBackend ile yukler — .pt ve .engine AYNI arayuzden kosar.
+
+    Boylece iki kol, ultralytics'in `predict()` giderini ICERMEDEN, yalnizca
+    ARKA UC ILERI GECISI olarak karsilastirilabilir.
+    """
     import torch
     from ultralytics.nn.autobackend import AutoBackend
 
@@ -83,7 +99,16 @@ def _backend(path, device="cuda:0", fp16=True):
 
 
 def _frame(frame_hw):
-    """Olcum karesi. Tohum SABIT: iki arka uc AYNI pikselleri gorur."""
+    """Olcum karesi uretir (rastgele gurultu, uint8 BGR).
+
+    frame_hw : (yukseklik, genislik) piksel
+    -> ndarray
+
+    ⭐ TOHUM SABITTIR (0): iki arka uc BIREBIR ayni pikselleri gorur, yoksa
+      cikti farki modelden mi girdiden mi geldi ayirt edilemezdi. Icerik
+      rastgele olabilir cunku karsilastirma NMS ONCESI ham tensorler
+      uzerindedir — anlamli bir tespit gerekmez.
+    """
     import numpy as np
 
     rng = np.random.default_rng(0)
@@ -108,7 +133,16 @@ def _input_tensor(frame, imgsz, device, fp16):
 
 
 def compare(pt_path, engine_path, imgsz, runs=50):
-    """Ham cikti farki + kare basi sure. Iki arka uc, AYNI kare."""
+    """Iki arka ucu AYNI kareyle karsilastirir: ham cikti farki + kare basi sure.
+
+    runs : olcum tekrari (n >= 30 tutun; GPU saat rampasi kisa olcumu bozar)
+    -> (kare, sonuc sozlugu)
+
+    Karsilastirma NMS ONCESI ham tensorler uzerindedir; boylece dogrulama
+    karenin ICERIGINE bagli olmaz. Skor kanali sinirli (0..1) oldugu icin
+    farki dogrudan anlamlidir; kutu kanallari ise yalnizca SKORU YUKSEK
+    capalarda anlamlidir.
+    """
     import torch
 
     frame = _frame(BENCH_FRAME_HW)
@@ -154,7 +188,14 @@ def compare(pt_path, engine_path, imgsz, runs=50):
 
 
 def end_to_end(path, frame, imgsz, runs=50):
-    """Uctan uca predict() — hatta fiilen odenen sure (on isleme + NMS dahil)."""
+    """Uctan uca `predict()` suresi — hatta FIILEN odenen milisaniye.
+
+    -> kare basi ortalama sure (ms)
+
+    `compare`in olctugu saf ileri geciste gorunmeyen her sey buraya dahildir:
+    letterbox, tensore kopya, NMS, `Results` nesnesi. Motorun uctan uca
+    kazanci saf ileri gecistekinden KUCUKTUR, cunku darbogaz o katmana kayar.
+    """
     from ultralytics import YOLO
 
     model = YOLO(path)
@@ -167,6 +208,13 @@ def end_to_end(path, frame, imgsz, runs=50):
 
 
 def main():
+    """Giris noktasi: (istege bagli) cevir, sonra OLC ve dogrula.
+
+    -> surec cikis kodu (0 = basarili, 2 = onkosul saglanmadi)
+
+    Akis: agirligi bul -> CUDA/TensorRT var mi? -> cevir -> ara urunleri
+    (.onnx) sil -> ham cikti farkini ve kare basi sureyi olc.
+    """
     ap = argparse.ArgumentParser(description="talon agirligi -> TensorRT motoru")
     ap.add_argument("--model", default=None,
                     help="perception/models/ icindeki .pt (varsayilan: talon_v3.pt)")

@@ -24,7 +24,14 @@ _frame_t = None  # son kare zamani (kamera canli mi)
 
 
 def publish(det, frame_t=None):
-    """Yeni kareyi yayinla (hedef yoksa det=None)."""
+    """[KAMERA THREAD'I] Bu karenin sonucunu yayinlar.
+
+    det     : tespit kaydi | None (kare geldi ama hedef yok)
+    frame_t : s (perf_counter); karenin ISLENDIGI an
+
+    Sayac (`seq`) her cagrida artar — hedef bulunmasa bile. Okuyucu bunu
+    "yeni kare geldi mi?" olcusu olarak kullanir; kutu kimligi degil.
+    """
     global _det, _seq, _frame_t
     with _lock:
         _det = det
@@ -33,13 +40,28 @@ def publish(det, frame_t=None):
 
 
 def status():
-    """(det, seq, frame_t) — okuyucunun tek atislik tutarli goruntusu."""
+    """[GUDUM DONGUSU] Son yayinin TEK ATISLIK tutarli goruntusu.
+
+    -> (det, seq, frame_t)
+       det     : son tespit | None
+       seq     : kare sayaci — ayni kareyi iki kez saymamak icin
+       frame_t : s; son karenin islenme ani
+
+    Ucu birlikte, tek kilit altinda dondurulur: ayri ayri okunsalardi kamera
+    thread'i aradan gecip bir karenin kutusuyla baska bir karenin sayacini
+    eslestirebilirdi.
+    """
     with _lock:
         return _det, _seq, _frame_t
 
 
 def reset():
-    """Sayaci ve son kaydi sifirlar (yeni gorev)."""
+    """Yeni gorev: sayaci ve son kaydi sifirlar.
+
+    Yeni gorevin ONCEKI gorevin kutusuyla acilmasini engeller. Tek basina
+    YETMEZ; `camera.reset()` de cagrilmalidir, cunku bu yalnizca YAYINLANMIS
+    kaydi temizler, uretici ile tuketici arasinda bekleyen KAREYI degil.
+    """
     global _det, _seq, _frame_t
     with _lock:
         _det = None

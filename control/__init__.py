@@ -6,7 +6,10 @@ control — avci dronun guduum ve karar mekanizmasi.
                       -> CARPMA kapilari).
                       Komut uretmez, dongu tutmaz, giris noktasi degildir;
                       kosturucu web/server.py'dir (hibrit mod).
-    gps_approach.py — GPSTracker: kalkis + BOZUK GNSS'i temizleyerek hedefin
+    takeoff.py      — TakeoffLaw: KALKIS fazi. Yalniz dikey tirmanis
+                      (TakeoffCfg.VZ = 12 m/s); yatay komut URETMEZ ve bu bir
+                      korumadir — GNSS filtresinin isinma transientini maskeler.
+    gps_approach.py — GPSTracker: BOZUK GNSS'i temizleyerek hedefin
                       KUYRUGUNDAKI istasyon noktasina oturma
                       (filter/gnss_filtre_v2.py cikisiyla; hedef hizi ILERI
                       BESLENIR).

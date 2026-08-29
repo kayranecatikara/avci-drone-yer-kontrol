@@ -63,20 +63,28 @@ from perception.tracking import Tracker
 FP16 = os.environ.get("AVCI_FP16", "1").lower() not in ("0", "off", "false")
 DEBUG_WINDOW = os.environ.get("AVCI_DEBUG_WINDOW", "0").lower() in ("1", "on", "true")
 
-# Ekran kaynaginda ureticinin hiz siniri. Tuketiciden hizli uretmek bayatligi
-# dusurur (60 Hz -> en fazla 16.7 ms eski kare) ama bir cekirdek yakar; oyunun
-# da ayni makinede kostugunu unutmayin.
+# Hz; EKRAN kaynaginda ureticinin hiz siniri. Tuketiciden hizli uretmek kare
+# bayatligini DUSURUR (60 Hz -> en fazla 16.7 ms eski kare) ama bir cekirdek
+# yakar; oyunun da ayni makinede kostugunu unutmayin. 0 = sinirsiz.
 CAP_FPS = float(os.environ.get("AVCI_CAP_FPS", "60"))
 
+# Hattin sayaclari — YALNIZ gosterge (bkz. status()); guduume girmez.
 _state = {"frames": 0, "fps": 0.0, "det_ms": 0.0, "source": None, "error": None,
           "cap_frames": 0, "cap_fps": 0.0, "age_ms": 0.0, "dropped": 0}
 
 # --- uretici -> tuketici koprusu: YALNIZ EN TAZE KARE ---
+# Kuyruk DEGIL, tek gozlu bir kutu: uretici uzerine yazar, tuketici okur.
+# Aradaki kareler bilerek DUSER (bkz. modul basligi).
 _latest_lock = threading.Lock()
-_latest = {"frame": None, "seq": 0, "t": 0.0}
+_latest = {"frame": None, "seq": 0, "t": 0.0}  # frame: BGR ndarray, seq: kare no, t: yakalama damgasi
 
 
 def _publish_frame(frame, t):
+    """[URETICI] Yeni kareyi kutuya koyar; oncekini DUSURUR.
+
+    frame : BGR ndarray
+    t     : s (perf_counter); yakalama ani — kare yasi bununla olculur
+    """
     with _latest_lock:
         _latest["frame"] = frame
         _latest["seq"] += 1
@@ -105,9 +113,13 @@ def reset():
 
 
 def _bgra_to_bgr(bgra):
-    """BGRA -> BGR. cv2 varsa onu kullan: numpy dilimi 1920x1200'de 8.56 ms,
-    cv2.cvtColor 1.11 ms (olculdu). Uretici maliyeti dogrudan yakalama hizini
-    belirledigi icin bu fark hattin tavanina yansir."""
+    """Ekran yakalamanin BGRA ciktisini dedektorun bekledigi BGR'ye cevirir.
+
+    ⭐ `cv2.cvtColor` KULLANIN, numpy dilimi DEGIL. Olculdu (1920x1200):
+      numpy dilimi 8.56 ms, cv2.cvtColor 1.11 ms. Ureticinin kare basi
+      maliyeti dogrudan YAKALAMA TAVANINI belirledigi icin bu fark hattin
+      tamamina yansir. cv2 yoksa dilime duseriz (calisir, yavastir).
+    """
     try:
         import cv2
         return cv2.cvtColor(bgra, cv2.COLOR_BGRA2BGR)
@@ -123,14 +135,25 @@ class ScreenSource:
 
     read() BLOKLAMAZ: o anki ekran tamponunu okur, kare daima tazedir. Bu
     yuzden kuyruk/bayatlik sorunu YOKTUR; tek sinir uretici hiz siniridir.
+
+    ⚠ OYUN PENCERESI GORUNUR/ONDE OLMALIDIR. mss EKRANI yakalar, pencereyi
+      degil; oyun baska pencerenin arkasinda kalirsa dedektore masaustu
+      pikseli gider ve hicbir sey "bozulmus" gorunmez.
     """
 
     def __init__(self):
-        self._sct = None
-        self._next_t = 0.0
-        self.name = "mss"
+        """Kaynagi tanimlar; gercek acilis `open()`tedir (thread'e ait olmali)."""
+        self._sct = None      # mss ornegi (her is parcaciginda AYRI olmali)
+        self._next_t = 0.0    # s; hiz sinirinin bir sonraki serbest ani
+        self.name = "mss"     # gosterge adi (arayuz/gunluk)
 
     def _region(self):
+        """AVCI_REGION="left,top,w,h" -> mss bbox sozlugu | None (tum ekran).
+
+        ⚠ KAMERA MODELI OYUN KADRAJINI VARSAYAR. Tum ekran yakalanirsa (gorev
+          cubugu, pencere kenarligi) merkez ve odak KAYAR, yani `F_PX` ve
+          `CY_REF` yanlis yere denk gelir. Tam oyun goruntusunu verin.
+        """
         raw = os.environ.get("AVCI_REGION", "").strip()
         if not raw:
             return None
@@ -142,12 +165,14 @@ class ScreenSource:
             return None
 
     def open(self):
+        """Ekran yakalamayi baslatir (URETICI is parcaciginda cagrilmali)."""
         import mss
         self._sct = mss.mss()  # mss her is parcaciginda AYRI ornek ister
         bbox = self._region()
         self.name = "mss (AVCI_REGION)" if bbox else "mss (tum ekran)"
 
     def read(self):
+        """Bir kare yakalar -> BGR ndarray. `CAP_FPS` ile hiz sinirlidir."""
         # hiz siniri: tuketiciden cok hizli uretmek bosa CPU yakar
         if CAP_FPS > 0:
             now = time.perf_counter()
@@ -160,12 +185,15 @@ class ScreenSource:
         return _bgra_to_bgr(bgra)
 
     def drain(self):
-        return 0  # ekran tamponunda kuyruk yoktur
+        """Ekran tamponunda kuyruk YOKTUR -> atilacak bayat kare de yok. -> 0"""
+        return 0
 
     def idle(self):
+        """Gorev pasifken: ekrani yakalamaya gerek yok, yalnizca bekle."""
         time.sleep(0.05)
 
     def close(self):
+        """Yakalamayi kapatir (kaynak yeniden acilirken ya da cikista)."""
         try:
             self._sct.close()
         except Exception:
@@ -181,12 +209,20 @@ class DeviceSource:
     """
 
     def __init__(self, spec):
+        """spec: AVCI_DEVICE degeri — cihaz indisi ("0") ya da bir yol/URL."""
         self._cap = None
         self._spec = spec
-        self.period_ms = 33.3
+        self.period_ms = 33.3  # ms; kare periyodu. `drain()`in "bu kare kuyruktan
+                               # mi geldi yoksa gercekten yeni mi?" olcusu budur;
+                               # open() icinde gercek FPS'ten guncellenir.
         self.name = "cv2 (device %s)" % spec
 
     def open(self):
+        """Cihazi acar ve format/cozunurluk/FPS ayarlarini uygular.
+
+        Backend sirasi: Windows'ta once DSHOW, sonra ANY. Acilista `drain()`
+        cagrilir ki gorev, surucu kuyrugunda bekleyen BAYAT kareyle acilmasin.
+        """
         import cv2
         dev = int(self._spec) if str(self._spec).isdigit() else self._spec
         backends = [("DSHOW", getattr(cv2, "CAP_DSHOW", 0))] if os.name == "nt" else []
@@ -238,14 +274,23 @@ class DeviceSource:
         self.drain()
 
     def read(self):
+        """Bir kare okur -> BGR ndarray | None.
+
+        ⛔ BLOKLAR: bir sonraki kareyi bekler (olculdu 32.00 ms @30 fps). Bu sure
+          URETICI thread'inde harcanir; tuketici bu sirada cikarim yapar, yani
+          kritik yoldan cikmis olur.
+        """
         ok, frame = self._cap.read()
         return frame if ok else None
 
     def drain(self):
-        """Kuyrukta BEKLEYEN bayat kareleri at; ilk GERCEK yeni karede dur.
+        """Kuyrukta BEKLEYEN bayat kareleri atar; ilk GERCEK yeni karede durur.
 
-        Ayirt etme olcusu olculdu: kuyruktaki kare aninda doner (0.1 ms),
-        gercek yeni kare bir kare periyodu bekletir. Esik periyodun yarisi.
+        -> atilan kare sayisi
+
+        Ayirt etme olcusu OLCULDU: kuyruktaki kare aninda doner (0.1 ms),
+        gercek yeni kare bir kare periyodu bekletir. Esik periyodun yarisidir.
+        En fazla 8 kare atilir — sonsuz donguye girmemek icin.
         """
         dropped = 0
         for _ in range(8):
@@ -264,6 +309,7 @@ class DeviceSource:
         self._cap.read()
 
     def close(self):
+        """Cihazi serbest birakir (kaynak yeniden acilirken ya da cikista)."""
         try:
             self._cap.release()
         except Exception:
@@ -272,6 +318,11 @@ class DeviceSource:
 
 
 def _make_source():
+    """Ortama gore goruntu kaynagini secer.
+
+    AVCI_DEVICE verilmisse capture kart / USB kamera (`DeviceSource`),
+    verilmemisse ekran yakalama (`ScreenSource`, Unreal simulasyonu).
+    """
     spec = os.environ.get("AVCI_DEVICE", "").strip()
     return DeviceSource(spec) if spec else ScreenSource()
 
@@ -298,7 +349,14 @@ def capture_bgr():
 #  URETICI
 # ==========================================================
 def _producer(active):
-    """Kaynaktan surekli kare cekip _latest'i tazeler. Tek isi budur."""
+    """[URETICI THREAD] Kaynaktan surekli kare cekip `_latest`i tazeler.
+
+    active : her turda cagrilan, "gorev calisiyor mu?" sorusunu yanitlayan islev
+
+    Tek isi budur — cikarim YAPMAZ. Kaynak acilamaz ya da okuma hata verirse
+    kendini toparlar (kapat, bekle, yeniden ac); hat bu yuzden gecici bir USB
+    kopmasinda tamamen olmez.
+    """
     source = _make_source()
     opened = False
     was_idle = True
@@ -474,7 +532,13 @@ def loop(active):
 
 
 def start(active):
-    """Uretici + tuketici is parcaciklarini arka planda baslat."""
+    """Uretici + tuketici is parcaciklarini arka planda baslatir.
+
+    active : her iki thread'e de gecirilen "gorev calisiyor mu?" islevi
+    -> tuketici thread nesnesi
+
+    Ikisi de daemon'dur: ana program cikarken beklemeye gerek kalmaz.
+    """
     prod = threading.Thread(target=_producer, args=(active,), daemon=True,
                             name="camera-capture")
     prod.start()

@@ -6,15 +6,27 @@ Calistir: python -m web.server   ->   http://127.0.0.1:8001   (Ctrl+C: kapat)
 Bu sunucu GUDUM URETMEZ ve GUDUM YASASI ICERMEZ. Yalnizca donguyu kosturur:
 komutu `control/` uretir, arayuz gosterir ve baslat/durdur eder.
 
-IKI MOD
-  GPS     — kalkis (`control.takeoff.TakeoffLaw`) + bozuk GNSS'i temizleyip
-            hedefin kuyrugundaki istasyona oturma
-            (`control.gps_approach.GPSTracker`).
-            Kamera hatti HIC calismaz (dedektor yuklenmez).
-  HIBRIT  — GPS + KAMERA. Ayni kalkis/GPS fazlari ile baslar; devir kapisi acilinca
-            (`control.main.PhaseSupervisor`) gorsel faza gecer ve komut
-            YALNIZCA kameradan turer (`control.visual_tracking.VisualTracker`).
-            Hedef kaybolursa GPS istasyon tutmaya geri donulur.
+UC MOD (ucu de AYNI `control/` kodunu cagirir; fark yalnizca HANGI FAZLARIN
+acilabildigidir — yasa, kapi ve zarf sabitleri MODA GORE DEGISMEZ)
+
+  GPS            — kalkis (`control.takeoff.TakeoffLaw`) + bozuk GNSS'i
+                   temizleyip hedefin kuyrugundaki istasyona oturma
+                   (`control.gps_approach.GPSTracker`).
+                   Kamera hatti HIC calismaz (dedektor yuklenmez).
+  HIBRIT         — GPS + KAMERA. Ayni kalkis/GPS fazlari ile baslar; devir
+                   kapisi acilinca (`control.main.PhaseSupervisor`) gorsel faza
+                   gecer ve komut YALNIZCA kameradan turer
+                   (`control.visual_tracking.VisualTracker`). Arac hedefin
+                   kuyrugunda OTURUR ve orada KALIR; CARPMA fazi ACILMAZ.
+                   Hedef kaybolursa GPS istasyon tutmaya geri donulur.
+  HIBRIT+CARPMA  — HIBRIT ile birebir ayni akis, tek fark: gorsel gudum
+                   `PhaseCfg.SPIKE_AFTER_VISUAL_S` (10 s) kesintisiz surunce
+                   CARPMA fazi acilir (`control.spike.SpikeLaw` — terminal
+                   hucum). Karar goreve ozeldir: `supervisor.reset(spike=...)`.
+
+⚠ MOD, YASAYA DOKUNMAZ. Modun tek etkisi (a) kamera hattinin kosup kosmadigi
+  ve (b) gozetmenin CARPMA kapisini acip acmayacagidir. Gudum sabitleri
+  (`ConverterCfg`, `GPSCfg`, `VisualCfg`) uc modda da AYNIDIR.
 
 ⛔ GORSEL FAZDA GPS/GNSS KOMUTA GIRMEZ (yarisma kurali; aksi diskalifiye).
   Yapisal garanti `VisualTracker.compute` imzasindadir: hedefe ait tek veri
@@ -47,14 +59,29 @@ from control.spike import SpikeLaw
 from perception import camera, detection_state
 from sdk import drone_sdk as drone
 
-MS_TO_KMH = 3.6
-WEB_PORT = 8001
-HERE = os.path.dirname(os.path.abspath(__file__))
-GNSS_GAP_S = 1.0
-CAMERA_WARN_S = 15.0  # s; hibrit modda bu kadar kare gelmezse uyar
+MS_TO_KMH = 3.6     # carpan; m/s -> km/h (yalniz arayuzde gosterim icin)
+WEB_PORT = 8001     # TCP portu; arayuzun dinledigi yer
+HERE = os.path.dirname(os.path.abspath(__file__))  # server.html'in bulundugu klasor
+GNSS_GAP_S = 1.0    # s; hedefin GNSS paketi bu kadar gelmezse arayuze "KESINTI"
+                    # olayi yazilir. YALNIZ GOSTERGEDIR — faz kapilarinin kendi
+                    # bayatlik esigi ayridir (`PhaseCfg.GPS_STALE_S` = 2.0 s).
+CAMERA_WARN_S = 15.0  # s; hibrit gorev basladiktan sonra bu kadar sure HIC kare
+                      # gelmezse "dedektor yuklenemedi olabilir" uyarisi yazilir
 
-MODE_GPS = "GPS"
-MODE_HYBRID = "HYBRID"
+MODE_GPS = "GPS"                    # kalkis + istasyon tutma; kamera hatti HIC kosmaz
+MODE_HYBRID = "HYBRID"              # GPS + kamera; CARPMA fazi KAPALI (kuyrukta kalinir)
+MODE_HYBRID_SPIKE = "HYBRID_SPIKE"  # GPS + kamera + CARPMA fazi (terminal hucum)
+
+
+def is_hybrid(mode=None):
+    """Kamera hatti kosan bir mod mu? (HIBRIT ve HIBRIT+CARPMA)
+
+    ⭐ TEK YERDE. "hangi modlar kamerali" sorusu koda dagilirsa yeni bir mod
+      eklendiginde bir yerde unutulur: kamera hatti sessizce kapali kalir
+      (hibrit gorev GPS gibi kosar) ya da GPS modunda acik unutulur ve
+      dedektor bosuna VRAM ayirir.
+    """
+    return (mission_mode if mode is None else mode) in (MODE_HYBRID, MODE_HYBRID_SPIKE)
 
 
 # ==========================================================
@@ -85,7 +112,12 @@ _watch = {"gap": False, "last_packet_t": None,
 
 
 def add_event(sv, message):
-    """Olay gunluge ekle. sv: bilgi|iyi|uyari|kritik."""
+    """Arayuzun olay gunlugune bir satir ekler (ve terminale basar).
+
+    sv      : onem derecesi — "info" | "good" | "warn" | "critical"
+              (arayuz bu anahtara gore renklendirir)
+    message : kullaniciya gorunen TURKCE metin
+    """
     global _event_id
     with event_lock:
         _event_id += 1
@@ -94,6 +126,10 @@ def add_event(sv, message):
 
 
 def _mission_reset(phase):
+    """Gorev gostergesini sifirlar: baslangic fazi + baslangic zamani.
+
+    phase : arayuzde gosterilecek ilk faz etiketi (genellikle "TAKEOFF")
+    """
     _mission.update(phase=phase, t0=time.time())
     # ⚠ camera.status()["kare"] KUMULATIFTIR (gorevler arasi sifirlanmaz) ->
     #   "ilk kare geldi" olayi bu gorevin TABANINA gore olculur, yoksa ikinci
@@ -106,6 +142,12 @@ def _mission_reset(phase):
 # BAGLANTI YONETICISI
 # ==========================================================
 def connection_manager():
+    """[THREAD] Oyun baglantisini ayakta tutar (2 s'de bir yoklar).
+
+    Baglanti koparsa yeniden baglanmayi dener ve durum DEGISIMLERINI olay
+    gunlugune yazar — her turda degil, yalnizca kenarda; yoksa gunluk
+    "baglandi/koptu" satirlariyla dolardi.
+    """
     _conn_prev = None
     while True:
         c = drone.is_connected()
@@ -127,7 +169,11 @@ def connection_manager():
 # IZLEYICI
 # ==========================================================
 def _track_packet():
-    """Yeni ham pakette last_packet_t'yi tazele (GNSS kesinti izleyicisi icin)."""
+    """Yeni ham GNSS paketi geldiyse damgayi tazeler (kesinti izleyicisi icin).
+
+    Paketin "yeni" olup olmadigi, SDK'nin dondurdugu demetin bir oncekiyle
+    ayni olup olmadigina bakilarak anlasilir; SDK ayri bir damga vermez.
+    """
     global _last_raw_packet
     raw = brain.last_raw
     if raw is None or raw == _last_raw_packet:
@@ -143,7 +189,7 @@ def _watch_camera():
     degilse `camera.loop` sessizce bekler ve kare sayaci hic ilerlemez —
     bu SESSIZ bir bozulmadir, arayuzun bunu soylemesi gerekir.
     """
-    if mission_mode != MODE_HYBRID or not mission_active:
+    if not is_hybrid() or not mission_active:
         return
     frames = camera.status().get("frames", 0)
     if frames > _watch.get("camera_frames0", 0):
@@ -222,7 +268,7 @@ def _takeoff_step(t):
 
     # Kamera yalnizca hibrit modda calisir; GPS modunda tespit okunmaz.
     det = seq = None
-    if mission_mode == MODE_HYBRID:
+    if is_hybrid():
         det, seq = supervisor.read_detection(t)
         _last_det = det
 
@@ -317,6 +363,21 @@ def _hybrid_step(t, dt):
 # KONTROL DONGUSU (50 Hz)
 # ==========================================================
 def control_loop():
+    """[THREAD] 50 Hz ANA KONTROL DONGUSU — gorevin kalbi.
+
+    Her tikte, icinde bulunulan faza gore dagitim yapar:
+        KALKIS  -> _takeoff_step   (moddan BAGIMSIZ, iki modda da ayni)
+        hibrit  -> _hybrid_step    (GPS <-> GORSEL <-> CARPMA)
+        GPS     -> brain.step()
+        pasif   -> brain.clean_target()  (yalniz filtreyi SICAK tutmak icin)
+
+    ⭐ BU DONGU GUDUM YASASI ICERMEZ. Komutu `control/` uretir; burasi yalnizca
+      "hangi adim cagrilacak" ve "ne kadar sure gecti" sorularini yanitlar.
+
+    ⚠ Butun tik `brain_lock` altindadir: telemetri okuyan HTTP thread'i ile
+      arasindaki tutarliligi ve `mission_stop()`un gercekten durdurmasini bu
+      kilit saglar.
+    """
     t_prev = None
     while True:
         if not drone.is_connected():
@@ -334,7 +395,7 @@ def control_loop():
                     brain.clean_target()  # gorev pasifken bile filtre isinsin
                 elif supervisor.phase == PhaseSupervisor.TAKEOFF:
                     _takeoff_step(t)      # kalkis IKI MODDA da ayni
-                elif mission_mode == MODE_HYBRID:
+                elif is_hybrid():
                     _hybrid_step(t, dt)
                 else:
                     brain.step()
@@ -354,6 +415,19 @@ def control_loop():
 # TELEMETRI
 # ==========================================================
 def build_telemetry():
+    """Arayuzun /api/telemetry ile cektigi tek JSON sozlugunu uretir.
+
+    -> dict; baglanti, mod, kendi durumumuz, hedef, guduum cubuklari, gorsel
+       faz/kapi gostergeleri, kamera sayaclari, faz etiketi ve son olaylar.
+
+    ⚠ FAZ ETIKETI TEK KAYNAKTAN gelir: "mission.phase". "visual" blogunda faz
+      metni BILEREK yoktur — iki yerde tasinsa arayuzde iki ayri (ve zamanla
+      celisen) faz gostergesi olusurdu.
+
+    ⚠ Anlik degerler `brain_lock` altinda TEK SEFERDE kopyalanir; tek tek
+      okunsalardi kontrol dongusu aradan gecip tutarsiz bir karisim uretirdi
+      (ornegin bir fazin menzili, baska bir fazin cubuk komutuyla).
+    """
     connected = drone.is_connected()
     dx, dy, dz = tlm.position_m()
     drot = tlm.orientation_deg()
@@ -394,7 +468,7 @@ def build_telemetry():
     return {
         "connected": connected,
         "mission_active": mission_active,
-        "mode": mode,  # GPS | HIBRIT
+        "mode": mode,  # GPS | HYBRID | HYBRID_SPIKE
         "drone": {
             "x": dx, "y": dy, "z": dz,
             "speed_kmh": dspd * MS_TO_KMH, "yaw": drot[2],
@@ -424,6 +498,13 @@ def build_telemetry():
             "handoff_count": sup["handoff_count"],
             "gnss_stale": sup["gnss_stale"],
             "camera_only_gate": sup["camera_only_gate"],
+            # --- CARPMA KAPISI (yalniz HIBRIT+CARPMA modunda acilabilir) ---
+            "spike_enabled": sup["spike_enabled"],
+            "spike_s": sup["visual_s"],        # GORSEL fazda kesintisiz sure
+            "spike_s_need": sup["spike_s_need"],
+            "spike_armed": sup["spike_armed"], # on-hizlanma penceresi (fren kapali)
+            "aim_settled": sup["aim_settled"], # kapinin 3. kosulu: dikey nisan
+            "spike_count": sup["spike_count"],
             "conf": det.get("conf") if det else None,
             "conf_min": VisualCfg.CONF_MIN,
             "range_m": visual_range,  # KUTUDAN (GPS'ten degil)
@@ -451,14 +532,24 @@ def build_telemetry():
 # GOREV BASLAT / DURDUR
 # ==========================================================
 def mission_start(mode):
-    """Yeni gorev: TUM durum sifirdan. mod: MODE_GPS | MODE_HYBRID."""
+    """Yeni gorev: TUM durum sifirdan.
+
+    mode: MODE_GPS | MODE_HYBRID | MODE_HYBRID_SPIKE
+
+    ⭐ CARPMA KARARI GOREV BASINDA VERILIR ve gozetmenin ORNEGINE yazilir
+      (`PhaseSupervisor.reset(spike=...)`), `PhaseCfg`e DEGIL: modul duruma
+      yazsaydik bir sonraki gorev onu devralirdi — "hibrit + carpma"dan sonra
+      "hibrit" secilse bile carpma fazi acilmaya devam ederdi. Bu, gorevi
+      durdurup yeniden baslatmada daha once yasanan MODUL DURUMU kusurlarinin
+      (bkz. CLAUDE.md §GOREVI DURDURUP YENIDEN BASLATMA) aynisi olurdu.
+    """
     global mission_active, mission_mode
     with brain_lock:
         takeoff.reset()  # zemin referansi ARM aninda yeniden alinsin
         brain.reset()
         sender.reset()
         visual.reset()
-        supervisor.reset()
+        supervisor.reset(spike=(mode == MODE_HYBRID_SPIKE))
         detection_state.reset()  # yeni gorev bayat KUTUYLA baslamasin
         camera.reset()           # ... ve bayat KAREYLE de baslamasin
         _mission_reset("TAKEOFF")
@@ -467,15 +558,27 @@ def mission_start(mode):
         #   Ayri ayri yazilsa arada bir tik "aktif ama mod eski" hali olurdu.
         mission_mode = mode
         mission_active = True
+        # ⚠ ISTENEN degil, GERCEKLESEN deger okunur: `PhaseCfg.SPIKE` (A/B ana
+        #   anahtari) kapaliysa mod acmis olsa da carpma fazi kosmaz.
+        spike_on = supervisor.spike_enabled
 
-    if mode == MODE_HYBRID:
-        msg = ("HIBRIT TAKIP BASLATILDI — GPS ile hedefin %.0f m gerisindeki "
-               "istasyona oturulacak, kilit kurulunca komut KAMERAYA devredilir"
-               % GPSCfg.STATION_RANGE_M)
-        add_event("good", "HIBRIT TAKIP BASLADI (GPS + KAMERA) — devir kapisi: "
+    if is_hybrid(mode):
+        label = "HIBRIT TAKIP + CARPMA" if spike_on else "HIBRIT TAKIP"
+        tail = (("gorsel gudum %.0f s kesintisiz surunce CARPMA fazi acilir"
+                 % PhaseCfg.SPIKE_AFTER_VISUAL_S) if spike_on
+                else "CARPMA fazi KAPALI — arac hedefin kuyrugunda kalir")
+        msg = ("%s BASLATILDI — GPS ile hedefin %.0f m gerisindeki istasyona "
+               "oturulacak, kilit kurulunca komut KAMERAYA devredilir (%s)"
+               % (label, GPSCfg.STATION_RANGE_M, tail))
+        add_event("good", "%s BASLADI (GPS + KAMERA) — devir kapisi: "
                          "%.1f s VE %d kare kilit + istasyon hatasi <%.0f m"
-                         % (VisualCfg.HANDOFF_LOCK_S, VisualCfg.HANDOFF_FRAMES,
+                         % (label, VisualCfg.HANDOFF_LOCK_S, VisualCfg.HANDOFF_FRAMES,
                             PhaseCfg.HANDOFF_STATION_ERR_M))
+        add_event("good" if spike_on else "info",
+                  ("CARPMA FAZI ACIK — %.0f s kesintisiz gorsel gudum + o anda "
+                   "TAZE kutu + dikey nisan oturmus olmali"
+                   % PhaseCfg.SPIKE_AFTER_VISUAL_S) if spike_on else
+                  "CARPMA FAZI KAPALI — gorsel faz kuyrukta kalir, terminal hucum yok")
     else:
         msg = ("GPS TAKIBI BASLATILDI — bozuk GNSS temizlenip hedefin "
                "%.0f m gerisindeki istasyona oturuluyor"
@@ -506,10 +609,25 @@ def mission_stop():
 # HTTP ISTEK ISLEYICI
 # ==========================================================
 class Handler(BaseHTTPRequestHandler):
+    """Arayuzun HTTP ucu — UC uc nokta, baskasi yok.
+
+        GET  /                 -> server.html (tek sayfa arayuz)
+        GET  /api/telemetry    -> build_telemetry() JSON'u (arayuz surekli ceker)
+        POST /api/command      -> {"cmd": "start_gps" | "start_hybrid" |
+                                   "start_hybrid_spike" | "stop"}
+    """
+
     def log_message(self, *args):
+        """HTTP erisim gunlugunu SUSTURUR.
+
+        Arayuz telemetriyi saniyede birkac kez cektigi icin varsayilan gunluk,
+        gercekten onemli olan [OLAY] ve [KAMERA] satirlarini bogardi.
+        """
         pass
 
     def _send(self, code, content, ctype):
+        """Yaniti gonderir. content BAYT olmali; Cache-Control: no-store eklenir
+        ki tarayici bayat telemetri gostermesin."""
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(content)))
@@ -518,6 +636,7 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def do_GET(self):
+        """Sayfayi ya da telemetri JSON'unu dondurur."""
         if self.path in ("/", "/index.html", "/server.html"):
             try:
                 with open(os.path.join(HERE, "server.html"), "rb") as f:
@@ -532,6 +651,7 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, b"yok", "text/plain; charset=utf-8")
 
     def _read_json(self):
+        """Istek govdesini JSON olarak cozer; cozulemezse bos sozluk doner."""
         length = int(self.headers.get("Content-Length", 0))
         raw = self.rfile.read(length).decode("utf-8") if length else "{}"
         try:
@@ -540,6 +660,7 @@ class Handler(BaseHTTPRequestHandler):
             return {}
 
     def do_POST(self):
+        """Baslat/durdur komutlarini isler ve sonucu arayuze metin olarak doner."""
         if self.path == "/api/command":
             data = self._read_json()
             cmd = data.get("cmd", "")
@@ -548,6 +669,8 @@ class Handler(BaseHTTPRequestHandler):
                 msg = mission_start(MODE_GPS)
             elif cmd == "start_hybrid":
                 msg = mission_start(MODE_HYBRID)
+            elif cmd == "start_hybrid_spike":
+                msg = mission_start(MODE_HYBRID_SPIKE)
             elif cmd == "stop":
                 msg = mission_stop()
             self._send(200, json.dumps({"ok": True, "msg": msg,
@@ -567,10 +690,17 @@ def camera_active():
     Dedektor TEMBEL yuklenir (ilk `True` doneninde) -> GPS modunda torch hic
     ice aktarilmaz, VRAM ayrilmaz, ekran yakalanmaz.
     """
-    return mission_active and mission_mode == MODE_HYBRID and drone.is_connected()
+    return mission_active and is_hybrid() and drone.is_connected()
 
 
 def main():
+    """Giris noktasi: thread'leri baslatir ve HTTP sunucusunu kosturur.
+
+    Sirasiyla baglanti yoneticisi, 50 Hz kontrol dongusu ve kamera hatti
+    (uretici + tuketici) arka planda baslar; ana thread HTTP'yi servis eder.
+    Cikista motorlar KESILIR ve baglanti kapatilir — Ctrl+C ile de olsa arac
+    komut almaya devam etmesin.
+    """
     import faulthandler, traceback
     faulthandler.enable()
 
@@ -586,7 +716,8 @@ def main():
         return
     print("  YER KONTROL ISTASYONU  ->  http://127.0.0.1:%d   (Ctrl+C: kapat)"
           % WEB_PORT)
-    print("  Modlar: GPS (yalniz istasyon tutma) | HIBRIT (GPS + kamera)")
+    print("  Modlar: GPS (yalniz istasyon tutma) | HIBRIT (GPS + kamera) | "
+          "HIBRIT + CARPMA (GPS + kamera + terminal hucum)")
     print("  Hibrit modda oyun penceresi GORUNUR/ONDE kalmali (ekran yakalanir).")
     try:
         server.serve_forever()

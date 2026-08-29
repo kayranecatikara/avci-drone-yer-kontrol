@@ -1,24 +1,65 @@
+# -*- coding: utf-8 -*-
+"""
+filter/gnss_filtre.py — ONCEKI SURUM GNSS temizleyici (ARTIK CAGRILMIYOR).
+
+Aktif kestirici `gnss_filtre_v2.py :: GNSSFilterV2`dir (CT-EKF). Bu dosya
+karsilastirma ve geri donus icin DURUYOR; silmeden once yenisinin canlida
+dogrulandigindan emin olun. Geri donerken dikkat: bu surum `lead_s=` degil
+`delay_s=` parametresi alir.
+
+YAKLASIM FARKI (ikisi de ayni sozlesmeyi saglar):
+    ESKI (bu dosya)  pencere tabanli SPIKE KAPILARI + son N noktadan lineer
+                     hiz egimi + GUVEN AGIRLIKLI lead
+    YENI (v2)        CT-EKF cekirdegi + Mahalanobis kapilari + kacis mekanizmasi
+
+⛔ NEDEN DEGISTIRILDI (olculdu; sentetik jammer, 120 s x 5 tohum):
+       konum hatasi medyan  21.86 m  ->  3.15 m   (6.9x)
+       hiz hatasi medyan     4.31 m/s ->  0.43 m/s (10x)
+   Kok neden: buradaki lead GUVEN AGIRLIKLI oldugu icin gecikmeyi fiilen
+   KAPATMIYORDU — 21.9 m ~= 18 m/s x 1.13 s, yani hata tam olarak telafi
+   edilmemis gecikmenin kendisiydi.
+
+Birimler: giristeki olcum ve ciktinin tamami SANTIMETRE (cm, cm/s). Spike
+kapilari icerideyken METRE alaninda calisir (esikler metre cinsinden daha
+okunakli oldugu icin); donusum update() icinde yapilir.
+"""
 import time
 
 # ==========================================================
-# Constants
+# SABITLER
 # ==========================================================
-CM_TO_M = 0.01
-M_TO_CM = 100.0
-# cm/s; gercekci hedef hiz tavani (~40 m/s). Ham lead-hizi bununla kirpilir.
-MAX_TARGET_SPEED = 4000.0
-VEL_EMA = 0.15              # lead-hizi yumusatma orani
-MAX_LEAD = 600.0            # cm; lead-mesafe tavani
-# cm/s; anlik vs yumusak hiz farki bu degerde lead guveni 0'a duser
-CONSISTENCY_SCALE = 1500.0
-GAP_DT           = 2.5      # sn; dropout/kesinti -> cooldown baslat
-COOLDOWN_N       = 3        # ornek; bosluk sonrasi lead'i agir kistigimiz ornek sayisi
-COOLDOWN_CONF   = 0.2       # cooldown suresince lead carpani
+CM_TO_M = 0.01    # carpan; cm -> m
+M_TO_CM = 100.0   # carpan; m -> cm
+MAX_TARGET_SPEED = 4000.0   # cm/s; gercekci hedef hiz tavani (~40 m/s). Egimden
+                            # cikan ham hiz bununla kirpilir; jammer sicramasi
+                            # egime girdiginde anlamsiz buyuk hiz uretir.
+VEL_EMA = 0.15              # 0..1; hiz kestiriminin EMA katsayisi. Kucuk = sakin
+                            # ama gec; dongu jitter'indan gelen titremeyi onler.
+MAX_LEAD = 600.0            # cm; gecikme telafisinin eksen basina tavani (6 m).
+                            # Hiz kestirimi bozulursa lead'in hedefi metrelerce
+                            # oteye firlatmasini engeller.
+CONSISTENCY_SCALE = 1500.0  # cm/s; ANLIK hiz ile YUMUSAK hiz farki bu degere
+                            # ulastiginda lead guveni 0'a duser (lead tamamen
+                            # kapanir). Tutarsiz hiz = guvenilmez lead demektir.
+GAP_DT           = 2.5      # s; iki paket arasi bundan uzunsa "kesinti" sayilir
+                            # ve cooldown baslar
+COOLDOWN_N       = 3        # adet ornek; kesinti sonrasi lead'in agir kisildigi
+                            # ornek sayisi (hiz kestirimi henuz toparlanmamistir)
+COOLDOWN_CONF   = 0.2       # carpan; cooldown suresince lead'e uygulanan katsayi
 
 # ==========================================================
-# HELPERS
+# YARDIMCILAR
 # ==========================================================
 def _slope(ts, vs):
+    """En kucuk kareler dogru uydurup EGIMI dondurur (hiz kestirimi).
+
+    ts : [s]; zaman damgalari
+    vs : [deger]; ayni uzunlukta olcum dizisi
+    -> egim, yani deger/saniye (ts saniye ise). Iki noktadan az varsa 0.0.
+
+    Iki nokta arasi basit fark yerine bu kullanilir: gurultulu olcumde
+    ardisik fark gurultuyu 1/dt ile BUYUTUR, egim ise N noktaya yayar.
+    """
     m = len(ts)
     if m < 2:
         return 0.0
@@ -32,15 +73,36 @@ def _slope(ts, vs):
 
 
 def _time_axis(times, n):
+    """Zaman ekseni uretir: `times` verilmisse onu, verilmemisse 0.2 s'lik
+    esit araliklarla varsayilan bir eksen (n eleman).
+
+    Varsayilan aralik nominal GNSS paket periyodudur (5 Hz).
+    """
     if times is None:
         return [0.2 * i for i in range(n)]
     return list(map(float, times))
 
 
 # ==========================================================
-# SPIKE TEMIZLEYICILER
+# SPIKE TEMIZLEYICILER — hepsi METRE alaninda calisir
 # ==========================================================
 def z_despike(z_dizi, times=None, thresh=3.0, max_hold=8, vz_ema=0.3, max_vz=5.0):
+    """Irtifa dizisindeki jammer sicramalarini temizler.
+
+    z_dizi   : [m]; ham irtifa dizisi
+    times    : [s]; damgalar (None -> 0.2 s'lik varsayilan eksen)
+    thresh   : m;   olcum, ONGORULEN degerden bu kadar uzaksa SICRAMA sayilir
+                    ve yerine ongoru konur
+    max_hold : adet; ust uste en fazla kac ornek degistirilebilir. Sinir
+                    ZORUNLUDUR: hedef gercekten tirmaniyorsa filtre onu sonsuza
+                    kadar "sicrama" sayip gercekten kopardi.
+    vz_ema   : 0..1; dikey hiz kestiriminin EMA katsayisi
+    max_vz   : m/s;  dikey hiz kestiriminin tavani
+    -> temizlenmis dizi (ayni uzunlukta, [m])
+
+    Yontem: bir onceki temiz noktadan hizla ONGORU uret, olcum ongoruden
+    `thresh`ten uzaksa olcumu degil ONGORUYU yaz.
+    """
     z = list(map(float, z_dizi))
     if not z:
         return z
@@ -67,6 +129,23 @@ def z_despike(z_dizi, times=None, thresh=3.0, max_hold=8, vz_ema=0.3, max_vz=5.0
 
 def x_despike(x_dizi, y_dizi=None, times=None,
               speed_thresh=12.0, pos_thresh=8.0, N=5, max_hold=6, max_speed=40.0):
+    """Yatay X (istege bagli olarak X-Y birlikte) dizisini temizler.
+
+    x_dizi       : [m]; ham X dizisi
+    y_dizi       : [m]; verilirse sapma 2B olarak olculur (daha secici)
+    times        : [s]; damgalar
+    speed_thresh : m/s; olcumun ima ettigi hiz, egimden gelen hizdan bu kadar
+                   sapiyorsa suphelidir
+    pos_thresh   : m;   VE olcum, ongorulen konumdan bu kadar uzaksa
+    N            : adet; hiz egiminin hesaplandigi son nokta sayisi
+    max_hold     : adet; ust uste degistirilebilecek azami ornek
+    max_speed    : m/s;  egimden gelen hizin kirpma tavani
+    -> temizlenmis X dizisi ([m])
+
+    ⭐ IKI KOSUL BIRDEN aranir (hem hiz hem konum sapmasi). Tek kosul yeterli
+      sayilsaydi hedefin gercek manevrasi sicrama sanilirdi: manevrada hiz
+      degisir ama konum ongoruye yakin kalir.
+    """
     x = list(map(float, x_dizi))
     n = len(x)
     if n < 3:
@@ -113,6 +192,17 @@ def x_despike(x_dizi, y_dizi=None, times=None,
 
 def y_despike(y_dizi, times=None, speed_thresh=15.0, pos_thresh=6.0,
               N=5, max_hold=6, max_speed=25.0):
+    """Yatay Y dizisini TEK BOYUTLU olarak temizler (parametreler `x_despike`
+    ile ayni anlamda; esikler yalnizca bu eksen icin ayri secilmistir).
+
+    y_dizi       : [m]; ham Y dizisi
+    speed_thresh : m/s; hiz sapmasi esigi
+    pos_thresh   : m;   konum sapmasi esigi
+    N            : adet; egim penceresi
+    max_hold     : adet; ust uste azami degistirme
+    max_speed    : m/s;  egim kirpma tavani
+    -> temizlenmis Y dizisi ([m])
+    """
     y = list(map(float, y_dizi))
     n = len(y)
     if n < 3:
@@ -147,23 +237,50 @@ def y_despike(y_dizi, times=None, speed_thresh=15.0, pos_thresh=6.0,
 
 
 # ==========================================================
-# STREAMING SARMALAYICI
+# AKIS SARMALAYICISI
 # ==========================================================
 class GNSSFilter:
+    """Yukaridaki toplu (batch) temizleyicileri AKIS arayuzune ceviren sarmalayici.
+
+    Her yeni olcumde pencerenin TAMAMI yeniden temizlenir ve son eleman
+    "simdiki temiz kestirim" olarak alinir. Bu, EKF'e gore pahalidir ama
+    durum tasimadigi icin sicrama sonrasi kendini toparlar.
+
+    SOZLESME (v2 ile ayni; degistirilecekse ikisi de degistirilmeli):
+        update(x, y, z)  -> (x, y, z) cm TELAFILI temiz konum | None (isinmadi)
+        guidance_state() -> {"pos": (x,y,z), "vel": (vx,vy,vz)} cm, cm/s | None
+    """
+
     def __init__(self, delay_s=1.0, window=400, vel_n=7):
-        # delay_s : olcum ~bu kadar eski -> ileri-tahminle telafi edilir
-        # window  : tutulan ham ornek penceresi
-        # vel_n   : hiz kestiriminde son N nokta (buyuk = daha yumusak)
+        """delay_s : s;     olcumun gecikmesi — cikis bu kadar ILERI tasinir
+        window  : adet; bellekte tutulan ham ornek sayisi (pencere).
+                  Buyutmek gecmisi uzatir ama her guncellemede TUM pencere
+                  yeniden temizlendigi icin maliyeti dogrudan arttirir.
+        vel_n   : adet; hiz egiminin hesaplandigi son nokta sayisi.
+                  Buyuk = daha yumusak ama daha gec hiz kestirimi.
+        """
         self.delay_s = float(delay_s)
         self.window = int(window)
         self.vel_n = int(vel_n)
-        self._xs = []; self._ys = []; self._zs = []; self._ts = []   # ham (m) + zaman
-        self._pos = None     # son telafisiz temiz konum (cm)
-        self._vel = None     # son hiz (cm/s) — yumusatilmis (guduum + lead ortak)
-        self._v_lead = None  # lead-hizi EMA durumu
-        self._cooldown = 0   # dropout/kesinti sonrasi lead-kisma sayaci
+        self._xs = []; self._ys = []; self._zs = []; self._ts = []  # ham ornek penceresi:
+                             # konumlar METRE, damgalar saniye (perf_counter)
+        self._pos = None     # (x,y,z) cm; son TELAFISIZ temiz konum
+        self._vel = None     # (vx,vy,vz) cm/s; son yumusatilmis hiz — hem guduume
+                             # ileri beslenir hem lead hesabinda kullanilir
+        self._v_lead = None  # (vx,vy,vz) cm/s; hiz EMA'sinin ic durumu
+        self._cooldown = 0   # adet; kesinti sonrasi lead'in kisildigi kalan ornek
 
     def update(self, noisy_x, noisy_y, noisy_z):
+        """HAM (bozuk) GNSS olcumunu isler ve TEMIZ hedef konumunu dondurur.
+
+        noisy_x/y/z : cm; SDK'nin get_target_location() ciktisi
+        -> (x, y, z) cm — gecikmesi telafi edilmis konum, ya da None (tek
+           ornek var, hiz kestirilemedi)
+
+        Adimlar: pencereye ekle -> uc ekseni de topluca temizle -> son
+        `vel_n` noktadan hiz egimi -> zarfa kirp -> EMA -> lead guveni ->
+        gecikme telafisi.
+        """
         t = time.perf_counter()
         self._xs.append(float(noisy_x) * CM_TO_M)  # cm -> m (spike esikleri metre)
         self._ys.append(float(noisy_y) * CM_TO_M)
@@ -203,7 +320,9 @@ class GNSSFilter:
                             (1.0 - a) * self._v_lead[2] + a * vz)
         self._vel = self._v_lead
 
-        # --- Lead guven faktoru
+        # --- Lead guven faktoru: ANLIK hiz ile YUMUSAK hiz ne kadar tutarli?
+        #     Ikisi ayrisiyorsa hiz kestirimine guvenilmez, dolayisiyla o hizla
+        #     yapilacak ileri tasima da guvenilmez -> lead kisilir.
         dt_last = self._ts[-1] - self._ts[-2]
         if dt_last <= 1e-3:
             dt_last = 0.2
@@ -227,6 +346,14 @@ class GNSSFilter:
         return (px + lx, py + ly, pz + lz)
 
     def guidance_state(self):
+        """Istasyon yasasinin ILERI BESLEDIGI durum.
+
+        -> {"pos": (x,y,z) cm, "vel": (vx,vy,vz) cm/s} | None (isinmadi)
+
+        ⚠ `pos` TELAFISIZ (lead uygulanmamis) konumdur; `update()`in dondurdugu
+          konum ise ileri tasinmistir. Ikisini karistirmak gecikme x hedef hizi
+          kadar, yani 18 m/s'de ~18 m sabit hata verir.
+        """
         if self._pos is None or self._vel is None:
             return None
         return {"pos": self._pos, "vel": self._vel}

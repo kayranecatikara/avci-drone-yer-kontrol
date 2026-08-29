@@ -1,14 +1,28 @@
 # -*- coding: utf-8 -*-
 """
-control/visual_tracking.py — GORSEL FAZ: IBVS
+control/visual_tracking.py — GÖRSEL FAZ: IBVS (görüntü tabanlı güdüm)
 
-AMAÇ: Kontrol hatasını doğrudan görüntü uzayında tanımlama (pixel)
+AMAÇ: Kontrol hatasını 3B dünyada değil doğrudan GÖRÜNTÜ UZAYINDA (piksel)
+tanımlamak. Hedefin konumu/hızı hiç kestirilmez; kutunun kadrajdaki YERİ ve
+BOYUTU doğrudan hata sinyalidir.
 
-    menzil (R)   = RANGE_C_REF / kutu_boyutu
-    kerteriz     = piksel + kendi IMU'muz
+    menzil (R)   = RANGE_C_REF / kutu_boyutu            (px·m / px = m)
+    kerteriz     = piksel + KENDİ IMU'muz (ego-motion telafisi)
     yaw          = burnu kerterize çevir
-    ileri hız    = kapanma hızı denetimi: v_yer = v_hedef_LOS + K*(R - TRAIL) -> profil TRAIL_RANGE_M'de sıfırlanır, araç kuyruğa oturur
-    dikey hız    = hedefi kadraja sabit yükseklikte tut (cy -> cy_ref)
+    ileri hız    = kapanma hızı denetimi:
+                   v_yer = v_hedef_LOS + K_CLOSE*(R - TRAIL_RANGE_M)
+                   profil `TRAIL_RANGE_M`de sıfırlanır -> araç kuyruğa OTURUR ve KALIR
+    dikey hız    = hedefi kadrajda sabit yükseklikte tut (cy -> CY_REF)
+
+⛔ KATI KURAL — BU DOSYADA GPS/GNSS YOKTUR (diskalifiye sebebi). Kural
+   YAPISAL olarak sağlanır: `VisualTracker.compute(det, own_att_deg,
+   own_vel_ms, dt)` imzasında hedefe ait tek veri BBOX PİKSELLERİDİR.
+   `own_*` değerleri KENDİ IMU/hızımızdır (ego-motion telafisi), hedef
+   verisi değildir. Konum/hız/GNSS kestirimi parametre olarak bile geçmez.
+
+⚠ Kamera modeli sabitleri (`TILT_DEG`, `F_PX_REF`, `RANGE_C_REF`) OYUNUN
+  sanal kamerasına aittir. Gerçek kameraya geçilirse üçü de geçersizdir ve
+  yeniden kalibrasyon şarttır.
 """
 import math
 import time
@@ -17,36 +31,76 @@ from control.common import ConverterCfg, VelocityToStick, clamp, wrap_deg
 
 
 # ==========================================================
-#  KAMERA MODELİ (kalibrasyon referansı 1920x1080)
+#  KAMERA MODELİ — KALİBRE EDİLDİ (referans çözünürlük 1920x1080)
 # ==========================================================
-REF_W, REF_H = 1920.0, 1080.0
-TILT_DEG = 26.50     # kamera ekseninin burna göre açısı
-F_PX_REF = 540.4     # odak uzunluğu (px) @1920 genislik; fx = fy
-RANGE_C_REF = 997.0  # px*m @1920;  R = RANGE_C_REF / kutu boyutu
+# Model çözünürlükten BAĞIMSIZDIR: bütün piksel sabitleri `_scale(W)` ile
+# ölçeklenir, yani 1280x720 kaynakla da aynı açıları/menzilleri üretir.
+REF_W, REF_H = 1920.0, 1080.0  # px; sabitlerin ölçüldüğü referans kare boyutu
+TILT_DEG = 26.50     # derece; kamera ekseninin burna göre YUKARI bakma açısı.
+                     # Kalibre edildi (artık 2.6 px, n=614; bootstrap 26.57° ± 0.11°).
+                     # ⛔ SDK başlığının yazdığı 25° kesin olarak elenir.
+F_PX_REF = 540.4     # px @1920 genişlik; odak uzunluğu (fx = fy varsayılır).
+                     # Açı <-> piksel dönüşümünün tek katsayısıdır.
+RANGE_C_REF = 997.0  # px·m @1920; menzil sabiti:  R = RANGE_C_REF / kutu_boyutu.
+                     # Fiziksel anlamı "1 m mesafede hedef kaç piksel görünür"dür,
+                     # yani hedefin gerçek boyutu ile odak uzunluğunun çarpımı.
+                     # ⚠ Modelin KUTULAMA SIKILIĞINA bağlıdır: dedektör değişirse
+                     #   yeniden ölçülmelidir, yoksa 3-50 m kapıları yanlış yerde
+                     #   açılıp kapanır.
 
 def _scale(W):
-    """Yakalanan kare genişliğinin kalibrasyon referansına oranı"""
+    """Yakalanan kare genişliğinin kalibrasyon referansına oranı (birimsiz).
+
+    W = 1920 -> 1.0,  W = 1280 -> 0.667. Piksel cinsinden her sabit bununla
+    çarpılır; model böylece çözünürlükten bağımsız kalır.
+    """
     return float(W) / REF_W
 
 def f_px(W):
+    """Bu kare genişliği için odak uzunluğu (px)."""
     return F_PX_REF * _scale(W)
 
 def range_m(box_px, W):
-    """Kutu boyutundan menzil (m)"""
+    """Kutu boyutundan menzil kestirir.
+
+    box_px : px; kutunun BÜYÜK kenarı (max(w, h))
+    W      : px; kare genişliği (ölçekleme için)
+    -> menzil (m) | None (boyut geçersiz)
+
+    ⚠ Bu bir TERSLEMEDİR: `size`daki simetrik gürültü `R`de çarpık ve ağır
+      kuyruklu olur. Bu yüzden yumuşatma `R`ye değil `size`a uygulanır
+      (bkz. `VisualTracker.compute`).
+    """
     if box_px <= 0:
         return None
     return (RANGE_C_REF * _scale(W)) / float(box_px)
 
 
 def pixel_angle(cx_px, cy_px, W, H):
-    """Kadraj konumundan kamera eksenine göre (yatay, dikey) açı (derece)"""
+    """Kadraj konumundan KAMERA EKSENİNE göre açı.
+
+    cx_px, cy_px : px; kutu merkezi
+    W, H         : px; kare ölçüleri
+    -> (yatay, dikey) derece; dikeyde YUKARI pozitiftir
+    """
     f = f_px(W)
     return (math.degrees(math.atan((cx_px - W / 2.0) / f)),
             math.degrees(math.atan((H / 2.0 - cy_px) / f)))
 
 
 def pixel_bearing(cx_px, cy_px, own_pitch_deg, own_roll_deg, W, H):
-    """Kadraj konumundan gövdeden bağımsız kerteriz (azimut, yükseliş) derece"""
+    """Kadraj konumundan GÖVDEDEN BAĞIMSIZ kerteriz üretir (ego-motion telafisi).
+
+    cx_px, cy_px  : px; kutu merkezi
+    own_pitch_deg : derece; KENDİ pitch'imiz
+    own_roll_deg  : derece; KENDİ roll'ümüz
+    W, H          : px; kare ölçüleri
+    -> (azimut, yükseliş) derece — burnumuza göre, ama yatışımızdan arındırılmış
+
+    Sıra önemlidir: önce kaydırma (kamera tilt + kendi pitch'imiz), sonra
+    roll ile döndürme. Girdi yalnız piksel ve KENDİ IMU'muzdur; hedefe ait
+    hiçbir konum/hız verisi kullanılmaz.
+    """
     horiz, vert = pixel_angle(cx_px, cy_px, W, H)
     elevation = vert + TILT_DEG + own_pitch_deg
     if own_roll_deg:
@@ -57,7 +111,15 @@ def pixel_bearing(cx_px, cy_px, own_pitch_deg, own_roll_deg, W, H):
 
 
 def bearing_pixel(azimuth_deg, elevation_deg, own_pitch_deg, own_roll_deg, W, H):
-    """`pixel_bearing`in TAM TERSI: kerterizden kadraj konumu (cx, cy)"""
+    """`pixel_bearing`in TAM TERSİ: kerterizden kadraj konumu üretir.
+
+    -> (cx, cy) px
+
+    KUTU KÖPRÜSÜNÜN çekirdeğidir: tespit gelmediğinde son kutunun ATALET
+    yönü saklanır ve o yön, ARADA DÖNMÜŞ olan kendi gövdemize göre yeniden
+    kadraja yansıtılır. Böylece bayat kutu, kendi hareketimiz telafi edilerek
+    ileri taşınır.
+    """
     # Sırası önemlidir. İleri dönüşümde önce kaydırır (dil + tilt + pitch) sonra roll ile döndürür.
     horiz, elev = azimuth_deg, elevation_deg
     if own_roll_deg:
@@ -74,20 +136,45 @@ def bearing_pixel(azimuth_deg, elevation_deg, own_pitch_deg, own_roll_deg, W, H)
 #  AYARLAR
 # ==========================================================
 class VisualCfg:
-    # ============ GÜVENİLİRLİK ============
-    CONF_MIN = 0.40     # Doğruluk değeri
-    SIZE_MIN_PX = 8.0   # px @1920; kutu boyutu güvenilirliği
-    RANGE_MAX_M = 50.0  # m; görsel devir sınırı
-    RANGE_MIN_M = 3.0   # m; takip mesafesi
-    STALE_S = 0.5       # s; tespitin geçerli sayıldığı süre
+    """Görsel fazın ayarları: geçerlilik kapıları, kilit, kazançlar, köprü.
 
-    # ============ DEVIR KİLİDİ ============
-    HANDOFF_LOCK_S = 1.0  # s; kesintisiz görsel kanıt süresi
-    HANDOFF_FRAMES = 10   # art arda geçerli kare sayısı
+    Dikey/yaw tavanları burada TANIMLANMAZ, `ConverterCfg`ten okunur.
+    `SpikeCfg` de yaw ve dikey kanal sabitlerini buradan okur — kamera ve
+    araç sabitleri faza ait değildir, tek kaynakta durur.
+    """
+
+    # ============ GEÇERLİLİK KAPILARI (`aim_box`) ============
+    CONF_MIN = 0.40     # 0..1; dedektör güveni bunun altındaki kutu güdüme HİÇ girmez.
+                        # Ölçüldü: eşik 0.10'da tespit %49 / argmax doğru %43;
+                        # 0.40'ta %40 / %40 — yani ~9 puan tespit karşılığında
+                        # yanlış-pozitifin argmax'ı çalması TAMAMEN biter.
+    SIZE_MIN_PX = 8.0   # px @1920; bundan küçük kutunun boyut ölçümü güvenilmezdir
+                        # (menzil `C/size` olduğu için küçük kutuda hata patlar)
+    RANGE_MAX_M = 50.0  # m; ÜST menzil kapısı. Ölçüldü: 60-90 m'de tespit %9 —
+                        # orada görsel faz açılmaz, GPS fazı sürer.
+    RANGE_MIN_M = 3.0   # m; ALT menzil kapısı. Bunun altındaki kutu gerçek hedef
+                        # değil DEV YANLIŞ-POZİTİFtir: dedektör 140 m'de bu boyutta
+                        # kutu üretiyordu, güdüm "temas" sanıp tam hücum veriyor ve
+                        # araç yere çakılıyordu (iki koşu, "Player ☠").
+                        # ⛔ DÜŞÜRMEYİN. Terminal fazın ihtiyacı `TERMINAL_GROWTH`
+                        #   istisnasıyla, bu kapı silinmeden karşılanır.
+    STALE_S = 0.5       # s; tespit bundan eskiyse artık güdüme giremez ("bayat")
+
+    # ============ DEVİR KİLİDİ (GPS -> GÖRSEL kapısının 1. koşulu) ============
+    # ⭐ İKİSİ BİRDEN GEREKİR; fiilî kapı = max(süre, kare/dedektör_hızı).
+    #   Yalnız KARE saysaydık kapı dedektör hızlandıkça SESSİZCE zayıflardı:
+    #       8-10 Hz -> 1.00 s | 29.9 FPS -> 0.33 s | 53.2 FPS -> 0.19 s
+    #   Yalnız SÜRE saysaydık DONMUŞ kamerayla açılırdı (duvar saati ilerler,
+    #   kare sayacı durur). Kapı geç açılıyorsa ÖNCE `HANDOFF_LOCK_S`i düşürün;
+    #   hızlı dedektörde bağlayan koşul süredir, kare değildir.
+    HANDOFF_LOCK_S = 1.0  # s; kanıt zincirinin kesintisiz sürmesi gereken SÜRE
+    HANDOFF_FRAMES = 10   # adet; ayrı ayrı KARE sayısı (aynı kare tekrar sayılmaz)
    
-    # ============ İLERİ HIZ ============
-    V_MAX = 28.0          # m/s; yatay hız tavanı
-    V_MIN = 0.0           # m/s; yatay hız tabanı
+    # ============ İLERİ HIZ: KAPANMA HIZI DENETİMİ ============
+    V_MAX = 28.0          # m/s; ileri hız TAVANI — "hücum hızı" DEĞİLDİR.
+                          # Hedef (Talon) 17.98 m/s uçuyor: 18 ile kapanma
+                          # 0.02 m/s = asla yakalayamayız. 28 -> kapanma ~10 m/s.
+    V_MIN = 0.0           # m/s; ileri hız TABANI — asla geri gitme
 
     # ⛔ MARJ ZORUNLU: TRAIL_RANGE_M > RANGE_MIN_M olmalı, EŞİT OLAMAZ.
     #   Yasa aracı tam olarak buraya oturtur; `aim_box` ise R < RANGE_MIN_M
@@ -110,27 +197,59 @@ class VisualCfg:
     #     kabaca YARISI. 3.5-4.0 da yetmez (g>%17 / %33 reddeder).
     #   ⛔ RANGE_MIN_M'i DÜŞÜREREK çözmeyin: o kapı 140 m'deki dev
     #     yanlış-pozitifleri kesen kapıdır (iki koşuda araç onsuz yere çakıldı).
-    TRAIL_RANGE_M = 4.5   # m; kapanma hızının sıfırlandığı menzil
-    K_CLOSE = 0.6         # 1/s; v_kapanma = K_CLOSE * (R - TRAIL_RANGE_M)
-    V_CLOSE_MAX = 12.0    # m/s; azami kapanma hızı
-    R_TAU = 0.20          # s; profilde kullanılan menzilin süzgeci
-    V_TGT_TAU = 0.5       # s; hedef hızı kestirimin süzgeci
+    TRAIL_RANGE_M = 4.5   # m; kapanma profilinin SIFIRLANDIĞI menzil = aracın
+                          # oturacağı denge noktası. `ATTACK_RANGE_M`(1 m) DEĞİLDİR:
+                          # görü sınırının (RANGE_MIN_M) ALTINA regüle etmek,
+                          # ulaşılamayan bir noktaya nişan almak olurdu.
+    K_CLOSE = 0.6         # 1/s; menzil fazlasını kapanma hızına çeviren P kazancı:
+                          # v_kapanma = K_CLOSE * (R - TRAIL_RANGE_M)
+    V_CLOSE_MAX = 12.0    # m/s; azami kapanma hızı. Aynı zamanda `Rdot` fiziksel
+                          # kapamasının sınırıdır — yasa bundan hızlı kapanma
+                          # komut etmediğine göre bundan hızlı bir ÖLÇÜM de
+                          # gerçek olamaz (bkz. `_closing_speed`).
+    R_TAU = 0.20          # s; menzil yumuşatmasının zaman ölçeği. Hem EMA zaman
+                          # sabiti hem de `size` medyan penceresi budur.
+    V_TGT_TAU = 0.5       # s; hedefin LOS hızı kestiriminin EMA zaman sabiti
 
-    # ============ YAW ============
-    K_YAW = 1.0           # kerteriz -> burun hedefi
-    KP_YAW_RATE = 3.0     # yaw hatasi (derece) -> yaw hizi (derece/s)
-    YAW_RATE_MAX = ConverterCfg.YAW_RATE_MAX_DEG
-    YAW_DEADBAND = 1.0    # derece; yaw düzeltmesi sınırı
+    # ============ YAW: BURNU KERTERİZE ÇEVİR ============
+    K_YAW = 1.0           # oran (birimsiz); azimut hatasının ne kadarı burun
+                          # hedefine yansıtılsın — 1.0 = TAM düzeltme
+    KP_YAW_RATE = 3.0     # 1/s; yaw hatasını (derece) dönüş hızına (derece/s) çeviren P kazancı
+    YAW_RATE_MAX = ConverterCfg.YAW_RATE_MAX_DEG  # derece/s; azami dönüş hızı (tek kaynak).
+                          # Araç 214 yapabiliyor ama 120'de tutuluyor: hızlı yaw
+                          # görüntüyü bulandırıp dedektörü kırar — BİLİNÇLİ.
+    YAW_DEADBAND = 1.0    # derece; azimut hatası bunun altındaysa yaw düzeltmesi
+                          # HİÇ verilmez (gürültüye karşı sakin burun)
 
-    # ============ DİKEY: KADRAJ REGULASYONU ============
-    K_CY = 0.014             # (m/s)/px @1080 yukseklik
-    CY_REF = 470.0           # px @1080; hedefi merkezin üstünde tut
-    VZ_CAP_VISUAL = 4.0      # m/s; dikey yumuşatma tavanı
-    VZ_MAX_CLIMB = ConverterCfg.VZ_MAX_CLIMB
-    VZ_MAX_DESCENT = ConverterCfg.VZ_MAX_DESCENT
+    # ============ DİKEY: KADRAJ REGÜLASYONU (saf takip DEĞİL) ============
+    # ⛔ SAF TAKİP DENENDİ VE ÇÖKTÜ. Hız vektörünü 3B'de hedefe nişanlamak,
+    #   24° yükselişte 28*sin(24°) = 11.4 m/s tırmanma komutu veriyor; araç
+    #   hedefin hizasına çıkıyor ve kamera 26.5° YUKARI baktığı için hedef
+    #   görünmez oluyordu (tespit %90 -> %12-15, isabet 0/3). Yerine hedefi
+    #   kadrajda sabit bir yükseklikte tutan regülasyon kondu.
+    K_CY = 0.014             # (m/s)/px @1080 yükseklik; dikey kadraj hatasını
+                             # dikey hıza çeviren P kazancı
+    CY_REF = 470.0           # px @1080; hedefin tutulacağı kadraj yüksekliği (nişan
+                             # noktası). Merkezin (540) ÜSTÜNDEDİR: kameranın 26.5°
+                             # yukarı bakışıyla uyumlu olarak altta kalıp yukarı bakarız.
+    VZ_CAP_VISUAL = 4.0      # m/s; dikey hız komutunun tavanı. Kazançla BİRLİKTE
+                             # ayarlandı (0.06/1.5 -> 0.014/4.0): doyum oranı %97 -> %17.7,
+                             # yani dikey kanal aç-kapa anahtarı olmaktan çıkıp gerçek
+                             # bir orantılı kontrolcü oldu (doğrusal aralık ±25 -> ±286 px).
+                             # Mekanizma: dikey komut throttle'ı sıçratır, araç savrulur,
+                             # 70 px'lik hedef bulanır — |throttle| tespiti EN ÇOK bozan
+                             # büyüklüktür (0.300 tespit var / 0.669 yok).
+    VZ_MAX_CLIMB = ConverterCfg.VZ_MAX_CLIMB      # m/s; aracın zarfı (tek kaynak)
+    VZ_MAX_DESCENT = ConverterCfg.VZ_MAX_DESCENT  # m/s; aracın zarfı (tek kaynak)
 
-    # ============ KUTU KÖPRÜSÜ ============
-    BRIDGE_S = 1.0  # s;
+    # ============ KUTU KÖPRÜSÜ (ölü-hesap) ============
+    # Çıkarım ~10-50 Hz, döngü 50 Hz: aradaki her tikte ve her tespit boşluğunda
+    # güdüm kutusuz kalırdı. Köprü, son geçerli kutunun ATALET yönünü saklar ve
+    # KENDİ dönüşümüzü telafi ederek kadraja geri yansıtır.
+    # ⭐ Girdi yalnız son kutu + kendi IMU'muzdur: GPS yok, menzil yok.
+    BRIDGE_S = 1.0  # s; bayat kutunun ileri taşınabileceği azami süre. Tarandı:
+                    # 0.3 -> 3.35 m | 0.5 -> 1.90 m | 1.0 -> 1.34 m (en yakın menzil,
+                    # kazanan) | 2.0 ek kazanç vermedi.
 
     # ============ TERMİNAL SÜREKLİLİK (yalnız ÇARPMA fazında) ============
     # ⛔ VARSAYILAN OLARAK ETKİSİZDİR. `aim_box` bu istisnayı yalnızca
@@ -159,7 +278,12 @@ EDGE_EPS_PX = 1.0
 
 
 def _median(vals):
-    """Küçük dizi için medyan — ORTALAMA DEĞİL, çünkü gürültü darbelidir."""
+    """Küçük bir dizinin medyanı (boş dizide None).
+
+    ⛔ ORTALAMA/EMA DEĞİL. Kutu boyutu gürültüsü DARBELİDİR (ardışık iki
+      karede 4.26 kat sıçrama ölçüldü); EMA darbeyi silmez, zamana yayar.
+      Medyan aykırı değeri tümden atar.
+    """
     v = sorted(vals)
     n = len(v)
     if not n:
@@ -329,7 +453,13 @@ def spike_framed(det, cfg=VisualCfg):
 
 
 def is_stale(det, cfg=VisualCfg, now=None):
-    """Tespit STALE_S'ten eski mi?"""
+    """Tespit `STALE_S`ten eski mi? -> True ise güdüme giremez.
+
+    det : tespit kaydı; `t` alanı perf_counter damgasıdır
+    now : s; karşılaştırma anı (verilmezse şimdi)
+
+    Tespitin HİÇ olmaması da bayat sayılır (None -> True).
+    """
     if det is None or det.get("t") is None:
         return True
     now = time.perf_counter() if now is None else now
@@ -339,29 +469,54 @@ def is_stale(det, cfg=VisualCfg, now=None):
 #  GORSEL FAZ SÜRÜCÜSÜ
 # ==========================================================
 class VisualTracker:
-    """IBVS gorsel güdüm"""
+    """GÖRSEL fazın sürücüsü — IBVS yasası + kutu köprüsü.
+
+    İki dış yöntemi vardır:
+        box(...)      hangi kutuyla uçacağız? (taze tespit ya da köprü)
+        compute(...)  o kutudan çubuk komutu üret
+
+    Araç hedefin KUYRUĞUNA oturur ve orada KALIR; temas etmez. Terminal hücum
+    ayrı bir fazın (`control/spike.py`) işidir.
+    """
 
     def __init__(self, cfg=VisualCfg):
+        """cfg: görsel faz ayarları (varsayılan `VisualCfg`)."""
         self.cfg = cfg
         self.conv = VelocityToStick()
         self.reset()
 
     def reset(self):
-        """Her yeni görsel faz başında çağrılır."""
-        self._bridge = None     # son geçerli kutunun atalet yönü
-        self._bridge_count = 0  # mekanizma sütunu
-        self._size_buf = []     # (t, kutu boyutu) — menzil süzgeci BURADA (bkz. compute)
-        self._R_f = None        # süzülmüş menzil (m)
-        self._R_prev = None     # son ölçüm menzili
-        self._dt_acc = 0.0      # iki menzil ölçümü arasi birikmiş süre (s)
-        self._Rdot = 0.0        # menzil türevi (m/s)
-        self._v_tgt_los = None  # hedefin LOS boyunca hızı (m/s)
-        self._v_cmd = 0.0       # son ileri hız komutu
-        self._tlm = {}
+        """Her yeni görsel faz başında çağrılır — kestirim durumu TAZE başlar.
+
+        Taşınırsa bir önceki angajmanın menzil/hız kestirimi yeni angajmanın
+        ilk tikine ön yük olarak girer ve komut sıçrar.
+        """
+        self._bridge = None     # son geçerli kutunun ATALET yönü {az, el, w, h, ...} | None
+        self._bridge_count = 0  # adet; köprüden üretilen kare sayısı (mekanizma sütunu)
+        self._size_buf = []     # [(t, kutu boyutu px)]; medyan süzgecinin penceresi.
+                                # ⭐ SÜZGEÇ `size`A UYGULANIR, `R`YE DEĞİL (bkz. compute)
+        self._R_f = None        # m; EMA ile süzülmüş menzil (kapanma profilinin girdisi)
+        self._R_prev = None     # m; son menzil ÖLÇÜMÜ (türev için)
+        self._dt_acc = 0.0      # s; iki menzil ölçümü arasında biriken süre
+        self._Rdot = 0.0        # m/s; menzilin değişim hızı (negatif = kapanıyoruz)
+        self._v_tgt_los = None  # m/s; hedefin LOS (görüş hattı) boyunca hızı | None
+        self._v_cmd = 0.0       # m/s; son ileri hız komutu (köprü karesinde tekrarlanır)
+        self._tlm = {}          # son tikin telemetrisi
 
     # ------------------------------------------------------------------
     def _closing_speed(self, R, yaw_des_deg, own_vel_ms, dt, bridge, no_brake=False):
-        """Kapanma hızı denetimli ileri hız hesabı (m/s)
+        """KAPANMA HIZI DENETİMİ — ileri hız komutunu üretir (m/s).
+
+        R           : m; bu karenin menzil ölçümü | None
+        yaw_des_deg : derece; istenen burun yönü (LOS ekseni)
+        own_vel_ms  : (vx, vy, vz) m/s; KENDİ hızımız
+        dt          : s; ölçülmüş tik süresi
+        bridge      : bu kare köprüden mi geldi? True ise kestirim ilerletilmez
+        -> ileri hız komutu (m/s)
+
+        YASA:  v_yer = v_hedef_LOS + K_CLOSE * (R - TRAIL_RANGE_M)
+        Hedefin LOS hızı KUTU BÜYÜMESİNDEN kestirilir (`Rdot`), GPS'ten değil.
+        Profil `TRAIL_RANGE_M`de sıfırlandığı için araç kuyrukta oturur.
 
         no_brake : ÇARPMA fazına geçişten hemen önceki ön-hızlanma penceresi
             (`Cfg.SPIKE_LEAD_S`). True iken kapanma profili menzille
@@ -433,7 +588,21 @@ class VisualTracker:
     #  KUTU SEÇİMİ
     # ------------------------------------------------------------------
     def box(self, det, own_att_deg, t):
-        """Güdüme verilecek kutuyu döndür"""
+        """Güdüme verilecek kutuyu seçer: TAZE tespit ya da KÖPRÜ.
+
+        det         : `aim_box`tan geçmiş tespit | None
+        own_att_deg : (roll, pitch, yaw) derece; KENDİ yönelimimiz
+        t           : s (perf_counter)
+        -> kutu dict | None (köprü de üretemedi)
+
+        Taze tespit varsa köprü durumu ONUNLA tazelenir ve tespit aynen
+        döner. Tespit yoksa son kutunun atalet yönü, arada dönmüş olan kendi
+        gövdemize göre kadraja geri yansıtılır ve `"bridge": True` işaretiyle
+        döner — bu işaret yasada önemlidir: köprü karesinde menzil kestirimi
+        ve integral İLERLETİLMEZ (aynı kutuyu tekrar kanıt saymamak için).
+
+        ⭐ ÇARPMA fazı da bu köprüyü kullanır — köprü TEK KAYNAKTADIR.
+        """
         roll, pitch, yaw = own_att_deg
         if det is not None:
             W = float(det["W"]); H = float(det["H"])
@@ -462,9 +631,17 @@ class VisualTracker:
     #  IBVS YASASI
     # ------------------------------------------------------------------
     def compute(self, det, own_att_deg, own_vel_ms, dt, no_brake=False):
-        """(thr, pitch, roll, yaw) çubuk konumu
+        """IBVS YASASI — kutudan çubuk komutu üretir.
 
-        no_brake : ön-hızlanma penceresi — bkz. `_closing_speed`.
+        det         : kutu (taze tespit ya da köprü); hedefe ait TEK veri budur
+        own_att_deg : (roll, pitch, yaw) derece; KENDİ yönelimimiz (ego-motion)
+        own_vel_ms  : (vx, vy, vz) m/s; KENDİ hız vektörümüz
+        dt          : s; ölçülmüş tik süresi
+        no_brake    : ön-hızlanma penceresi — bkz. `_closing_speed`
+        -> (thr, pitch, roll, yaw), dördü de -1..+1 çubuk konumu
+
+        ⛔ İmzada hedefe ait konum/hız/GNSS verisi YOKTUR ve olamaz; katı
+          kural yapısal olarak burada sağlanır.
         """
         p = self.cfg
         own_roll, own_pitch, own_yaw = own_att_deg
@@ -574,4 +751,9 @@ class VisualTracker:
         return float(thr), float(pitch), float(roll), float(yaw)
 
     def status(self):
+        """Son tikin telemetrisi (yalnız gösterge; komuta girmez).
+
+        `size_px` (süzülmüş) ile `size_raw` (ham) birlikte yayınlanır: ikisinin
+        farkı, medyan süzgecinin o an ne kadar iş yaptığını doğrudan gösterir.
+        """
         return dict(self._tlm)

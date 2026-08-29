@@ -127,7 +127,12 @@
       <div class="body">
         <button id="startGpsBtn" class="btn start" onclick="missionStart('start_gps')"><span class="ic">🛰️</span> GPS Takibi Başlat</button>
         <button id="startHybridBtn" class="btn start" onclick="missionStart('start_hybrid')"><span class="ic">🎥</span> Hibrit Takip Başlat <small style="color:var(--muted)">(GPS + Kamera)</small></button>
+        <button id="startHybridSpikeBtn" class="btn start" onclick="missionStart('start_hybrid_spike')"><span class="ic">🎯</span> Hibrit Takip + Çarpma <small style="color:var(--muted)">(GPS + Kamera + Terminal Hücum)</small></button>
         <button class="btn stop" onclick="missionStop()"><span class="ic">⏹️</span> Durdur</button>
+        <div class="note">Üç mod da aynı kalkış ve GPS istasyon fazıyla başlar.
+          <b>Hibrit</b> görsel fazda kalır: araç hedefin kuyruğuna oturur ve orada tutunur.
+          <b>Hibrit + Çarpma</b> ise <span id="noteSpikeS">—</span> s kesintisiz görsel güdümden sonra terminal hücuma geçer
+          (o anda taze kutu ve oturmuş dikey nişan da şarttır).</div>
       </div>
     </section>
 
@@ -181,6 +186,7 @@
           <div class="row"><span class="k">Kadraj hatası </span><span class="v mono" id="vsEcy">—</span></div>
           <div class="row"><span class="k">Köprü </span><span class="v mono" id="vsBridge">—</span></div>
           <div class="row"><span class="k">Devir sayısı</span><span class="v mono" id="vsHandoff">—</span></div>
+          <div class="row"><span class="k">Çarpma fazı </span><span class="v mono" id="vsSpike">—</span></div>
           <div class="row"><span class="k">Kamera</span><span class="v mono" id="vsCamera">—</span></div>
         </div>
 
@@ -223,8 +229,16 @@
   </main>
 
 <script>
-  const $ = id => document.getElementById(id);
+  // ==========================================================
+  //  ARAYUZ — SALT GOSTERGE. Burada GUDUM YASASI YOKTUR ve komut
+  //  URETILMEZ; sayfa yalnizca /api/telemetry'yi ceker, gosterir ve
+  //  /api/command ile baslat/durdur tetikler. Gosterilen her sayi
+  //  sunucudan geldigi gibidir, burada hesaplanmaz.
+  // ==========================================================
+  const $ = id => document.getElementById(id);  // kisayol: getElementById
 
+  // Sunucuya baslat/durdur komutu gonderir. Hata YUTULUR: bir POST kacirmak,
+  // bir sonraki tikte zaten fark edilir ve arayuzun donmasindan iyidir.
   async function sendCommand(cmd){
     try{
       await fetch("/api/command",{method:"POST",
@@ -235,6 +249,8 @@
   function missionStart(cmd){ sendCommand(cmd || "start_gps"); }
   function missionStop(){ sendCommand("stop"); }
 
+  // Baglanti rozetini boyar. state: "ok" (oyuna bagli) | "wait" (sunucu ayakta
+  // ama oyun yok) | "bad" (sunucuya hic ulasilamiyor).
   function setConn(state){
     const dot = $("dot"), txt = $("connText");
     dot.className = "dot " + (state==="ok"?"ok":state==="wait"?"wait":"bad");
@@ -243,13 +259,21 @@
                     : "Sunucu kapalı";
   }
 
-  const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));
-  const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));
-  const f2 = (x)=> (x==null? "—" : Number(x).toFixed(2));
+  // Sayi bicimleyicileri — null/undefined DAIMA "—" olur. Bu onemlidir:
+  // "0.0" ile "veri yok" arayuzde asla karismamalidir (ornegin menzil 0 m
+  // ile menzil bilinmiyor cok farkli seylerdir).
+  const f1 = (x)=> (x==null? "—" : Number(x).toFixed(1));   // bir ondalik
+  const f0 = (x)=> (x==null? "—" : Math.round(Number(x)));  // tam sayi
+  const f2 = (x)=> (x==null? "—" : Number(x).toFixed(2));   // iki ondalik
+  // Baglanti kesilince tum sayisal alanlari "—" yapar; bayat degerlerin
+  // ekranda gecerliymis gibi asili kalmasini onler.
   const dash = ()=>["dx","dy","dz","dspd","dyaw","tx","ty","tz","dist","distClean","zDelta"]
                     .forEach(id=>$(id).textContent="—");
 
   // ===== Gorev durumu: faz cipleri =====
+  // Faz etiketi TEK KAYNAKTAN (`mission.phase`) gelir ve o da gozetmenden
+  // gelir. Yeni bir faz eklenip buraya cip konmazsa hicbir cip yanmaz —
+  // gorunur bir eksiklik; eskiden oldugu gibi YANLIS bir cip yanmaz.
   function updateMission(ms){
     ms = ms || {};
     const phase = ms.phase || "READY";
@@ -259,10 +283,17 @@
   }
 
   // ===== Hangi baslatma dugmesi etkin =====
+  // ⚠ Her mod KENDI dugmesine bakar; "hibrit degilse GPS" gibi bir varsayim
+  //   yeni mod eklendiginde YANLIS dugmeyi yakardi (faz cipinde ayni hata
+  //   yasandi: brain.phase'e dusuldugu icin her yeni faz ISTASYON gorunuyordu).
+  const MODE_BTN = {"GPS":"startGpsBtn", "HYBRID":"startHybridBtn",
+                    "HYBRID_SPIKE":"startHybridSpikeBtn"};
   function updateMode(t){
-    const active = !!t.mission_active, mode = t.mode || "GPS", hybrid = (mode === "HYBRID");
-    $("startGpsBtn").classList.toggle("active", active && !hybrid);
-    $("startHybridBtn").classList.toggle("active", active && hybrid);
+    const active = !!t.mission_active, mode = t.mode || "GPS";
+    for(const m in MODE_BTN){
+      const btn = $(MODE_BTN[m]); if(!btn) continue;
+      btn.classList.toggle("active", active && mode === m);
+    }
   }
 
   // ===== Gorsel takip (yalniz HIBRIT modda anlamli) =====
@@ -270,7 +301,8 @@
   // e_cy = kadraj regulasyon hatasi. Gorsel fazda hedefin GPS'i okunmaz.
   function updateVisual(t){
     const v = t.visual || {}, cam = t.camera || {};
-    const hybrid = (t.mode === "HYBRID") && !!t.mission_active;
+    // Kamera hatti IKI modda da kosar: HYBRID ve HYBRID_SPIKE.
+    const hybrid = (t.mode === "HYBRID" || t.mode === "HYBRID_SPIKE") && !!t.mission_active;
     $("visualCard").style.opacity = hybrid ? "1" : ".45";
 
     // Kapi 1: kesintisiz gorsel kanit — SURE **VE** KARE birlikte.
@@ -304,6 +336,23 @@
       : (v.bridge_frames ? '— <small>('+v.bridge_frames+' kare kullanıldı)</small>' : "—");
     $("vsHandoff").textContent = (v.handoff_count!=null) ? v.handoff_count : "—";
 
+    // Carpma kapisinin UC kosulu var (sure + o anda TAZE kutu + dikey nisan).
+    // Hangisinin bagladigi gorunmezse "kapi neden acilmadi?" cevapsiz kalir —
+    // devir kapisindaki "kadraj disi" uyarisinin ayni gerekcesi.
+    const phase = (t.mission && t.mission.phase) || "READY";
+    if(v.spike_s_need != null) $("noteSpikeS").textContent = f0(v.spike_s_need);
+    if(!hybrid)                $("vsSpike").innerHTML = '— <small>(kapalı)</small>';
+    else if(!v.spike_enabled)  $("vsSpike").innerHTML = 'KAPALI <small>(bu görevde — kuyrukta kalınır)</small>';
+    else if(phase === "SPIKE") $("vsSpike").innerHTML =
+      '<span style="color:var(--danger)">AKTİF</span> <small>(#'+(v.spike_count||1)+')</small>';
+    else if(phase === "VISUAL"){
+      const left = Math.max(0, (v.spike_s_need||0) - (v.spike_s||0));
+      $("vsSpike").innerHTML = f1(left)+' <small>s kaldı</small>'
+        + (v.spike_armed ? ' <small style="color:var(--warn)">ön-hızlanma</small>'
+           : (v.aim_settled === false ? ' <small style="color:var(--muted)">nişan bekleniyor</small>' : ''));
+    }
+    else $("vsSpike").innerHTML = 'hazır <small>('+f1(v.spike_s_need)+' s görsel güdüm sonrası)</small>';
+
     // Kamera hatti sessizce olebilir (torch/model yuklenemezse kare hic gelmez).
     const frames = cam.frames || 0;
     $("vsCamera").innerHTML = !hybrid ? '— <small>(kapalı)</small>'
@@ -312,6 +361,10 @@
 
   }
 
+  // Bir guduum kanalini merkezden cikan bar olarak cizer.
+  // id: bar elemani; value: -1..+1 cubuk konumu (sunucudan geldigi gibi).
+  // Pozitif deger yesile, negatif turuncuya boyanir; boylece isaret bir sayiya
+  // bakmadan gorulur (ornegin roll'un hangi yone doydugu).
   function setCmdBar(id, value){
     value = Number(value)||0; if(value>1)value=1; if(value<-1)value=-1;
     const fill=$(id); if(!fill) return;
@@ -319,6 +372,7 @@
     else        { fill.style.left=(50+value*50)+"%"; fill.style.width=(-value*50)+"%"; fill.style.background="var(--warn)"; }
     const vEl=$(id+"V"); if(vEl) vEl.textContent=value.toFixed(2);
   }
+  // Dort cubuk kanalini birden tazeler (throttle/pitch/roll/yaw).
   function updateGuidance(gd){
     gd = gd || {};
     setCmdBar("gdThr", gd.thr);   setCmdBar("gdPitch", gd.pitch);
@@ -326,11 +380,18 @@
   }
 
   // ---- Olay gunlugu ----
-  let lastEventId = 0;
+  let lastEventId = 0;  // en son islenen olayin id'si — ayni olay iki kez yazilmasin
+  // Saniyeyi "dk:sn.s" bicimine cevirir (gorev basindan itibaren gecen sure).
   function _mmss(s){ s=Math.max(0,s); const m=Math.floor(s/60), ss=s-m*60;
     return (m<10?"0":"")+m+":"+(ss<10?"0":"")+ss.toFixed(1); }
+  // Unix damgasini yerel saate cevirir (gorev baslamadan once gelen olaylar icin).
   function _hhmm(epoch){ try{ return new Date(epoch*1000).toLocaleTimeString('tr-TR',{hour12:false}); }catch(e){ return ""; } }
+  // HTML kacisi: olay metinleri sunucudan gelir ve innerHTML ile yazilir.
   function _esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+  // Yeni olaylari gunluge ekler.
+  // ⭐ Kullanici gunlugu yukari kaydirmissa OTOMATIK KAYDIRMA YAPILMAZ
+  //   (`atBottom`); yoksa bir olayi okumaya calisirken ekran surekli kacardi.
+  //   Sunucu yeniden baslarsa id'ler geriye doner ve gunluk sifirlanir.
   function updateEvents(events, mission){
     if(!Array.isArray(events)) return;
     const log=$("eventLog"); if(!log) return;
@@ -346,12 +407,20 @@
       row.innerHTML = '<span class="ev-time">'+stamp+'</span><span class="ev-'+(e.sv||"info")+'">'+_esc(e.m)+'</span>';
       log.appendChild(row);
     }
-    while(log.childElementCount>300) log.removeChild(log.firstChild);
+    while(log.childElementCount>300) log.removeChild(log.firstChild);  // DOM'u sinirli tut
     if(atBottom) log.scrollTop = log.scrollHeight;
   }
 
   // ---- Kusbakisi mini-harita: avci / ham hedef / temiz hedef izleri ----
-  let mmHunter=[], mmRaw=[], mmClean=[], mmStation=null, mmT0=null;
+  // Uc iz de son 600 noktayla sinirlidir (~2 dakika @5 Hz): daha uzun gecmis
+  // hem cizimi yavaslatir hem de olcegi buyutup guncel hareketi gorunmez kilar.
+  let mmHunter=[],   // [[x, y], ...] m; avcinin izi
+      mmRaw=[],      // [[x, y], ...] m; HAM (bozuk) GNSS hedef izi
+      mmClean=[],    // [[x, y], ...] m; FILTRELENMIS hedef izi
+      mmStation=null,// [x, y] m; tutulmaya calisilan istasyon noktasi
+      mmT0=null;     // gorev baslangic damgasi — degisince izler sifirlanir
+  // Haritayi cizer. Olcek her karede TUM noktalari icine alacak sekilde
+  // kendiliginden ayarlanir; sag alttaki "~N m" yazisi o anki genisliktir.
   function drawMinimap(t){
     const cv=$("minimap"); if(!cv) return;
     const wrap=cv.parentElement, cw=wrap.clientWidth, ch=wrap.clientHeight;
@@ -417,7 +486,10 @@
     ctx.fillText("~"+Math.round(2*half)+" m", cw-64, ch-8);
   }
 
-  let lastOk = 0;
+  let lastOk = 0;  // ms; oyuna BAGLI oldugumuzu son goren yanitin zamani
+  // Ana dongu: telemetriyi cek, tum panelleri tazele.
+  // Bir yanit gelse bile oyun bagli degilse rozet 2.5 s sonra "bekliyor"a
+  // duser — yani "sunucu ayakta" ile "oyun bagli" AYRI gosterilir.
   async function tick(){
     try{
       const r = await fetch("/api/telemetry",{cache:"no-store"});
@@ -455,8 +527,10 @@
       setConn("bad"); dash();
     }
   }
-  setInterval(tick, 200);
-  tick();
+  setInterval(tick, 200);  // ms; arayuz tazeleme periyodu (5 Hz).
+                           // ⚠ Kontrol dongusu 50 Hz'dir; buradaki hiz YALNIZ
+                           //   gosterimi etkiler, guduume dokunmaz.
+  tick();                  // ilk cizimi beklemeden yap
 </script>
 </body>
 </html>

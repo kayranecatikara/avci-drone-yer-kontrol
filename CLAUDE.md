@@ -14,12 +14,31 @@ noktası kaldırıldı):
 python -m web.server        ->  http://127.0.0.1:8001
 ```
 
-Arayüzün **iki modu** vardır ve ikisi de aynı `control/` kodunu çağırır:
+Arayüzün **üç modu** vardır ve üçü de aynı `control/` kodunu çağırır
+(2026-08-28; çarpma fazı hibritten ayrı bir düğmeye alındı):
 
 | mod | ne koşar | kamera |
 |---|---|---|
 | **GPS** | kalkış → GPS fazı (istasyon tutma) | hiç açılmaz, dedektör yüklenmez |
-| **HİBRİT** | kalkış → GPS fazı → devir kapısı → görsel faz | açık; komut görsel fazda yalnız kameradan |
+| **HİBRİT** | kalkış → GPS fazı → devir kapısı → görsel faz; kuyrukta **oturur ve kalır** | açık; komut görsel fazda yalnız kameradan |
+| **HİBRİT + ÇARPMA** | aynısı + 10 s kesintisiz görsel güdümden sonra **çarpma fazı** | aynı |
+
+⭐ **MOD YASAYA DOKUNMAZ.** Modun tek etkisi (a) kamera hattının koşup
+koşmadığı ve (b) gözetmenin **çarpma kapısını** açıp açmayacağıdır. Güdüm
+sabitleri (`ConverterCfg`, `GPSCfg`, `VisualCfg`) üç modda da aynıdır; HİBRİT
+ile HİBRİT+ÇARPMA arasında görsel yasa **birebir aynı** kodu koşar.
+
+⛔ **ÇARPMA KARARI ÖRNEKTE DURUR, `Cfg`DE DEĞİL** (`web/server.py ::
+mission_start` → `PhaseSupervisor.reset(spike=...)`). Mod seçimi `Cfg.SPIKE`i
+yazsaydı bir sonraki görev onu devralırdı: "hibrit + çarpma" koşusundan sonra
+"hibrit" seçilse bile çarpma fazı açılmaya devam ederdi — bu, §GÖREVİ DURDURUP
+YENİDEN BAŞLATMA'da ölçülüp giderilen **MODÜL DURUMU** kusurlarının aynısı
+olurdu. `Cfg.SPIKE` yerinde durur ama artık **ana anahtardır** (A/B): `False`
+iken hiçbir mod çarpma fazını açamaz; ikisi VE'lenir.
+
+⚠ **KAMERALI MODLAR TEK YERDE** (`web/server.py :: is_hybrid`). "hangi modlar
+kameralı" sorusu koda dağılırsa yeni mod eklendiğinde bir yerde unutulur ve
+kamera hattı **sessizce** kapalı kalır (hibrit görev GPS gibi koşar).
 
 Arayüz **güdüm yasası içermez ve komut üretmez**: yasayı `control/` üretir,
 arayüz döngüyü koşturur, gösterir ve tetikler. Ortada kuşbakışı harita,
@@ -391,6 +410,10 @@ bırakmaz: `BRIDGE_S` boyunca son geçerli kutu kendi dönüşümüzle ileri ta�
 ### ÇARPMA KAPISI (GÖRSEL → SPIKE) — 2026-08-27
 
 **Kural (kullanıcı kararı): 10 s görsel güdümden sonra çarpma fazı.**
+⚠ Bu kapı yalnız **HİBRİT + ÇARPMA** modunda açılır (2026-08-28); düz HİBRİT
+modda `supervisor.spike_enabled = False` olduğu için görsel faz kuyrukta kalır
+ve ön-hızlanma penceresi (dolayısıyla terminal süreklilik istisnası da) **hiç
+açılmaz** — yani `aim_box` o modda bit bit eski davranışındadır.
 `Cfg.SPIKE_AFTER_VISUAL_S = 10.0`. Süre **görsel faza girişten** sayılır
 (`_visual_since`) ve faz GPS'e düşerse sıfırlanır — yani "10 saniye boyunca
 hedefi görsel olarak güttük" demektir, "görev başlayalı 10 s oldu" değil.

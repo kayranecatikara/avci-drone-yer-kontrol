@@ -38,15 +38,28 @@ from control.visual_tracking import (REF_H, RANGE_C_REF, VisualCfg, _scale,
 #  AYARLAR
 # ==========================================================
 class SpikeCfg:
+    """Çarpma fazının ayarları — YALNIZ bu faza ait olanlar.
+
+    Yaw ve dikey kanal sabitleri buraya KOPYALANMAZ, `VisualCfg`ten okunur:
+    onlar kameranın ve aracın ölçülmüş sabitleridir, faza ait değildir.
+    Burada tanımlı olanlar hücuma özgüdür: PI kazançları, temas menzili ve
+    terminal nişan kayması.
+    """
+
     # ============ İLERİ HIZ: TEMASA KADAR PI ============
     # ⛔ GÖRSEL FAZDAN FARKI BURADADIR. Görsel faz `TRAIL_RANGE_M`(4.5 m)
     #   profilini sıfırlar — yani KUYRUĞA OTURUR ve orada kalır. Çarpma fazı
     #   ise sıfır noktasını TEMAS menziline koyar: hata hep pozitif kalır,
     #   hız tavanda oturur, kapanma sabit olur. "Şu menzilde dur" noktası YOK.
-    ATTACK_RANGE_M = 1.0  # m; PI'nin sıfır noktası = TEMAS menzili
-    K_FWD = 0.35          # (m/s)/px @1920; P kazancı
-    K_I = 0.04            # (m/s)/(px*s) @1920; I kazancı
-    I_MAX = 8.0           # m/s; integral doyumu (windup önleyici)
+    ATTACK_RANGE_M = 1.0  # m; PI'nin SIFIR NOKTASI = temas menzili. Hedef "şu
+                          # menzilde dur" değil, "temasa kadar kapan"dır; bu yüzden
+                          # hata pratikte hep pozitif kalır ve hız tavanda oturur.
+    K_FWD = 0.35          # (m/s)/px @1920; kutu boyutu hatasını ileri hıza çeviren
+                          # P kazancı (hata TEMAS kutusu - şimdiki kutu, px)
+    K_I = 0.04            # (m/s)/(px·s) @1920; aynı hatanın I kazancı — kalıcı
+                          # kapanma eksikliğini zamanla kapatır
+    I_MAX = 8.0           # m/s; integralin doyum sınırı (windup önleyici). İntegral
+                          # bu değeri aşamaz, yani PI çıkışına en fazla 8 m/s ekler.
 
     # ⭐ V_ATTACK BİR HIZ TAVANIDIR, "hücum hızı" DEĞİL. Talon 17.98 m/s
     #   uçuyor; 18 ile kapanma 0.02 m/s = asla yakalayamayız. 28 -> ~10 m/s.
@@ -64,8 +77,10 @@ class SpikeCfg:
     #   YAZILMAZ — çarpma fazının nişanı, görsel fazın hedefi BIRAKTIĞI yerden
     #   başlamak ZORUNDADIR. İkisi ayrı yazılırsa aralarındaki fark, faz
     #   geçişinde doğrudan bir dikey BASAMAK olur (aşağıya bak).
-    CY_REF_FAR = VisualCfg.CY_REF   # px @1080; görsel fazın bıraktığı nişan
-    CY_REF_NEAR = 540.0             # px @1080; temasta merkeze getir (nişan al)
+    CY_REF_FAR = VisualCfg.CY_REF   # px @1080; harmanın BAŞLANGICI = görsel fazın
+                                    # hedefi bıraktığı nişan noktası (tek kaynak)
+    CY_REF_NEAR = 540.0             # px @1080; harmanın BİTİŞİ = kadrajın tam ortası.
+                                    # Temasta hedefi merkeze almak "nişan almak"tır.
 
     # ⛔ HARMAN GİRİŞ KUTUSUNA ÇAPALANIR — SABİT PİKSELE DEĞİL.
     #   Devralınan sürümde harman sabit 40->90 px (~25 m -> ~11 m) idi. O,
@@ -95,24 +110,36 @@ class SpikeCfg:
     #   ve faza ait değildir; iki yerde tutulurlarsa kayarlar (zarf sabitleri
     #   üç yere kopyalandığında tırmanma tavanı 33.51/33.5/33.5 diye ZATEN
     #   kaymıştı — bkz. CLAUDE.md).
-    K_YAW = VisualCfg.K_YAW
-    KP_YAW_RATE = VisualCfg.KP_YAW_RATE
-    YAW_RATE_MAX = VisualCfg.YAW_RATE_MAX
-    YAW_DEADBAND = VisualCfg.YAW_DEADBAND
-    K_CY = VisualCfg.K_CY
-    VZ_CAP_VISUAL = VisualCfg.VZ_CAP_VISUAL
-    VZ_MAX_CLIMB = VisualCfg.VZ_MAX_CLIMB
-    VZ_MAX_DESCENT = VisualCfg.VZ_MAX_DESCENT
-    BRIDGE_S = VisualCfg.BRIDGE_S
+    K_YAW = VisualCfg.K_YAW                  # oran; azimut hatasının burun hedefine yansıyan payı
+    KP_YAW_RATE = VisualCfg.KP_YAW_RATE      # 1/s; yaw hatası (derece) -> dönüş hızı (derece/s)
+    YAW_RATE_MAX = VisualCfg.YAW_RATE_MAX    # derece/s; azami dönüş hızı
+    YAW_DEADBAND = VisualCfg.YAW_DEADBAND    # derece; bunun altındaki azimut hatası düzeltilmez
+    K_CY = VisualCfg.K_CY                    # (m/s)/px @1080; dikey kadraj hatası -> dikey hız
+    VZ_CAP_VISUAL = VisualCfg.VZ_CAP_VISUAL  # m/s; dikey hız komutunun tavanı
+    VZ_MAX_CLIMB = VisualCfg.VZ_MAX_CLIMB    # m/s; aracın tırmanma zarfı
+    VZ_MAX_DESCENT = VisualCfg.VZ_MAX_DESCENT  # m/s; aracın alçalma zarfı (asimetrik)
+    BRIDGE_S = VisualCfg.BRIDGE_S            # s; kutu köprüsünün azami ömrü
 
 
 # ==========================================================
 #  ÇARPMA FAZI SÜRÜCÜSÜ
 # ==========================================================
 class SpikeLaw:
-    """Terminal hücum — girdi YALNIZ kutu pikselleri + kendi IMU'muz."""
+    """ÇARPMA fazının sürücüsü — terminal hücum yasası.
+
+    Görsel fazdan tek farkı İLERİ HIZ ve DİKEY NİŞANDIR: kuyrukta oturmayı
+    bırakıp temas menziline kadar kapanır, nişanı da yaklaştıkça kadrajın
+    ortasına kaydırır. Yaw kanalı görsel fazla BİREBİR aynıdır.
+
+    Kutu köprüsü BU SINIFTA YOKTUR: köprü tek kaynaktadır (`VisualTracker.box`)
+    ve koşturucu çarpma fazında da onu çağırır.
+
+    ⛔ Girdi yalnız kutu pikselleri + kendi IMU'muzdur; `compute()` imzasında
+      hedefe ait konum/hız/GNSS verisi geçmez.
+    """
 
     def __init__(self, cfg=SpikeCfg):
+        """cfg: çarpma fazı ayarları (varsayılan `SpikeCfg`)."""
         self.cfg = cfg
         self.conv = VelocityToStick()
         self.reset()
@@ -123,14 +150,22 @@ class SpikeLaw:
         ⛔ INTEGRALI TAŞIMAYIN. Faz geri dönüp tekrar girilirse eski integral
           `I_MAX`(8 m/s) kadar bir ön yükle başlar ve ilk komut doyar.
         """
-        self._entry_size = None  # faza GİRİŞTEKİ kutu boyutu (px @1920) — nişan çapası
-        self._i = 0.0      # PI integral durumu (m/s)
-        self._v_cmd = 0.0  # son ileri hız komutu (m/s)
-        self._tlm = {}
+        self._entry_size = None  # px @1920; faza GİRİŞTEKİ kutu boyutu — terminal
+                                 # nişan harmanının çapası (girişte k=0 olsun diye)
+        self._i = 0.0      # m/s; PI'nin integral durumu (±I_MAX ile sınırlı)
+        self._v_cmd = 0.0  # m/s; son ileri hız komutu (köprü karesinde tekrarlanır)
+        self._tlm = {}     # son tikin telemetrisi
 
     # ------------------------------------------------------------------
     def _aim_cy(self, size_px, W, H):
-        """Terminal nişan noktası (px) — GİRİŞ kutusundan TEMAS kutusuna kayar.
+        """Terminal nişan noktasını hesaplar.
+
+        size_px : px; bu karenin kutu boyutu
+        W, H    : px; kare ölçüleri
+        -> (cy_ref, k) — nişan yüksekliği (px, bu karenin ölçeğinde) ve harman
+           oranı k (0 = giriş nişanı, 1 = temas nişanı)
+
+        Nişan GİRİŞ kutusundan TEMAS kutusuna doğrusal olarak kayar.
 
         Girişte k=0 olduğu için nişan `VisualCfg.CY_REF`tir: görsel fazın
         hedefi tuttuğu nokta. Bu yüzden faz geçişinde e_cy = 0'dır ve dikey
@@ -156,7 +191,16 @@ class SpikeLaw:
 
     # ------------------------------------------------------------------
     def _attack_speed(self, size_px, W, dt, bridge):
-        """Kutu boyutu hatası üzerinden PI (m/s).
+        """İleri hız komutu — kutu boyutu hatası üzerinden PI.
+
+        size_px : px; bu karenin kutu boyutu
+        W       : px; kare genişliği (kazançlar @1920 tanımlı, normalize edilir)
+        dt      : s; ölçülmüş tik süresi
+        bridge  : bu kare köprüden mi geldi? True ise integral İLERLETİLMEZ
+        -> ileri hız komutu (m/s), [V_MIN, V_ATTACK] arasında
+
+        Hata = TEMAS kutusu - şimdiki kutu (px). Menzil kapandıkça kutu büyür,
+        hata küçülür; temasta sıfırlanır.
 
         ⚠ SÜZGEÇ YOK — bilinçli. Görsel fazda `size`e medyan süzgeç uygulanır
           (dedektör gürültüsü `R = C/size` terslemesinde şişer). Burada
@@ -241,4 +285,9 @@ class SpikeLaw:
         return float(thr), float(pitch), float(roll), float(yaw)
 
     def status(self):
+        """Son tikin telemetrisi (yalnız gösterge; komuta girmez).
+
+        `pi_i` integralin doyup doymadığını, `aim_blend` nişan harmanının ne
+        kadar ilerlediğini (0 = giriş, 1 = temas) doğrudan gösterir.
+        """
         return dict(self._tlm)
